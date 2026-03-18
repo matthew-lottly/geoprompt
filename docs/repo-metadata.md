@@ -8,7 +8,7 @@ Use this when updating the GitHub repository sidebar and settings page.
 
 ## Recommended Description
 
-- Portfolio repository for backend, GIS, database, and analytics work.
+- Portfolio repository for backend, GIS, database, and analytics engineering work.
 
 ## Optional Shorter Description
 
@@ -16,11 +16,9 @@ Use this when updating the GitHub repository sidebar and settings page.
 
 ## Recommended Website
 
-Use one of these if available:
+Use this:
 
-- Your personal site
-- Your LinkedIn profile
-- A portfolio landing page
+- https://lottly-ai.com/
 
 ## Recommended Topics
 
@@ -36,6 +34,58 @@ Add 5 to 10 of these:
 - databases
 - data-engineering
 - data-science
+
+## Standalone Repository Descriptions
+
+Use these in the GitHub repository sidebar for each extracted project.
+
+- `environmental-monitoring-api`: FastAPI backend for environmental monitoring with optional PostGIS, Docker support, and a browser dashboard.
+- `environmental-monitoring-analytics`: DuckDB reporting pipeline for environmental monitoring alerts, regional metrics, and operational briefs.
+- `monitoring-data-warehouse`: DuckDB warehouse project for dimensional modeling, SQL transforms, and monitoring data quality checks.
+
+## Recommended Topics By Repository
+
+### Matt-Powell
+
+- portfolio
+- software-engineering
+- gis
+- geospatial
+- python
+- sql
+- data-engineering
+- backend
+
+### environmental-monitoring-api
+
+- fastapi
+- python
+- postgis
+- postgresql
+- gis
+- geospatial
+- docker
+- api
+
+### environmental-monitoring-analytics
+
+- duckdb
+- analytics
+- python
+- sql
+- data-engineering
+- reporting
+- geospatial
+
+### monitoring-data-warehouse
+
+- duckdb
+- data-warehouse
+- dimensional-modeling
+- sql
+- python
+- data-engineering
+- etl
 
 ## About Section Guidance
 

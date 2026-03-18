@@ -1,6 +1,6 @@
 name: Environmental Monitoring Analytics CI
 
-on:
+"on":
   push:
     paths:
       - ".github/workflows/environmental-monitoring-analytics-ci.yml"

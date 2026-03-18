@@ -1,6 +1,6 @@
 name: Environmental Monitoring API CI
 
-on:
+"on":
   push:
   pull_request:
 

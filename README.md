@@ -4,9 +4,9 @@
 ![Python](https://img.shields.io/badge/Python-3.11%2B-49616d)
 ![Focus](https://img.shields.io/badge/Focus-Backend%20%7C%20GIS%20%7C%20Data-d4a85f)
 
-Software engineer building backend, database, GIS, and analytics systems.
+GIS developer and software engineer building backend, database, geospatial, and analytics systems.
 
-I build practical systems around data-heavy problems. The projects here emphasize clear architecture, reliable data handling, geospatial workflows, and software that turns raw information into usable products.
+I build practical systems around data-heavy problems. My work spans enterprise GIS, spatial data engineering, backend services, analytics, and GeoAI-oriented automation. The projects here emphasize clear architecture, reliable data handling, geospatial workflows, and software that turns raw information into usable products.
 
 ## Quick Access
 
@@ -18,9 +18,16 @@ I build practical systems around data-heavy problems. The projects here emphasiz
 
 ## Profile Summary
 
-- Focus: software engineering with strong GIS, database, and analytics depth
+- Focus: backend engineering with strong GIS, database, and analytics depth
 - Strengths: end-to-end systems, data workflows, geospatial problem solving, pragmatic architecture
-- Typical work: ingest data, model it well, process it reliably, and expose it through tools, APIs, and analytical outputs
+- Typical work: spatial ETL, API design, enterprise GIS tooling, reporting pipelines, and applied data products
+
+## Background
+
+- Current founder and lead engineer at Lottly, a geospatial AI SaaS product: https://lottly-ai.com/
+- Current geospatial developer and AI engineer at GeoPrompt
+- Prior work across enterprise GIS, wildfire and infrastructure workflows, LiDAR analysis, and geodatabase design
+- Public profile: [docs/matt-powell-profile.md](docs/matt-powell-profile.md)
 
 ## Portfolio Shape
 
@@ -86,8 +93,6 @@ Demo narrative: [projects/monitoring-data-warehouse/docs/demo-storyboard.md](pro
 
 ## Connect
 
-Add your real public links here before sharing the repository widely.
-
-- LinkedIn: add your public LinkedIn URL
-- Portfolio: add your portfolio or personal site URL
-- Resume: add a public resume link or PDF URL
+- LinkedIn: https://www.linkedin.com/in/matthew-a-powell/
+- Website: https://lottly-ai.com/
+- Resume / profile: [docs/matt-powell-profile.md](docs/matt-powell-profile.md)

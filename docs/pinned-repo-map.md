@@ -1,6 +1,22 @@
 # Pinned Repo Map
 
-Use this file to decide which private projects are worth promoting into public showcase repos.
+Use this file to decide which public repos should be pinned first and how they should read as a coherent portfolio.
+
+## Recommended Pin Order
+
+1. `environmental-monitoring-api`
+2. `environmental-monitoring-analytics`
+3. `monitoring-data-warehouse`
+4. `Matt-Powell`
+5. `lottly-ai.com` or another public product repo when available
+
+## Why This Order Works
+
+- `environmental-monitoring-api` is the strongest first impression because it combines backend engineering, geospatial context, deployment, and a visual dashboard.
+- `environmental-monitoring-analytics` shows that the portfolio also handles reporting and analytical interpretation, not just services.
+- `monitoring-data-warehouse` reinforces database engineering and data-modeling depth.
+- `Matt-Powell` explains the overall portfolio shape and ties the public work back to your professional identity.
+- A future Lottly code or product repo would add founder and product-building credibility once there is a safe public version to show.
 
 ## Ideal Pinned Set
 
@@ -103,3 +119,12 @@ Score each candidate repo from 1 to 5 in these areas:
 - Fit with your overall profile story
 
 Projects scoring well across all five areas should be first in line for public release.
+
+## Pin Descriptions
+
+Use these as the short repo one-liners when arranging the pinned section on GitHub.
+
+- `environmental-monitoring-api`: FastAPI and PostGIS-ready backend for environmental monitoring with a browser dashboard and integration tests.
+- `environmental-monitoring-analytics`: DuckDB-based monitoring analytics pipeline that turns station observations into concise operational reporting.
+- `monitoring-data-warehouse`: Monitoring warehouse project showing dimensional modeling, SQL transforms, and repeatable data quality checks.
+- `Matt-Powell`: Portfolio repository for backend, GIS, database, and analytics engineering work.
