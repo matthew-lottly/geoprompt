@@ -1,6 +1,6 @@
 name: Monitoring Data Warehouse CI
 
-"on":
+on:
   push:
     paths:
       - ".github/workflows/monitoring-data-warehouse-ci.yml"

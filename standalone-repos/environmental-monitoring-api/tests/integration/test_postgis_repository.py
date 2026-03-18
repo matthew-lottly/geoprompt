@@ -1,3 +1,7 @@
+"""Pyright import resolution in the parent workspace does not model this nested src layout."""
+
+# pyright: reportMissingImports=false
+
 from datetime import datetime, timezone
 
 import os
@@ -5,6 +9,7 @@ import os
 import pytest
 
 from spatial_data_api.repository import PostGISFeatureRepository
+
 
 
 pytestmark = pytest.mark.skipif(

@@ -1,6 +1,6 @@
 name: Spatial Data API CI
 
-"on":
+on:
   push:
     paths:
       - ".github/workflows/spatial-data-api-ci.yml"

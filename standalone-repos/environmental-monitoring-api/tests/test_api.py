@@ -1,6 +1,11 @@
+"""Pyright import resolution in the parent workspace does not model this nested src layout."""
+
+# pyright: reportMissingImports=false
+
 from fastapi.testclient import TestClient
 
 from spatial_data_api.main import app
+
 
 
 client = TestClient(app)
