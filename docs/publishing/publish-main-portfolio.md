@@ -36,6 +36,7 @@ git push -u origin main
 2. Add the About box settings above in the GitHub repository sidebar.
 3. Confirm the workflow badges and relative project links render correctly.
 4. Pin `Matt-Powell` fifth, after the four standalone repositories are live.
+5. Use [github-profile-finish-checklist.md](github-profile-finish-checklist.md) as the final GitHub UI checklist.
 
 ## Recommended Sequence
 
