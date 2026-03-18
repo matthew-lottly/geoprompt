@@ -27,6 +27,7 @@ Environmental monitoring work often stops at spreadsheets, maps, and one-off scr
 - Optional PostGIS-backed repository for standalone deployment
 - Filtering by category, region, and station status
 - Summary endpoint for quick monitoring rollups
+- Recent-observation and per-station observation-history endpoints
 - Browser dashboard for quick visual review of service health, station status, and alert locations
 - Test coverage for the main endpoints
 - Docker and docker-compose setup
@@ -48,6 +49,8 @@ Environmental monitoring work often stops at spreadsheets, maps, and one-off scr
 - `GET /api/v1/features`
 - `GET /api/v1/features/summary`
 - `GET /api/v1/features/{feature_id}`
+- `GET /api/v1/observations/recent`
+- `GET /api/v1/features/{feature_id}/observations`
 
 Example monitoring domains in the sample data:
 
@@ -99,6 +102,8 @@ For a visual demo, open `http://127.0.0.1:8000/dashboard`.
 
 See [docs/demo-script.md](docs/demo-script.md) for a short presentation flow.
 See [docs/architecture.md](docs/architecture.md) for the project structure overview.
+See [docs/roadmap.md](docs/roadmap.md) for the next planned improvements.
+See [docs/public-issues.md](docs/public-issues.md) for good first public follow-up tasks.
 
 ### Docker with PostGIS
 
@@ -166,9 +171,9 @@ This gives the project a ready-to-run monitoring-station table and seed dataset 
 
 ## Next Steps
 
+- Add time-window filters to the observation-history endpoints
 - Add an ingestion pipeline for new monitoring feeds
 - Add authentication and access control
-- Expand tests around validation, alert states, and historical observations
 - Add container image publishing
 
 ## Repository Notes

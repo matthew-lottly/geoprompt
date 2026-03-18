@@ -71,6 +71,29 @@ def test_feature_summary() -> None:
     assert payload["categories"]["water_quality"] == 1
 
 
+def test_recent_observations() -> None:
+    response = client.get("/api/v1/observations/recent", params={"limit": 3})
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["observations"]) == 3
+    assert payload["observations"][0]["observationId"] == "obs-2001"
+    assert payload["observations"][0]["status"] == "alert"
+
+
+def test_feature_observations() -> None:
+    response = client.get("/api/v1/features/station-001/observations", params={"limit": 2})
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["observationId"] for item in payload["observations"]] == ["obs-1001", "obs-1002"]
+    assert payload["observations"][0]["metricName"] == "river_stage_ft"
+
+
+def test_feature_observations_not_found() -> None:
+    response = client.get("/api/v1/features/missing/observations")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Feature not found"
+
+
 def test_get_feature_not_found() -> None:
     response = client.get("/api/v1/features/missing")
     assert response.status_code == 404

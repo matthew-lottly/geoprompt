@@ -28,6 +28,20 @@ class FeatureCollection(BaseModel):
     features: list[FeatureRecord]
 
 
+class ObservationRecord(BaseModel):
+    observation_id: str = Field(alias="observationId")
+    feature_id: str = Field(alias="featureId")
+    observed_at: str = Field(alias="observedAt")
+    metric_name: str = Field(alias="metricName")
+    value: float
+    unit: str
+    status: Literal["normal", "alert", "offline"]
+
+
+class ObservationCollection(BaseModel):
+    observations: list[ObservationRecord]
+
+
 class FeatureSummary(BaseModel):
     total_features: int
     categories: dict[str, int]

@@ -39,3 +39,29 @@ def test_postgis_repository_feature_lookup() -> None:
     assert feature.properties.name == "Sierra Air Quality Node"
     assert feature.properties.region == "West"
     assert feature.properties.status == "alert"
+
+
+def test_postgis_repository_recent_observations() -> None:
+    database_url = os.getenv(
+        "SPATIAL_DATA_API_INTEGRATION_DB_URL",
+        "postgresql+psycopg://spatial:spatial@localhost:5432/spatial",
+    )
+    repository = PostGISFeatureRepository(database_url)
+
+    observations = repository.list_recent_observations(limit=2)
+    assert len(observations) == 2
+    assert observations[0].observation_id == "obs-2001"
+    assert observations[0].status == "alert"
+
+
+def test_postgis_repository_feature_observations() -> None:
+    database_url = os.getenv(
+        "SPATIAL_DATA_API_INTEGRATION_DB_URL",
+        "postgresql+psycopg://spatial:spatial@localhost:5432/spatial",
+    )
+    repository = PostGISFeatureRepository(database_url)
+
+    observations = repository.list_feature_observations("station-001", limit=5)
+    assert len(observations) == 2
+    assert observations[0].metric_name == "river_stage_ft"
+    assert observations[1].observation_id == "obs-1002"

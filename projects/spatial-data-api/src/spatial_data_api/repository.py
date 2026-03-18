@@ -6,18 +6,24 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from spatial_data_api.core.config import get_settings
-from spatial_data_api.schemas import FeatureCollection, FeatureRecord, FeatureSummary
+from spatial_data_api.schemas import FeatureCollection, FeatureRecord, FeatureSummary, ObservationCollection, ObservationRecord
 from spatial_data_api.database import get_engine
 
 
 class FeatureRepository:
     def __init__(self, data_path: Path):
         self.data_path = data_path
+        self.observations_path = data_path.with_name("sample_observations.json")
         self._collection = self._load_collection()
+        self._observations = self._load_observations()
 
     def _load_collection(self) -> FeatureCollection:
         payload = json.loads(self.data_path.read_text(encoding="utf-8"))
         return FeatureCollection.model_validate(payload)
+
+    def _load_observations(self) -> ObservationCollection:
+        payload = json.loads(self.observations_path.read_text(encoding="utf-8"))
+        return ObservationCollection.model_validate(payload)
 
     def list_features(
         self,
@@ -40,6 +46,23 @@ class FeatureRepository:
             None,
         )
 
+    def list_recent_observations(self, limit: int = 5) -> list[ObservationRecord]:
+        observations = sorted(
+            self._observations.observations,
+            key=lambda observation: observation.observed_at,
+            reverse=True,
+        )
+        return observations[:limit]
+
+    def list_feature_observations(self, feature_id: str, limit: int = 10) -> list[ObservationRecord]:
+        observations = [
+            observation
+            for observation in self._observations.observations
+            if observation.feature_id == feature_id
+        ]
+        observations.sort(key=lambda observation: observation.observed_at, reverse=True)
+        return observations[:limit]
+
     def summary(self) -> FeatureSummary:
         categories: dict[str, int] = {}
         statuses: dict[str, int] = {}
@@ -56,7 +79,7 @@ class FeatureRepository:
         )
 
     def is_ready(self) -> bool:
-        return self.data_path.exists()
+        return self.data_path.exists() and self.observations_path.exists()
 
     def data_source_name(self) -> str:
         return self.data_path.name
@@ -115,6 +138,43 @@ class PostGISFeatureRepository:
             return None
         return self._row_to_feature(row)
 
+    def list_recent_observations(self, limit: int = 5) -> list[ObservationRecord]:
+        query = """
+        SELECT
+            observation_id,
+            feature_id,
+            TO_CHAR(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS observed_at,
+            metric_name,
+            value,
+            unit,
+            status
+        FROM public.monitoring_observations
+        ORDER BY observed_at DESC, observation_id DESC
+        LIMIT :limit
+        """
+        with self.engine.connect() as connection:
+            rows = connection.execute(text(query), {"limit": limit}).mappings().all()
+        return [self._row_to_observation(row) for row in rows]
+
+    def list_feature_observations(self, feature_id: str, limit: int = 10) -> list[ObservationRecord]:
+        query = """
+        SELECT
+            observation_id,
+            feature_id,
+            TO_CHAR(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS observed_at,
+            metric_name,
+            value,
+            unit,
+            status
+        FROM public.monitoring_observations
+        WHERE feature_id = :feature_id
+        ORDER BY observed_at DESC, observation_id DESC
+        LIMIT :limit
+        """
+        with self.engine.connect() as connection:
+            rows = connection.execute(text(query), {"feature_id": feature_id, "limit": limit}).mappings().all()
+        return [self._row_to_observation(row) for row in rows]
+
     def summary(self) -> FeatureSummary:
         category_query = "SELECT category, COUNT(*) AS count FROM public.monitoring_stations GROUP BY category ORDER BY category"
         status_query = "SELECT status, COUNT(*) AS count FROM public.monitoring_stations GROUP BY status ORDER BY status"
@@ -136,6 +196,7 @@ class PostGISFeatureRepository:
         try:
             with self.engine.connect() as connection:
                 connection.execute(text("SELECT 1 FROM public.monitoring_stations LIMIT 1"))
+                connection.execute(text("SELECT 1 FROM public.monitoring_observations LIMIT 1"))
             return True
         except SQLAlchemyError:
             return False
@@ -161,6 +222,20 @@ class PostGISFeatureRepository:
                     "type": "Point",
                     "coordinates": [row["longitude"], row["latitude"]],
                 },
+            }
+        )
+
+    @staticmethod
+    def _row_to_observation(row: dict) -> ObservationRecord:
+        return ObservationRecord.model_validate(
+            {
+                "observationId": row["observation_id"],
+                "featureId": row["feature_id"],
+                "observedAt": row["observed_at"],
+                "metricName": row["metric_name"],
+                "value": row["value"],
+                "unit": row["unit"],
+                "status": row["status"],
             }
         )
 
