@@ -2,6 +2,8 @@
 
 Backend service for monitoring stations, environmental observations, and spatial status reporting through a clean, typed API.
 
+![Dashboard preview](assets/dashboard-preview.svg)
+
 ## Overview
 
 This project is a geospatial backend for environmental monitoring. It loads a sample monitoring-station dataset for local development, supports an optional PostGIS-backed repository for standalone deployment, and exposes a typed API for health checks, metadata, filtering, and feature lookup.
@@ -84,6 +86,9 @@ Then open `http://127.0.0.1:8000/docs`.
 
 For a visual demo, open `http://127.0.0.1:8000/dashboard`.
 
+See [docs/demo-script.md](docs/demo-script.md) for a short presentation flow.
+See [docs/architecture.md](docs/architecture.md) for the project structure overview.
+
 ### Docker with PostGIS
 
 ```bash
@@ -148,3 +153,7 @@ This gives the project a ready-to-run monitoring-station table and seed dataset 
 - Add authentication and access control
 - Expand tests around validation, alert states, and historical observations
 - Add CI and image publishing
+
+## Publication
+
+See [PUBLISHING.md](PUBLISHING.md) for the standalone repository plan.

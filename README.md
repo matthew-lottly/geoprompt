@@ -1,60 +1,92 @@
 # Matt Powell
 
-Software engineer building backend, data, and geospatial systems.
+[![Spatial Data API CI](https://github.com/matthew-lottly/Matt-Powell/actions/workflows/spatial-data-api-ci.yml/badge.svg)](https://github.com/matthew-lottly/Matt-Powell/actions/workflows/spatial-data-api-ci.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-49616d)
+![Focus](https://img.shields.io/badge/Focus-Backend%20%7C%20GIS%20%7C%20Data-d4a85f)
 
-I build practical systems around data-heavy problems, with a focus on APIs, databases, GIS workflows, and analytics that support real decisions. This repository highlights the projects and patterns that best represent how I work: clear architecture, reliable data handling, and software that turns raw information into usable tools.
+Software engineer building backend, database, GIS, and analytics systems.
 
-## What I Build
+I build practical systems around data-heavy problems. The projects here emphasize clear architecture, reliable data handling, geospatial workflows, and software that turns raw information into usable products.
 
-- Backend services and internal tools
-- Data pipelines and database-backed systems
-- GIS and geospatial workflows
-- Applied analytics and decision-support products
+## Quick Access
 
-## Hiring Snapshot
+- [projects/spatial-data-api](projects/spatial-data-api) for the flagship backend and GIS demo
+- [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) for the analytics and reporting lane
+- [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) for the database-engineering lane
+- [standalone-repos](standalone-repos) for publishable split-out repository copies
+- [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md) for the standalone repo roadmap
+
+## Profile Summary
 
 - Focus: software engineering with strong GIS, database, and analytics depth
 - Strengths: end-to-end systems, data workflows, geospatial problem solving, pragmatic architecture
-- Typical work: ingest data, model it well, process it reliably, and expose it through tools, APIs, or analysis outputs
+- Typical work: ingest data, model it well, process it reliably, and expose it through tools, APIs, and analytical outputs
 
-## How This Portfolio Is Organized
+## Portfolio Shape
 
-The strongest public work on this account falls into a few connected lanes.
+This repository is organized as one coherent engineering portfolio with three complementary lanes:
 
-1. Integrated systems: projects that combine software, data, and geospatial workflows
-2. Data platforms: ETL, schema design, automation, and reliable processing
-3. Spatial applications: analysis tools, map services, and geoprocessing workflows
-4. Analytics: reporting, modeling, and operational insight from real-world data
+- backend and GIS delivery
+- analytics and reporting
+- database modeling and warehouse design
 
-## What To Expect
+Each lane is implemented against the same environmental monitoring theme so the work reads as one body of practice instead of unrelated demos.
 
-This portfolio is intentionally curated. Public repositories are selected for clarity, documentation, and engineering quality. Experiments, rough drafts, and employer-adjacent work stay private unless they are worth turning into polished portfolio pieces.
+## Review Path
 
-## Current Stack
+Start with the flagship backend project, then move outward by lane.
+
+1. [projects/spatial-data-api](projects/spatial-data-api): integrated backend, GIS, Docker, PostGIS, dashboard
+2. [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics): analytics and reporting
+3. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
+
+## Core Stack
 
 - Languages: Python, SQL, JavaScript, TypeScript
 - Data: PostgreSQL, PostGIS, ETL workflows, analytics tooling
 - GIS: spatial analysis, geoprocessing, mapping workflows
 - Engineering: APIs, automation, data products, developer tooling
 
-## Suggested Pinned Repos
-
-Pin 4 to 6 repositories that make your range obvious without looking scattered.
-
-1. One flagship integrated project
-2. One backend or database-heavy system
-3. One GIS or geospatial application
-4. One analytics or data science project
-5. One optional reusable developer tool
-
 ## Featured Projects
 
-- [projects/spatial-data-api](projects/spatial-data-api): environmental monitoring backend with FastAPI, optional PostGIS, Docker support, and a browser dashboard.
-- [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics): DuckDB-based analytics project for turning monitoring observations into operational reporting.
+| Project | Lane | What It Shows |
+| --- | --- | --- |
+| [projects/spatial-data-api](projects/spatial-data-api) | Backend + GIS | FastAPI service with optional PostGIS, Docker support, health checks, and a browser dashboard for environmental monitoring. |
+| [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) | Analytics | DuckDB-based reporting pipeline for alert rates, regional monitoring pressure, and markdown operations briefs. |
+| [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) | Database Engineering | Warehouse-style schema design, dimensional modeling, SQL transformations, and repeatable data quality checks for monitoring data. |
+
+## Project Cards
+
+### Environmental Monitoring API
+
+Applied backend project with a map-backed dashboard, PostGIS-ready repository layer, Docker runtime, readiness checks, and integration tests.
+
+Demo asset: [projects/spatial-data-api/assets/dashboard-preview.svg](projects/spatial-data-api/assets/dashboard-preview.svg)
+Demo narrative: [projects/spatial-data-api/docs/demo-storyboard.md](projects/spatial-data-api/docs/demo-storyboard.md)
+
+### Environmental Monitoring Analytics
+
+Analytics-side project focused on transforming station observations into concise operational reporting with DuckDB and SQL-first metrics.
+
+Demo asset: [projects/environmental-monitoring-analytics/assets/report-preview.svg](projects/environmental-monitoring-analytics/assets/report-preview.svg)
+Demo narrative: [projects/environmental-monitoring-analytics/docs/demo-storyboard.md](projects/environmental-monitoring-analytics/docs/demo-storyboard.md)
+
+### Monitoring Data Warehouse
+
+Database-engineering project focused on modeling, loading, and validating a monitoring warehouse with dimensions, facts, and quality checks.
+
+Demo asset: [projects/monitoring-data-warehouse/assets/warehouse-preview.svg](projects/monitoring-data-warehouse/assets/warehouse-preview.svg)
+Demo narrative: [projects/monitoring-data-warehouse/docs/demo-storyboard.md](projects/monitoring-data-warehouse/docs/demo-storyboard.md)
+
+## Publication Status
+
+- Standalone-ready copies have been prepared in [standalone-repos](standalone-repos)
+- Split instructions and helper scripts are in [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md)
+- Each standalone repository now includes its own CI workflow, publishing notes, and license file
 
 ## Connect
 
-Add public links here once the repository is ready.
+Add your real public links here before sharing the repository widely.
 
 - LinkedIn: add your public LinkedIn URL
 - Portfolio: add your portfolio or personal site URL
