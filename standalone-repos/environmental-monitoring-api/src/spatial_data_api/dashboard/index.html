@@ -73,8 +73,10 @@
               <p class="eyebrow">Recent Data</p>
               <h3>Latest Observations</h3>
             </div>
-            <p class="section-copy">Newest readings returned by the live observation-history endpoint.</p>
+            <p class="section-copy">Newest readings, alert-heavy signals, and recent status changes from the live observation-history endpoint.</p>
           </div>
+          <div id="observation-summary" class="observation-summary-grid"></div>
+          <div id="recent-alert-focus" class="signal-list"></div>
           <div id="recent-observations" class="observation-list"></div>
         </article>
 
@@ -91,11 +93,11 @@
         <article class="content-card">
           <div class="section-head compact">
             <div>
-              <p class="eyebrow">Coverage</p>
-              <h3>Categories</h3>
+              <p class="eyebrow">Change Detection</p>
+              <h3>Recent Status Changes</h3>
             </div>
           </div>
-          <div id="category-breakdown" class="pill-list"></div>
+          <div id="status-shifts" class="signal-list"></div>
         </article>
       </section>
     </main>

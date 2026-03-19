@@ -23,7 +23,7 @@ Environmental and operational monitoring workflows often stop at files, dashboar
 - Filtering by category, region, and station status
 - Summary endpoint for quick monitoring rollups
 - Recent-observation and per-station observation-history endpoints with filtered summary rollups
-- Browser dashboard for quick visual review of service health, alert stations, and recent readings
+- Browser dashboard for quick visual review of service health, alert stations, recent alert readings, and status changes
 - Test coverage for the main endpoints
 - Docker and docker-compose setup
 
@@ -157,7 +157,7 @@ This gives the project a ready-to-run monitoring-station table and seed dataset 
 
 ## Next Steps
 
-- Add dashboard panels for recent observation changes and alert trends
+- Add station threshold configuration so alert status can be derived from observed values
 - Add an ingestion pipeline for new monitoring feeds
 - Add authentication and access control
 - Add container image publishing

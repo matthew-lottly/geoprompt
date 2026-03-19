@@ -2,9 +2,9 @@
 
 ## Near Term
 
-- Add dashboard panels for recent observations and trend changes.
 - Publish a container image as part of CI.
 - Add export-ready summaries for operations teams.
+- Add dashboard trend deltas for the recent observation window.
 
 ## Next
 

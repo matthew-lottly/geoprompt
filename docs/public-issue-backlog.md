@@ -13,8 +13,11 @@ This order keeps the flagship backend moving first, then strengthens the analyti
 
 ## environmental-monitoring-api
 
-- [#1 Highlight recent alert observations and status changes in the dashboard](https://github.com/matthew-lottly/environmental-monitoring-api/issues/1)
 - [#2 Publish a container image from CI](https://github.com/matthew-lottly/environmental-monitoring-api/issues/2)
+
+Completed recently:
+
+- [#1 Highlight recent alert observations and status changes in the dashboard](https://github.com/matthew-lottly/environmental-monitoring-api/issues/1)
 
 ## environmental-monitoring-analytics
 
@@ -36,4 +39,5 @@ This order keeps the flagship backend moving first, then strengthens the analyti
 - Repository About metadata is set for all five public repositories.
 - The standalone repositories now each have an initial issue backlog.
 - The API lane now ships filtered observation rollup summaries in the observation endpoints.
+- The standalone API dashboard now highlights recent alert readings and recent status changes, and issue `environmental-monitoring-api#1` is closed.
 - GitHub profile pinning still needs to be set manually in the GitHub UI.
