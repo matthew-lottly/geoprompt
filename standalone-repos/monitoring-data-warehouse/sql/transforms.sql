@@ -1,4 +1,5 @@
 DELETE FROM dim_station;
+DELETE FROM dim_station_attribute_history;
 DELETE FROM dim_region;
 DELETE FROM dim_category;
 DELETE FROM fact_observation;
@@ -34,6 +35,18 @@ FROM (
     SELECT DISTINCT station_id, station_name, region, category
     FROM staging_readings
 );
+
+INSERT INTO dim_station_attribute_history
+SELECT
+    ROW_NUMBER() OVER (ORDER BY station_id, effective_from) AS station_history_key,
+    station_id,
+    station_name,
+    owner_team,
+    response_tier,
+    effective_from,
+    NULLIF(effective_to, '') AS effective_to,
+    is_current
+FROM staging_station_attribute_history;
 
 INSERT INTO fact_observation
 SELECT

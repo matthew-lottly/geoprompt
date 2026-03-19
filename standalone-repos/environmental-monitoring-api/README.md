@@ -123,6 +123,17 @@ This starts:
 
 The default `.env.example` uses the PostGIS-backed repository when running in Docker.
 
+### Published container image
+
+The standalone repository CI publishes a public image to GitHub Container Registry on pushes to `main`.
+
+```bash
+docker pull ghcr.io/matthew-lottly/environmental-monitoring-api:latest
+docker run --rm -p 8000:8000 ghcr.io/matthew-lottly/environmental-monitoring-api:latest
+```
+
+For a PostGIS-backed run, provide the same environment variables used in `.env.example`.
+
 ## Validation
 
 Run the unit tests:
@@ -147,6 +158,8 @@ The integration tests default to `postgresql+psycopg://spatial:spatial@localhost
 - License: [LICENSE](LICENSE)
 - Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
 - Local CI workflow: [.github/workflows/ci.yml](.github/workflows/ci.yml)
+
+The CI workflow now also publishes `ghcr.io/matthew-lottly/environmental-monitoring-api:latest` from the default branch.
 
 ## Configuration
 

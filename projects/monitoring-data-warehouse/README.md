@@ -19,6 +19,7 @@ This project represents the database-engineering lane of the portfolio. It start
 ## Warehouse Model
 
 - `dim_station`
+- `dim_station_attribute_history`
 - `dim_region`
 - `dim_category`
 - `fact_observation`
@@ -36,6 +37,7 @@ python -m monitoring_data_warehouse.builder
 
 - A local DuckDB warehouse file
 - Row-count and quality-check summary
+- A slowly changing dimension example for station ownership and response tier
 - Sample daily alert and regional status marts
 
 See [docs/model-notes.md](docs/model-notes.md) for the modeling rationale behind the warehouse shape.
@@ -45,8 +47,8 @@ See [docs/schema-diagram.md](docs/schema-diagram.md) for a quick view of the war
 ## Next Steps
 
 - Add dbt-style dependency metadata
-- Add slowly changing dimension examples
 - Add partitioning and retention strategy notes for PostgreSQL migration
+- Add source freshness and late-arriving dimension handling notes
 
 ## Publication
 

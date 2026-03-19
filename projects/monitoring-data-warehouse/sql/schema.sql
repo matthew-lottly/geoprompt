@@ -6,6 +6,17 @@ CREATE TABLE IF NOT EXISTS dim_station (
     category TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS dim_station_attribute_history (
+    station_history_key INTEGER PRIMARY KEY,
+    station_id TEXT NOT NULL,
+    station_name TEXT NOT NULL,
+    owner_team TEXT NOT NULL,
+    response_tier TEXT NOT NULL,
+    effective_from TEXT NOT NULL,
+    effective_to TEXT,
+    is_current BOOLEAN NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS dim_region (
     region_key INTEGER PRIMARY KEY,
     region_name TEXT NOT NULL
