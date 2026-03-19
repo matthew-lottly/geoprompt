@@ -9,7 +9,7 @@ Data science portfolio project for temporal diagnostics, baseline comparison, an
 - Lane: Data science and time-series analysis
 - Domain: Temporal diagnostics and signal review
 - Stack: Python, JSON fixtures, split-based review windows, baseline comparison
-- Includes: sample station histories, feature profiling, rolling means, baseline leaderboard output, tests
+- Includes: sample station histories, feature profiling, rolling means, seasonal fingerprints, change-point candidates, baseline leaderboard output, tests
 
 ## Overview
 
@@ -21,6 +21,8 @@ This project focuses on time-series analysis rather than GIS surface area. It lo
 - An object-oriented lab workflow that can be extended without changing the public export interface
 - Rolling averages for temporal smoothing at multiple windows
 - Feature profiling for level, slope, recent change, and variability
+- Seasonal phase summaries and seasonal-naive baseline comparison
+- Change-point candidate summaries that flag likely mean shifts before downstream modeling
 - Baseline leaderboard output for a held-out review window
 - A persisted `outputs/run_registry.json` trail for exported runs
 - Clean export artifacts for downstream reporting, diagnostics, or model preparation

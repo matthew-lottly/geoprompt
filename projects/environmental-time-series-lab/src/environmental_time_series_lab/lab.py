@@ -8,6 +8,8 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+from environmental_time_series_lab.workflow_base import ReportWorkflow
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "station_histories.json"
@@ -16,6 +18,7 @@ DEFAULT_REGISTRY_NAME = "run_registry.json"
 DEFAULT_REVIEW_WINDOW = 2
 DEFAULT_SHORT_WINDOW = 3
 DEFAULT_LONG_WINDOW = 5
+DEFAULT_SEASON_LENGTH = 3
 
 
 def load_histories(path: Path) -> list[dict[str, Any]]:
@@ -70,12 +73,19 @@ def _drift_projection(values: Sequence[float], horizon: int) -> list[float]:
     return [round(values[-1] + slope * (step + 1), 2) for step in range(horizon)]
 
 
-def _candidate_review_predictions(values: Sequence[float], horizon: int) -> dict[str, list[float]]:
+def _seasonal_naive_projection(values: Sequence[float], horizon: int, season_length: int) -> list[float]:
+    effective_season_length = max(1, min(season_length, len(values)))
+    seasonal_pattern = [round(value, 2) for value in values[-effective_season_length:]]
+    return [seasonal_pattern[index % effective_season_length] for index in range(horizon)]
+
+
+def _candidate_review_predictions(values: Sequence[float], horizon: int, season_length: int) -> dict[str, list[float]]:
     return {
         "last_value": _last_value_projection(values, horizon),
         "trailing_mean_2": _trailing_mean_projection(values, horizon, window=2),
         "trailing_mean_3": _trailing_mean_projection(values, horizon, window=3),
         "drift": _drift_projection(values, horizon),
+        "seasonal_naive": _seasonal_naive_projection(values, horizon, season_length),
     }
 
 
@@ -104,19 +114,51 @@ def _build_feature_profile(values: Sequence[float], short_window: int, long_wind
     }
 
 
-def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[str, Any]) -> Path:
-    registry_path = output_dir / registry_name
-    if registry_path.exists():
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    else:
-        registry = {"runs": []}
-    registry.setdefault("runs", []).append(run_entry)
-    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_path
+def _build_seasonality_profile(values: Sequence[float], season_length: int) -> dict[str, Any]:
+    effective_season_length = max(1, min(season_length, len(values)))
+    phase_averages = {
+        f"phase_{phase_index + 1}": round(_mean(values[phase_index::effective_season_length]), 2)
+        for phase_index in range(effective_season_length)
+    }
+    strongest_phase = max(phase_averages.items(), key=lambda item: item[1])[0]
+    seasonal_range = round(max(phase_averages.values()) - min(phase_averages.values()), 2)
+    return {
+        "seasonLength": effective_season_length,
+        "phaseAverages": phase_averages,
+        "seasonalRange": seasonal_range,
+        "dominantPhase": strongest_phase,
+    }
+
+
+def _detect_change_point(values: Sequence[float]) -> dict[str, Any]:
+    if len(values) < 4:
+        return {
+            "candidateIndex": None,
+            "beforeMean": round(_mean(values), 2),
+            "afterMean": round(_mean(values), 2),
+            "meanShift": 0.0,
+            "direction": "stable",
+        }
+
+    candidate_splits = range(2, len(values) - 1)
+    best_split = max(
+        candidate_splits,
+        key=lambda split_index: abs(_mean(values[split_index:]) - _mean(values[:split_index])),
+    )
+    before_mean = round(_mean(values[:best_split]), 2)
+    after_mean = round(_mean(values[best_split:]), 2)
+    mean_shift = round(after_mean - before_mean, 2)
+    return {
+        "candidateIndex": best_split,
+        "beforeMean": before_mean,
+        "afterMean": after_mean,
+        "meanShift": abs(mean_shift),
+        "direction": _trend_label(mean_shift),
+    }
 
 
 @dataclass(slots=True)
-class TimeSeriesLab:
+class TimeSeriesLab(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
     review_window: int = DEFAULT_REVIEW_WINDOW
     short_window: int = DEFAULT_SHORT_WINDOW
@@ -124,6 +166,11 @@ class TimeSeriesLab:
     report_name: str = "Environmental Time Series Lab"
     run_label: str = "temporal-diagnostics-review"
     registry_name: str = DEFAULT_REGISTRY_NAME
+    season_length: int = DEFAULT_SEASON_LENGTH
+
+    @property
+    def output_filename(self) -> str:
+        return "time_series_report.json"
 
     def load_histories(self) -> list[dict[str, Any]]:
         return load_histories(self.data_path)
@@ -133,6 +180,8 @@ class TimeSeriesLab:
         summaries = []
         winning_baselines: Counter[str] = Counter()
         trend_labels: Counter[str] = Counter()
+        dominant_phases: Counter[str] = Counter()
+        change_directions: Counter[str] = Counter()
 
         for series in histories:
             values = [float(value) for value in series["values"]]
@@ -142,7 +191,9 @@ class TimeSeriesLab:
             calibration = values[:-self.review_window]
             review = values[-self.review_window:]
             feature_profile = _build_feature_profile(calibration, short_window=self.short_window, long_window=self.long_window)
-            baseline_predictions = _candidate_review_predictions(calibration, self.review_window)
+            seasonality_profile = _build_seasonality_profile(calibration, self.season_length)
+            change_point_candidate = _detect_change_point(calibration)
+            baseline_predictions = _candidate_review_predictions(calibration, self.review_window, self.season_length)
             leaderboard = [
                 {
                     "baseline": baseline_name,
@@ -154,6 +205,8 @@ class TimeSeriesLab:
             leaderboard.sort(key=lambda candidate: (candidate["reviewMae"], candidate["baseline"]))
             selected_baseline = leaderboard[0]["baseline"]
             winning_baselines[selected_baseline] += 1
+            dominant_phases[seasonality_profile["dominantPhase"]] += 1
+            change_directions[change_point_candidate["direction"]] += 1
 
             total_change = round(values[-1] - values[0], 2)
             trend_label = _trend_label(total_change)
@@ -166,6 +219,8 @@ class TimeSeriesLab:
                     "analysisWindow": len(calibration),
                     "reviewWindow": len(review),
                     "featureProfile": feature_profile,
+                    "seasonalityProfile": seasonality_profile,
+                    "changePointCandidate": change_point_candidate,
                     "rollingMeanShort": _rolling_mean(values, min(self.short_window, len(values))),
                     "rollingMeanLong": _rolling_mean(values, min(self.long_window, len(values))),
                     "firstDifferences": _first_differences(values),
@@ -189,44 +244,45 @@ class TimeSeriesLab:
                 "reviewWindow": self.review_window,
                 "shortWindow": self.short_window,
                 "longWindow": self.long_window,
-                "candidateBaselineCount": 4,
+                "seasonLength": self.season_length,
+                "candidateBaselineCount": 5,
             },
             "summary": {
                 "seriesCount": len(histories),
                 "reviewWindow": self.review_window,
                 "shortWindow": self.short_window,
                 "longWindow": self.long_window,
+                "seasonLength": self.season_length,
                 "averageSelectedReviewMae": round(sum(item["selectedReviewMae"] for item in summaries) / len(summaries), 2),
+                "averageSeasonalRange": round(sum(item["seasonalityProfile"]["seasonalRange"] for item in summaries) / len(summaries), 2),
                 "trendLabels": dict(sorted(trend_labels.items())),
+                "dominantPhases": dict(sorted(dominant_phases.items())),
+                "changeDirections": dict(sorted(change_directions.items())),
                 "baselineWins": dict(sorted(winning_baselines.items())),
             },
             "seriesDiagnostics": summaries,
             "notes": [
                 "Designed as a public-safe temporal diagnostics workflow with split-based review windows and candidate baseline comparison.",
-                "The lab captures feature profiles, rolling summaries, and baseline leaderboard output before handing off to forecasting or anomaly pipelines.",
-                "The same structure can grow into decomposition, seasonal baselines, change-point detection, or external experiment tracking.",
+                "The lab captures feature profiles, rolling summaries, seasonal fingerprints, and change-point candidates before handing off to forecasting or anomaly pipelines.",
+                "Seasonal-naive review baselines make the comparison more realistic for repeating station behavior.",
+                "The same structure can grow into fuller decomposition, formal change-point tests, or external experiment tracking.",
             ],
         }
 
+    def build_registry_entry(self, report: dict[str, Any], output_path: Path) -> dict[str, Any]:
+        return {
+            "runLabel": report["experiment"]["runLabel"],
+            "generatedAt": report["experiment"]["generatedAt"],
+            "reportName": report["reportName"],
+            "reportFile": output_path.name,
+            "seriesCount": report["summary"]["seriesCount"],
+            "averageSelectedReviewMae": report["summary"]["averageSelectedReviewMae"],
+            "averageSeasonalRange": report["summary"]["averageSeasonalRange"],
+            "baselineWins": report["summary"]["baselineWins"],
+        }
+
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        report = self.build_report()
-        output_path = output_dir / "time_series_report.json"
-        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        _update_run_registry(
-            output_dir,
-            self.registry_name,
-            {
-                "runLabel": report["experiment"]["runLabel"],
-                "generatedAt": report["experiment"]["generatedAt"],
-                "reportName": report["reportName"],
-                "reportFile": output_path.name,
-                "seriesCount": report["summary"]["seriesCount"],
-                "averageSelectedReviewMae": report["summary"]["averageSelectedReviewMae"],
-                "baselineWins": report["summary"]["baselineWins"],
-            },
-        )
-        return output_path
+        return super().export_report(output_dir)
 
 
 def build_time_series_report(
@@ -234,6 +290,7 @@ def build_time_series_report(
     review_window: int = DEFAULT_REVIEW_WINDOW,
     short_window: int = DEFAULT_SHORT_WINDOW,
     long_window: int = DEFAULT_LONG_WINDOW,
+    season_length: int = DEFAULT_SEASON_LENGTH,
     report_name: str = "Environmental Time Series Lab",
     run_label: str = "temporal-diagnostics-review",
     registry_name: str = DEFAULT_REGISTRY_NAME,
@@ -243,6 +300,7 @@ def build_time_series_report(
         review_window=review_window,
         short_window=short_window,
         long_window=long_window,
+        season_length=season_length,
         report_name=report_name,
         run_label=run_label,
         registry_name=registry_name,
@@ -257,12 +315,14 @@ def export_time_series_report(
     review_window: int = DEFAULT_REVIEW_WINDOW,
     short_window: int = DEFAULT_SHORT_WINDOW,
     long_window: int = DEFAULT_LONG_WINDOW,
+    season_length: int = DEFAULT_SEASON_LENGTH,
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> Path:
     lab = TimeSeriesLab(
         review_window=review_window,
         short_window=short_window,
         long_window=long_window,
+        season_length=season_length,
         report_name=report_name,
         run_label=run_label,
         registry_name=registry_name,
@@ -279,6 +339,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--review-window", type=int, default=DEFAULT_REVIEW_WINDOW, help="Number of trailing observations reserved for baseline review.")
     parser.add_argument("--short-window", type=int, default=DEFAULT_SHORT_WINDOW, help="Short rolling window used in diagnostics output.")
     parser.add_argument("--long-window", type=int, default=DEFAULT_LONG_WINDOW, help="Long rolling window used in diagnostics output.")
+    parser.add_argument("--season-length", type=int, default=DEFAULT_SEASON_LENGTH, help="Season length used for phase summaries and seasonal-naive review baselines.")
     return parser.parse_args()
 
 
@@ -291,6 +352,7 @@ def main() -> None:
         review_window=args.review_window,
         short_window=args.short_window,
         long_window=args.long_window,
+        season_length=args.season_length,
         registry_name=args.registry_name,
     )
     print(f"Wrote time-series report to {output_path}")

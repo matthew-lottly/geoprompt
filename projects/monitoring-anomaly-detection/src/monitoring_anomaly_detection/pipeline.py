@@ -10,6 +10,8 @@ from pathlib import Path
 from statistics import mean, median, pstdev
 from typing import Any
 
+from monitoring_anomaly_detection.workflow_base import ReportWorkflow
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "station_observations.csv"
@@ -96,24 +98,17 @@ def _evaluate_detector(events: list[dict[str, Any]], detector_name: str) -> dict
     }
 
 
-def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[str, Any]) -> Path:
-    registry_path = output_dir / registry_name
-    if registry_path.exists():
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    else:
-        registry = {"runs": []}
-    registry.setdefault("runs", []).append(run_entry)
-    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_path
-
-
 @dataclass(slots=True)
-class AnomalyDetectionWorkflow:
+class AnomalyDetectionWorkflow(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
     report_name: str = "Monitoring Anomaly Detection"
     run_label: str = "detector-comparison-pass"
     warmup_window: int = DEFAULT_WARMUP_WINDOW
     registry_name: str = DEFAULT_REGISTRY_NAME
+
+    @property
+    def output_filename(self) -> str:
+        return "anomaly_report.json"
 
     def load_observations(self) -> list[dict[str, Any]]:
         return load_observations(self.data_path)
@@ -224,26 +219,20 @@ class AnomalyDetectionWorkflow:
             ],
         }
 
+    def build_registry_entry(self, report: dict[str, Any], output_path: Path) -> dict[str, Any]:
+        return {
+            "runLabel": report["experiment"]["runLabel"],
+            "generatedAt": report["experiment"]["generatedAt"],
+            "reportName": report["reportName"],
+            "reportFile": output_path.name,
+            "stationCount": report["summary"]["stationCount"],
+            "selectedDetector": report["summary"]["selectedDetector"],
+            "selectedDetectorF1": report["summary"]["selectedDetectorF1"],
+            "selectedAlertCount": report["summary"]["selectedAlertCount"],
+        }
+
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        report = self.build_report()
-        output_path = output_dir / "anomaly_report.json"
-        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        _update_run_registry(
-            output_dir,
-            self.registry_name,
-            {
-                "runLabel": report["experiment"]["runLabel"],
-                "generatedAt": report["experiment"]["generatedAt"],
-                "reportName": report["reportName"],
-                "reportFile": output_path.name,
-                "stationCount": report["summary"]["stationCount"],
-                "selectedDetector": report["summary"]["selectedDetector"],
-                "selectedDetectorF1": report["summary"]["selectedDetectorF1"],
-                "selectedAlertCount": report["summary"]["selectedAlertCount"],
-            },
-        )
-        return output_path
+        return super().export_report(output_dir)
 
 
 def build_anomaly_report(

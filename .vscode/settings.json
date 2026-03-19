@@ -5,6 +5,7 @@
     "./projects/environmental-time-series-lab/src",
     "./standalone-checkouts/environmental-time-series-lab/src",
     "./projects/station-forecasting-workbench/src",
+    "./projects/station-risk-classification-lab/src",
     "./standalone-checkouts/station-forecasting-workbench/src",
     "./projects/postgis-service-blueprint/src",
     "./standalone-checkouts/postgis-service-blueprint/src",

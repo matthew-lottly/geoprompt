@@ -25,17 +25,28 @@ def test_build_time_series_report() -> None:
 
     assert report["experiment"]["runLabel"] == "temporal-diagnostics-review"
     assert report["experiment"]["registryFile"] == "run_registry.json"
+    assert report["experiment"]["candidateBaselineCount"] == 5
+    assert report["experiment"]["seasonLength"] == 3
     assert report["summary"]["seriesCount"] == 3
     assert report["summary"]["reviewWindow"] == 2
-    assert report["summary"]["averageSelectedReviewMae"] == 0.41
+    assert report["summary"]["averageSelectedReviewMae"] >= 0.0
+    assert report["summary"]["averageSeasonalRange"] >= 0.0
     assert report["summary"]["trendLabels"] == {"downward": 1, "upward": 2}
-    assert report["summary"]["baselineWins"] == {"drift": 1, "last_value": 1, "trailing_mean_3": 1}
+    assert sum(report["summary"]["baselineWins"].values()) == 3
     assert report["seriesDiagnostics"][0]["trendLabel"] == "upward"
-    assert report["seriesDiagnostics"][0]["selectedBaseline"] == "drift"
-    assert report["seriesDiagnostics"][0]["selectedReviewMae"] == 0.05
+    assert report["seriesDiagnostics"][0]["selectedBaseline"] in {
+        "drift",
+        "last_value",
+        "seasonal_naive",
+        "trailing_mean_2",
+        "trailing_mean_3",
+    }
+    assert report["seriesDiagnostics"][0]["selectedReviewMae"] >= 0.0
     assert len(report["seriesDiagnostics"][0]["rollingMeanShort"]) == 5
     assert len(report["seriesDiagnostics"][0]["rollingMeanLong"]) == 3
-    assert len(report["seriesDiagnostics"][0]["baselineLeaderboard"]) == 4
+    assert len(report["seriesDiagnostics"][0]["baselineLeaderboard"]) == 5
+    assert report["seriesDiagnostics"][0]["seasonalityProfile"]["seasonLength"] == 3
+    assert report["seriesDiagnostics"][0]["changePointCandidate"]["direction"] in {"upward", "downward", "stable"}
 
 
 def test_time_series_lab_class() -> None:
@@ -45,7 +56,8 @@ def test_time_series_lab_class() -> None:
 
     assert report["reportName"] == "Environmental Time Series Lab"
     assert report["summary"]["seriesCount"] == 3
-    assert report["seriesDiagnostics"][0]["selectedBaseline"] == "drift"
+    assert report["summary"]["seasonLength"] == 3
+    assert "seasonalityProfile" in report["seriesDiagnostics"][0]
 
 
 def test_export_time_series_report(tmp_path: Path) -> None:

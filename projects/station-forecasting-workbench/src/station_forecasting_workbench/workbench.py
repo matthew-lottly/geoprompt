@@ -8,6 +8,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
+from station_forecasting_workbench.workflow_base import ReportWorkflow
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "forecast_histories.json"
@@ -106,19 +108,8 @@ def _split_series(values: list[float], validation_horizon: int, test_horizon: in
     return train, validation, test
 
 
-def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[str, Any]) -> Path:
-    registry_path = output_dir / registry_name
-    if registry_path.exists():
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    else:
-        registry = {"runs": []}
-    registry.setdefault("runs", []).append(run_entry)
-    registry_path.write_text(json.dumps(registry, indent=2), encoding="utf-8")
-    return registry_path
-
-
 @dataclass(slots=True)
-class ForecastWorkbench:
+class ForecastWorkbench(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
     validation_horizon: int = DEFAULT_VALIDATION_HORIZON
     test_horizon: int = DEFAULT_TEST_HORIZON
@@ -126,6 +117,10 @@ class ForecastWorkbench:
     report_name: str = "Station Forecasting Workbench"
     run_label: str = "baseline-model-review"
     registry_name: str = DEFAULT_REGISTRY_NAME
+
+    @property
+    def output_filename(self) -> str:
+        return "station_forecast_report.json"
 
     def load_histories(self) -> list[dict[str, Any]]:
         return load_histories(self.data_path)
@@ -216,26 +211,20 @@ class ForecastWorkbench:
             ],
         }
 
+    def build_registry_entry(self, report: dict[str, Any], output_path: Path) -> dict[str, Any]:
+        return {
+            "runLabel": report["experiment"]["runLabel"],
+            "generatedAt": report["experiment"]["generatedAt"],
+            "reportName": report["reportName"],
+            "reportFile": output_path.name,
+            "seriesCount": report["summary"]["seriesCount"],
+            "averageValidationMae": report["summary"]["averageValidationMae"],
+            "averageTestMae": report["summary"]["averageTestMae"],
+            "modelWins": report["summary"]["modelWins"],
+        }
+
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        report = self.build_report()
-        output_path = output_dir / "station_forecast_report.json"
-        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-        _update_run_registry(
-            output_dir,
-            self.registry_name,
-            {
-                "runLabel": report["experiment"]["runLabel"],
-                "generatedAt": report["experiment"]["generatedAt"],
-                "reportName": report["reportName"],
-                "reportFile": output_path.name,
-                "seriesCount": report["summary"]["seriesCount"],
-                "averageValidationMae": report["summary"]["averageValidationMae"],
-                "averageTestMae": report["summary"]["averageTestMae"],
-                "modelWins": report["summary"]["modelWins"],
-            },
-        )
-        return output_path
+        return super().export_report(output_dir)
 
 
 def build_forecast_report(

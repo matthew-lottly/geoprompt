@@ -47,6 +47,12 @@
       ]
     },
     {
+      "root": "projects/station-risk-classification-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
       "root": "standalone-checkouts/station-forecasting-workbench",
       "extraPaths": [
         "src"

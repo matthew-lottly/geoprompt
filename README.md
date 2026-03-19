@@ -20,6 +20,7 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 - [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection) for the anomaly detection data science lane
 - [projects/environmental-time-series-lab](projects/environmental-time-series-lab) for the time-series analysis lane
 - [projects/station-forecasting-workbench](projects/station-forecasting-workbench) for the forecasting data science lane
+- [projects/station-risk-classification-lab](projects/station-risk-classification-lab) for the classification data science lane
 - [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) for the GIS frontend prototype lane
 - [standalone-checkouts](standalone-checkouts) for real standalone repository checkouts
 - [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md) for the standalone repo roadmap
@@ -40,13 +41,14 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 
 ## Portfolio Shape
 
-This repository is organized as one coherent engineering portfolio with eleven complementary lanes:
+This repository is organized as one coherent engineering portfolio with twelve complementary lanes:
 
 - backend and GIS delivery
 - analytics and reporting
 - anomaly detection and operational triage
 - time-series analysis and trend review
 - forecasting and projection workbenches
+- classification and station risk triage
 - database modeling and warehouse design
 - desktop GIS and QGIS-oriented operations workflows
 - open spatial services and publication planning
@@ -65,12 +67,13 @@ Start with the flagship backend project, then move outward by lane.
 3. [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection): Python anomaly-detection workflow for ranking suspicious telemetry behavior and packaging alert-ready triage output
 4. [projects/environmental-time-series-lab](projects/environmental-time-series-lab): Python time-series analysis lab for rolling summaries, trend scoring, and temporal review artifacts
 5. [projects/station-forecasting-workbench](projects/station-forecasting-workbench): Python forecasting workbench for holdout evaluation and short-horizon station projections
-6. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
-7. [projects/qgis-operations-workbench](projects/qgis-operations-workbench): Python-based desktop GIS workbench for route layouts, bookmarks, and analyst review packs
-8. [projects/postgis-service-blueprint](projects/postgis-service-blueprint): SQL and Python blueprint for PostGIS-backed collections, publication views, and open spatial service contracts
-9. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
-10. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
-11. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
+6. [projects/station-risk-classification-lab](projects/station-risk-classification-lab): Python classification lab for candidate risk models, holdout review, and explainable station-priority output
+7. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
+8. [projects/qgis-operations-workbench](projects/qgis-operations-workbench): Python-based desktop GIS workbench for route layouts, bookmarks, and analyst review packs
+9. [projects/postgis-service-blueprint](projects/postgis-service-blueprint): SQL and Python blueprint for PostGIS-backed collections, publication views, and open spatial service contracts
+10. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
+11. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
+12. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
 
 ## Core Stack
 
@@ -86,8 +89,9 @@ Start with the flagship backend project, then move outward by lane.
 | [projects/spatial-data-api](projects/spatial-data-api) | Backend + GIS | FastAPI service with optional PostGIS, Docker support, health checks, and a browser dashboard for environmental monitoring. |
 | [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) | Analytics | DuckDB-based reporting pipeline for alert rates, regional monitoring pressure, and markdown operations briefs. |
 | [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection) | Data Science | Python anomaly-detection pipeline for ranking suspicious telemetry behavior and packaging triage-ready station alerts. |
-| [projects/environmental-time-series-lab](projects/environmental-time-series-lab) | Data Science | Python time-series analysis lab for rolling summaries, trend labels, and temporal monitoring review. |
+| [projects/environmental-time-series-lab](projects/environmental-time-series-lab) | Data Science | Python time-series analysis lab for rolling summaries, seasonality fingerprints, change-point candidates, and temporal monitoring review. |
 | [projects/station-forecasting-workbench](projects/station-forecasting-workbench) | Data Science | Python forecasting workbench for trailing-baseline projections, holdout evaluation, and station-level review outputs. |
+| [projects/station-risk-classification-lab](projects/station-risk-classification-lab) | Data Science | Python classification lab for candidate risk-model comparison, explainable station triage, and holdout review output. |
 | [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) | Database Engineering | Warehouse-style schema design, dimensional modeling, SQL transformations, and repeatable data quality checks for monitoring data. |
 | [projects/qgis-operations-workbench](projects/qgis-operations-workbench) | Desktop GIS | Python-driven desktop GIS review pack builder for QGIS-oriented bookmarks, route layouts, and analyst task preparation. |
 | [projects/postgis-service-blueprint](projects/postgis-service-blueprint) | Spatial Services | Open spatial service blueprint for PostGIS-backed collections, publication views, and delivery planning across FastAPI, PostgREST, or OGC API Features. |
@@ -131,6 +135,13 @@ Data science project focused on baseline forecasting, holdout evaluation, and sh
 
 Demo asset: [projects/station-forecasting-workbench/assets/forecast-preview.svg](projects/station-forecasting-workbench/assets/forecast-preview.svg)
 Demo narrative: [projects/station-forecasting-workbench/docs/demo-storyboard.md](projects/station-forecasting-workbench/docs/demo-storyboard.md)
+
+### Station Risk Classification Lab
+
+Data science project focused on candidate classifier comparison, explainable risk labels, and station-priority review outputs.
+
+Demo asset: [projects/station-risk-classification-lab/assets/classification-preview.svg](projects/station-risk-classification-lab/assets/classification-preview.svg)
+Demo narrative: [projects/station-risk-classification-lab/docs/demo-storyboard.md](projects/station-risk-classification-lab/docs/demo-storyboard.md)
 
 ### Monitoring Data Warehouse
 
