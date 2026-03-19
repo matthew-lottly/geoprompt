@@ -1,1 +1,0 @@
-"""PostGIS service blueprint package."""
