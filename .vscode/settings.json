@@ -1,5 +1,9 @@
 {
   "python.analysis.extraPaths": [
+    "./projects/postgis-service-blueprint/src",
+    "./standalone-repos/postgis-service-blueprint/src",
+    "./projects/qgis-operations-workbench/src",
+    "./standalone-repos/qgis-operations-workbench/src",
     "./projects/raster-monitoring-pipeline/src",
     "./standalone-repos/raster-monitoring-pipeline/src"
   ]

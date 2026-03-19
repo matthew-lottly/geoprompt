@@ -1,19 +1,4 @@
 {
-  "executionEnvironments": [
-    {
-      "root": "projects/raster-monitoring-pipeline",
-      "extraPaths": [
-        "projects/raster-monitoring-pipeline/src"
-      ]
-    },
-    {
-      "root": "standalone-repos/raster-monitoring-pipeline",
-      "extraPaths": [
-        "standalone-repos/raster-monitoring-pipeline/src"
-      ]
-    }
-  ]
-}{
   "include": [
     "projects",
     "standalone-repos"
@@ -22,37 +7,49 @@
     {
       "root": "projects/spatial-data-api",
       "extraPaths": [
-        "projects/spatial-data-api/src"
+        "src"
       ]
     },
     {
       "root": "standalone-repos/environmental-monitoring-api",
       "extraPaths": [
-        "standalone-repos/environmental-monitoring-api/src"
+        "src"
       ]
     },
     {
       "root": "projects/qgis-operations-workbench",
       "extraPaths": [
-        "projects/qgis-operations-workbench/src"
+        "src"
       ]
     },
     {
       "root": "standalone-repos/qgis-operations-workbench",
       "extraPaths": [
-        "standalone-repos/qgis-operations-workbench/src"
+        "src"
       ]
     },
     {
       "root": "projects/postgis-service-blueprint",
       "extraPaths": [
-        "projects/postgis-service-blueprint/src"
+        "src"
       ]
     },
     {
       "root": "standalone-repos/postgis-service-blueprint",
       "extraPaths": [
-        "standalone-repos/postgis-service-blueprint/src"
+        "src"
+      ]
+    },
+    {
+      "root": "projects/raster-monitoring-pipeline",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "standalone-repos/raster-monitoring-pipeline",
+      "extraPaths": [
+        "src"
       ]
     }
   ]
