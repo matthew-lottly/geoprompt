@@ -1,6 +1,6 @@
 # Monitoring Anomaly Detection
 
-Data science portfolio project for detecting anomalous monitoring behavior, ranking sensor events, and packaging triage-ready anomaly reports.
+Data science portfolio project for detector comparison, labeled-event evaluation, ranking suspicious sensor events, and packaging triage-ready anomaly reports.
 
 ![Monitoring anomaly detection preview](assets/anomaly-preview.svg)
 
@@ -8,20 +8,20 @@ Data science portfolio project for detecting anomalous monitoring behavior, rank
 
 - Lane: Data science and anomaly detection
 - Domain: Monitoring telemetry triage
-- Stack: Python, CSV fixtures, statistical anomaly rules
-- Includes: sample observations, anomaly ranking, station-level summaries, tests
+- Stack: Python, CSV fixtures, lightweight anomaly-detection experiment workflow
+- Includes: labeled sample observations, detector leaderboard, ranked events, station-level summaries, tests
 
 ## Overview
 
 This project shows the operational side of data science: turning raw monitoring telemetry into anomaly candidates that an analyst or downstream alerting system can review quickly.
 
-The current implementation stays public-safe and dependency-light. It uses checked-in observations, computes station baselines, scores deviations, and exports a ranked anomaly report without needing notebooks or external services.
+The current implementation stays public-safe and dependency-light. It uses checked-in observations, compares several detector strategies against labeled events, selects the strongest detector by F1 score, and exports a ranked anomaly report with experiment-style metadata.
 
 ## What It Demonstrates
 
-- Repeatable anomaly scoring over environmental telemetry
-- Station-level baselines and deviation analysis
-- Severity ranking for operational review
+- Candidate-detector comparison across global, rolling, robust, and delta-based scoring
+- Labeled-event evaluation with precision, recall, and F1
+- Station-level baselines and ranked event review
 - A clean handoff artifact for alerting, dashboards, or analyst queues
 
 ## Project Structure
@@ -63,8 +63,11 @@ pytest
 
 The default command writes `outputs/anomaly_report.json` with:
 
+- experiment run metadata and detector thresholds
 - station baselines
-- anomaly candidates ranked by deviation score
+- detector leaderboard entries and labeled-event metrics
+- ranked scored events
+- selected alerts from the winning detector
 - per-station alert counts
 - operational notes for triage
 
