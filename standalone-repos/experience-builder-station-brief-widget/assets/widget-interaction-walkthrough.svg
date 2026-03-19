@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="860" viewBox="0 0 1440 860" role="img" aria-labelledby="title desc">
-  <title id="title">Experience Builder widget interaction walkthrough</title>
-  <desc id="desc">Three storyboard panels showing region filtering, synchronized selection, and detail panel updates in the station brief widget demo.</desc>
+  <title id="title">Station brief widget prototype interaction walkthrough</title>
+  <desc id="desc">Three conceptual storyboard panels showing region filtering, synchronized selection, and detail panel updates in the station brief widget demo.</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%" stop-color="#f5efe1" />
@@ -25,7 +25,7 @@
   <rect width="1440" height="860" fill="url(#bg)" />
   <text x="84" y="84" class="kicker">Interaction Walkthrough</text>
   <text x="84" y="132" class="title">Station Brief Widget Demo Flow</text>
-  <text x="84" y="170" class="body">A lightweight storyboard for reviewers who want to see filter, map, and detail-panel behavior without launching the app.</text>
+  <text x="84" y="170" class="body">A lightweight conceptual storyboard for reviewers who want to see filter, map, and detail-panel behavior without launching the app.</text>
 
   <g transform="translate(72,220)">
     <rect width="412" height="560" rx="28" fill="url(#panel)" stroke="#cdbf9b" />

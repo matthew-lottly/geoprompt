@@ -1,8 +1,8 @@
 <svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
   <rect width="1200" height="720" fill="#EFE8DA"/>
   <rect x="48" y="40" width="1104" height="136" rx="28" fill="#FFF8EF" stroke="#E5D9C5"/>
-  <text x="84" y="84" fill="#6B6B62" font-family="Georgia, serif" font-size="16" letter-spacing="3">ARCGIS UI DEMO</text>
-  <text x="84" y="136" fill="#1F2725" font-family="Georgia, serif" font-size="44">Experience Builder Station Brief Widget</text>
+  <text x="84" y="84" fill="#6B6B62" font-family="Georgia, serif" font-size="16" letter-spacing="3">GIS WIDGET PROTOTYPE</text>
+  <text x="84" y="136" fill="#1F2725" font-family="Georgia, serif" font-size="44">Station Brief Widget Concept</text>
   <rect x="84" y="188" width="140" height="34" rx="17" fill="#E2ECF1"/><text x="116" y="210" fill="#49616D" font-family="Georgia, serif" font-size="15">TypeScript</text>
   <rect x="236" y="188" width="110" height="34" rx="17" fill="#F0E6D2"/><text x="268" y="210" fill="#8E6731" font-family="Georgia, serif" font-size="15">React</text>
   <rect x="358" y="188" width="92" height="34" rx="17" fill="#E2EFE0"/><text x="389" y="210" fill="#677C48" font-family="Georgia, serif" font-size="15">GIS UI</text>

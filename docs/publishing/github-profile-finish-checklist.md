@@ -55,7 +55,7 @@ This reads as a coherent story: flagship backend first, then analytics, then war
 
 ### experience-builder-station-brief-widget
 
-- Description: `React and TypeScript ArcGIS Experience Builder style widget prototype for filtering, summaries, and station detail interaction.`
+- Description: `React and TypeScript GIS widget prototype inspired by ArcGIS Experience Builder patterns for filtering, summaries, and station detail interaction.`
 - Website: `https://lottly-ai.com/`
 - Topics: `react`, `typescript`, `arcgis`, `experience-builder`, `gis`, `frontend`, `geospatial`
 

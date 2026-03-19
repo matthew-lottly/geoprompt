@@ -4,7 +4,7 @@ Reference asset: `assets/widget-interaction-walkthrough.svg`
 
 ## 1. Frame the use case
 
-Show the widget as a compact operational panel that could sit beside a map or dashboard in an ArcGIS Experience Builder app.
+Show the widget as a compact operational panel that could sit beside a map or dashboard in a GIS web app. Describe it as Experience Builder-inspired, but keep the asset framed as a concept storyboard rather than a product screenshot.
 
 ## 2. Show configuration
 
@@ -14,17 +14,13 @@ Point out that the widget accepts config for title, subtitle, owner visibility, 
 
 Switch the region selector from `All` to `West` and show how the summary and station list react immediately.
 
-## 4. Show the map-adjacent mock
-
-Click a marker in the coverage panel to show that the selection behavior stays consistent across a list surface and a map-style surface.
-
-## 5. Select a station
+## 4. Select a station
 
 Click `Sierra Air Quality Node` to highlight the detail panel and show the reading, last observed timestamp, owner, and alert score.
 
-## 6. Explain the public-safe angle
+## 5. Explain the public-safe angle
 
-Close by noting that the code reflects the interaction and component patterns of Experience Builder widget work without exposing any private employer implementation.
+Close by noting that the code reflects the interaction and component patterns of Experience Builder-style widget work without exposing any private employer implementation or presenting the visuals as official ArcGIS product captures.
 
 ## 7. Reviewer shortcut
 

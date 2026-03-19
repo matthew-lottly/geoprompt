@@ -13,9 +13,10 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 - [projects/spatial-data-api](projects/spatial-data-api) for the flagship backend and GIS demo
 - [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) for the analytics and reporting lane
 - [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) for the database-engineering lane
-- [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) for the ArcGIS UI and Experience Builder style lane
+- [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) for the GIS frontend prototype lane
 - [standalone-repos](standalone-repos) for publishable split-out repository copies
 - [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md) for the standalone repo roadmap
+- [docs/next-gis-repo-sequence.md](docs/next-gis-repo-sequence.md) for the next non-Esri GIS expansion plan
 
 ## Profile Summary
 
@@ -37,7 +38,7 @@ This repository is organized as one coherent engineering portfolio with four com
 - backend and GIS delivery
 - analytics and reporting
 - database modeling and warehouse design
-- ArcGIS-style frontend and widget development
+- GIS frontend prototyping informed by Experience Builder patterns
 
 Each lane is implemented against the same environmental monitoring theme so the work reads as one body of practice instead of unrelated demos.
 
@@ -48,7 +49,7 @@ Start with the flagship backend project, then move outward by lane.
 1. [projects/spatial-data-api](projects/spatial-data-api): integrated backend, GIS, Docker, PostGIS, dashboard
 2. [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics): analytics and reporting
 3. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
-4. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript ArcGIS Experience Builder style widget prototype
+4. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
 
 ## Core Stack
 
@@ -64,7 +65,7 @@ Start with the flagship backend project, then move outward by lane.
 | [projects/spatial-data-api](projects/spatial-data-api) | Backend + GIS | FastAPI service with optional PostGIS, Docker support, health checks, and a browser dashboard for environmental monitoring. |
 | [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) | Analytics | DuckDB-based reporting pipeline for alert rates, regional monitoring pressure, and markdown operations briefs. |
 | [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) | Database Engineering | Warehouse-style schema design, dimensional modeling, SQL transformations, and repeatable data quality checks for monitoring data. |
-| [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) | GIS Frontend | Public-safe React and TypeScript prototype of an ArcGIS Experience Builder style widget with selection-driven station summaries and detail panels. |
+| [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) | GIS Frontend | Public-safe React and TypeScript widget prototype inspired by ArcGIS Experience Builder patterns, with conceptual visuals and selection-driven station summaries. |
 
 ## Project Cards
 
@@ -91,10 +92,16 @@ Demo narrative: [projects/monitoring-data-warehouse/docs/demo-storyboard.md](pro
 
 ### Experience Builder Station Brief Widget
 
-Frontend GIS project focused on widget-style interaction patterns, station filtering, and selection-driven detail panels modeled after ArcGIS Experience Builder work.
+Frontend GIS project focused on widget-style interaction patterns, station filtering, and selection-driven detail panels. The visuals are conceptual portfolio assets informed by ArcGIS Experience Builder patterns, not product screenshots.
 
 Demo asset: [projects/experience-builder-station-brief-widget/assets/widget-preview.svg](projects/experience-builder-station-brief-widget/assets/widget-preview.svg)
 Demo narrative: [projects/experience-builder-station-brief-widget/docs/demo-storyboard.md](projects/experience-builder-station-brief-widget/docs/demo-storyboard.md)
+
+## Next GIS Expansion
+
+The next public repo wave broadens beyond Esri-centered work while keeping the current Experience Builder-inspired prototype in place.
+
+- [docs/next-gis-repo-sequence.md](docs/next-gis-repo-sequence.md) outlines the next sequence across QGIS desktop automation, open web mapping, spatial services, and raster pipelines.
 
 ## Publication Status
 

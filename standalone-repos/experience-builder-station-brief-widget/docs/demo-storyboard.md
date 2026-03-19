@@ -4,7 +4,7 @@ Reference asset: `assets/widget-interaction-walkthrough.svg`
 
 ## 1. Frame the use case
 
-Show the widget as a compact operational panel that could sit beside a map or dashboard in an ArcGIS Experience Builder app.
+Show the widget as a compact operational panel that could sit beside a map or dashboard in a GIS web app. Describe it as Experience Builder-inspired, but keep the asset framed as a concept storyboard rather than a product screenshot.
 
 ## 2. Show configuration
 
@@ -20,7 +20,7 @@ Click `Sierra Air Quality Node` to highlight the detail panel and show the readi
 
 ## 5. Explain the public-safe angle
 
-Close by noting that the code reflects the interaction and component patterns of Experience Builder widget work without exposing any private employer implementation.
+Close by noting that the code reflects the interaction and component patterns of Experience Builder-style widget work without exposing any private employer implementation or presenting the visuals as official ArcGIS product captures.
 
 ## 7. Reviewer shortcut
 

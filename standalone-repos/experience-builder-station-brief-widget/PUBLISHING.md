@@ -6,7 +6,7 @@
 
 ## Recommended Description
 
-- React and TypeScript ArcGIS Experience Builder style widget prototype for station summaries, filtering, and selection-driven detail panels.
+- React and TypeScript GIS widget prototype inspired by ArcGIS Experience Builder patterns for station summaries, filtering, and selection-driven detail panels.
 
 ## Suggested Topics
 
@@ -40,6 +40,6 @@ git push -u origin main
 
 ## First Public Polish Pass
 
-- Add one browser screenshot from the live Vite app alongside the SVG preview
+- Add one browser screenshot from the live Vite app alongside the SVG preview and caption it as a prototype capture from this repository
 - Add a short GIF showing region filtering and marker selection
 - Link this repository back to the API repo as the frontend-facing companion project

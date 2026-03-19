@@ -2,7 +2,7 @@
 
 ## Overview
 
-This project models the shape of an Experience Builder style widget without depending on private framework exports or employer configuration.
+This project models the shape of a map-centric widget inspired by Experience Builder patterns without depending on private framework exports or employer configuration.
 
 ## Flow
 
@@ -13,6 +13,6 @@ This project models the shape of an Experience Builder style widget without depe
 
 ## Why It Works Publicly
 
-- Demonstrates TypeScript and React patterns relevant to ArcGIS UI work.
+- Demonstrates TypeScript and React patterns relevant to GIS frontend and Experience Builder-adjacent work.
 - Shows selection-driven GIS interface design without requiring private services.
 - Keeps the code reviewable and runnable in a normal frontend toolchain.

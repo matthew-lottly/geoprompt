@@ -87,7 +87,7 @@ duckdb, data-warehouse, dimensional-modeling, sql, python, data-engineering, etl
 Description
 
 ```text
-React and TypeScript ArcGIS Experience Builder style widget prototype for filtering, summaries, and station detail interaction.
+React and TypeScript GIS widget prototype inspired by ArcGIS Experience Builder patterns for filtering, summaries, and station detail interaction.
 ```
 
 Website
@@ -115,5 +115,5 @@ react, typescript, arcgis, experience-builder, gis, frontend, geospatial
 ## Optional GitHub Profile Bio
 
 ```text
-GIS developer and software engineer building backend, geospatial, database, analytics, and ArcGIS-style frontend systems.
+GIS developer and software engineer building backend, geospatial, database, analytics, and GIS frontend systems across Esri-oriented and open stacks.
 ```

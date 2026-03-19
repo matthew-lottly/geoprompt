@@ -235,7 +235,7 @@ export function StationBriefWidget({ stations, config, isLoading, loadError, onC
               <p className="eyebrow">Widget Config</p>
               <h3>Runtime Settings</h3>
             </div>
-            <p className="section-copy">Public-safe example of the kind of configuration state an Experience Builder widget carries.</p>
+            <p className="section-copy">Public-safe example of the kind of configuration state common in map-centric widget UIs, including Experience Builder-inspired patterns.</p>
           </div>
           <div className="detail-grid compact">
             <div>

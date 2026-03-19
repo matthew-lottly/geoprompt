@@ -60,19 +60,19 @@ export function App() {
     <main className="page-shell">
       <section className="hero-panel">
         <div>
-          <p className="eyebrow">ArcGIS UI Demo</p>
-          <h1>Experience Builder Station Brief Widget</h1>
+          <p className="eyebrow">GIS Widget Prototype</p>
+          <h1>Station Brief Widget Concept</h1>
           <p className="hero-copy">
-            Public-safe React and TypeScript prototype of an ArcGIS Experience Builder style widget for station
-            filtering, operational summaries, persisted status filters, live API snapshot loading, and selection-driven
-            station detail panels.
+            Public-safe React and TypeScript prototype inspired by ArcGIS Experience Builder interaction patterns for
+            station filtering, operational summaries, persisted status filters, live API snapshot loading, and
+            selection-driven station detail panels.
           </p>
         </div>
         <div className="hero-notes">
           <span className="badge">TypeScript</span>
           <span className="badge">React</span>
           <span className="badge">GIS UI</span>
-          <span className="badge">Experience Builder Pattern</span>
+          <span className="badge">Prototype Pattern</span>
         </div>
       </section>
 
