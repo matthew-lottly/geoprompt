@@ -3,9 +3,21 @@
     "projects",
     "standalone-checkouts"
   ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "standalone-repos"
+  ],
   "executionEnvironments": [
     {
       "root": "projects/spatial-data-api",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "standalone-checkouts/spatial-data-api",
       "extraPaths": [
         "src"
       ]
@@ -29,6 +41,30 @@
       ]
     },
     {
+      "root": "projects/gulf-coast-inundation-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "standalone-checkouts/gulf-coast-inundation-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "projects/arroyo-flood-forecasting-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "standalone-checkouts/arroyo-flood-forecasting-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
       "root": "projects/environmental-time-series-lab",
       "extraPaths": [
         "src"
@@ -48,6 +84,12 @@
     },
     {
       "root": "projects/station-risk-classification-lab",
+      "extraPaths": [
+        "src"
+      ]
+    },
+    {
+      "root": "standalone-checkouts/station-risk-classification-lab",
       "extraPaths": [
         "src"
       ]

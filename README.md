@@ -17,8 +17,10 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 - [projects/postgis-service-blueprint](projects/postgis-service-blueprint) for the open spatial services lane
 - [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard) for the open web mapping lane
 - [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline) for the raster analysis and monitoring lane
+- [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab) for the Google Earth Engine inundation mapping lane
 - [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection) for the anomaly detection data science lane
 - [projects/environmental-time-series-lab](projects/environmental-time-series-lab) for the time-series analysis lane
+- [projects/arroyo-flood-forecasting-lab](projects/arroyo-flood-forecasting-lab) for the flood forecasting data science lane
 - [projects/station-forecasting-workbench](projects/station-forecasting-workbench) for the forecasting data science lane
 - [projects/station-risk-classification-lab](projects/station-risk-classification-lab) for the classification data science lane
 - [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) for the GIS frontend prototype lane
@@ -41,12 +43,13 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 
 ## Portfolio Shape
 
-This repository is organized as one coherent engineering portfolio with twelve complementary lanes:
+This repository is organized as one coherent engineering portfolio with fourteen complementary lanes:
 
 - backend and GIS delivery
 - analytics and reporting
 - anomaly detection and operational triage
 - time-series analysis and trend review
+- flood forecasting and uncertainty review
 - forecasting and projection workbenches
 - classification and station risk triage
 - database modeling and warehouse design
@@ -54,6 +57,7 @@ This repository is organized as one coherent engineering portfolio with twelve c
 - open spatial services and publication planning
 - open web mapping and layer review
 - raster analysis and monitoring pipelines
+- satellite flood mapping and Earth Engine analysis
 - GIS frontend prototyping informed by Experience Builder patterns
 
 Each lane is implemented against the same environmental monitoring theme so the work reads as one body of practice instead of unrelated demos.
@@ -66,14 +70,16 @@ Start with the flagship backend project, then move outward by lane.
 2. [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics): analytics and reporting
 3. [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection): Python anomaly-detection workflow for ranking suspicious telemetry behavior and packaging alert-ready triage output
 4. [projects/environmental-time-series-lab](projects/environmental-time-series-lab): Python time-series analysis lab for rolling summaries, trend scoring, and temporal review artifacts
-5. [projects/station-forecasting-workbench](projects/station-forecasting-workbench): Python forecasting workbench for holdout evaluation and short-horizon station projections
-6. [projects/station-risk-classification-lab](projects/station-risk-classification-lab): Python classification lab for candidate risk models, holdout review, and explainable station-priority output
-7. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
-8. [projects/qgis-operations-workbench](projects/qgis-operations-workbench): Python-based desktop GIS workbench for route layouts, bookmarks, and analyst review packs
-9. [projects/postgis-service-blueprint](projects/postgis-service-blueprint): SQL and Python blueprint for PostGIS-backed collections, publication views, and open spatial service contracts
-10. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
-11. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
-12. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
+5. [projects/arroyo-flood-forecasting-lab](projects/arroyo-flood-forecasting-lab): Python flood-forecasting lab for wavelet denoising, autoregressive PMSE comparison, and Monte Carlo river-stage scenario review
+6. [projects/station-forecasting-workbench](projects/station-forecasting-workbench): Python forecasting workbench for holdout evaluation and short-horizon station projections
+7. [projects/station-risk-classification-lab](projects/station-risk-classification-lab): Python classification lab for candidate risk models, holdout review, and explainable station-priority output
+8. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
+9. [projects/qgis-operations-workbench](projects/qgis-operations-workbench): Python-based desktop GIS workbench for route layouts, bookmarks, and analyst review packs
+10. [projects/postgis-service-blueprint](projects/postgis-service-blueprint): SQL and Python blueprint for PostGIS-backed collections, publication views, and open spatial service contracts
+11. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
+12. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
+13. [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab): Google Earth Engine and Python inundation-mapping lab for Landsat-based flood frequency review and gauge-correlation summaries
+14. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
 
 ## Core Stack
 
@@ -90,6 +96,7 @@ Start with the flagship backend project, then move outward by lane.
 | [projects/environmental-monitoring-analytics](projects/environmental-monitoring-analytics) | Analytics | DuckDB-based reporting pipeline for alert rates, regional monitoring pressure, and markdown operations briefs. |
 | [projects/monitoring-anomaly-detection](projects/monitoring-anomaly-detection) | Data Science | Python anomaly-detection pipeline for ranking suspicious telemetry behavior and packaging triage-ready station alerts. |
 | [projects/environmental-time-series-lab](projects/environmental-time-series-lab) | Data Science | Python time-series analysis lab for rolling summaries, seasonality fingerprints, change-point candidates, and temporal monitoring review. |
+| [projects/arroyo-flood-forecasting-lab](projects/arroyo-flood-forecasting-lab) | Data Science | Python flood forecasting lab for wavelet denoising, autoregressive model comparison, holdout PMSE review, and Monte Carlo river-stage scenario bands. |
 | [projects/station-forecasting-workbench](projects/station-forecasting-workbench) | Data Science | Python forecasting workbench for trailing-baseline projections, holdout evaluation, and station-level review outputs. |
 | [projects/station-risk-classification-lab](projects/station-risk-classification-lab) | Data Science | Python classification lab for candidate risk-model comparison, explainable station triage, and holdout review output. |
 | [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) | Database Engineering | Warehouse-style schema design, dimensional modeling, SQL transformations, and repeatable data quality checks for monitoring data. |
@@ -97,6 +104,7 @@ Start with the flagship backend project, then move outward by lane.
 | [projects/postgis-service-blueprint](projects/postgis-service-blueprint) | Spatial Services | Open spatial service blueprint for PostGIS-backed collections, publication views, and delivery planning across FastAPI, PostgREST, or OGC API Features. |
 | [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard) | Web Mapping | React and TypeScript dashboard for open-stack layer review, map filtering, and a live MapLibre map surface. |
 | [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline) | Raster Analysis | Python pipeline for raster snapshot comparison, hotspot ranking, and downstream monitoring summaries. |
+| [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab) | Remote Sensing | Google Earth Engine and Python workflow for Landsat-based inundation-frequency mapping, QA masking, and gauge-correlation validation summaries. |
 | [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) | GIS Frontend | Public-safe React and TypeScript widget prototype inspired by ArcGIS Experience Builder patterns, with conceptual visuals and selection-driven station summaries. |
 
 ## Project Cards
@@ -128,6 +136,13 @@ Data science project focused on rolling summaries, trend labeling, and temporal 
 
 Demo asset: [projects/environmental-time-series-lab/assets/time-series-preview.svg](projects/environmental-time-series-lab/assets/time-series-preview.svg)
 Demo narrative: [projects/environmental-time-series-lab/docs/demo-storyboard.md](projects/environmental-time-series-lab/docs/demo-storyboard.md)
+
+### Arroyo Flood Forecasting Lab
+
+Data science project focused on wavelet-assisted river-stage forecasting, raw-versus-denoised PMSE comparison, and Monte Carlo flood scenario review.
+
+Demo asset: [projects/arroyo-flood-forecasting-lab/assets/flood-forecast-preview.svg](projects/arroyo-flood-forecasting-lab/assets/flood-forecast-preview.svg)
+Demo narrative: [projects/arroyo-flood-forecasting-lab/docs/demo-storyboard.md](projects/arroyo-flood-forecasting-lab/docs/demo-storyboard.md)
 
 ### Station Forecasting Workbench
 
@@ -177,6 +192,13 @@ Raster analysis project focused on comparing baseline and latest raster snapshot
 
 Demo asset: [projects/raster-monitoring-pipeline/assets/raster-preview.svg](projects/raster-monitoring-pipeline/assets/raster-preview.svg)
 Demo narrative: [projects/raster-monitoring-pipeline/docs/demo-storyboard.md](projects/raster-monitoring-pipeline/docs/demo-storyboard.md)
+
+### Gulf Coast Inundation Lab
+
+Remote sensing project focused on Landsat-based inundation-frequency mapping, Earth Engine export workflows, and gauge-validation summaries for Gulf Coast floodplain analysis.
+
+Demo asset: [projects/gulf-coast-inundation-lab/assets/gulf-coast-inundation-preview.svg](projects/gulf-coast-inundation-lab/assets/gulf-coast-inundation-preview.svg)
+Demo narrative: [projects/gulf-coast-inundation-lab/docs/demo-storyboard.md](projects/gulf-coast-inundation-lab/docs/demo-storyboard.md)
 
 ### Experience Builder Station Brief Widget
 

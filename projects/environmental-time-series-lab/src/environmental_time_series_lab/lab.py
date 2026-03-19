@@ -21,8 +21,71 @@ DEFAULT_LONG_WINDOW = 5
 DEFAULT_SEASON_LENGTH = 3
 
 
+@dataclass(slots=True)
+class StationHistory:
+    station_id: str
+    metric: str
+    values: list[float]
+
+
+@dataclass(slots=True)
+class SeriesDiagnostics:
+    station_id: str
+    metric: str
+    analysis_window: int
+    review_window: int
+    feature_profile: dict[str, float]
+    seasonality_profile: dict[str, Any]
+    change_point_candidate: dict[str, Any]
+    rolling_mean_short: list[float]
+    rolling_mean_long: list[float]
+    first_differences: list[float]
+    trend_value: float
+    trend_label: str
+    baseline_leaderboard: list[dict[str, Any]]
+    selected_baseline: str
+    selected_review_mae: float
+    review_actual: list[float]
+    review_prediction: list[float]
+    latest_value: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stationId": self.station_id,
+            "metric": self.metric,
+            "analysisWindow": self.analysis_window,
+            "reviewWindow": self.review_window,
+            "featureProfile": self.feature_profile,
+            "seasonalityProfile": self.seasonality_profile,
+            "changePointCandidate": self.change_point_candidate,
+            "rollingMeanShort": self.rolling_mean_short,
+            "rollingMeanLong": self.rolling_mean_long,
+            "firstDifferences": self.first_differences,
+            "trendValue": self.trend_value,
+            "trendLabel": self.trend_label,
+            "baselineLeaderboard": self.baseline_leaderboard,
+            "selectedBaseline": self.selected_baseline,
+            "selectedReviewMae": self.selected_review_mae,
+            "reviewActual": self.review_actual,
+            "reviewPrediction": self.review_prediction,
+            "latestValue": self.latest_value,
+        }
+
+
 def load_histories(path: Path) -> list[dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))["series"]
+
+
+def _load_station_histories(path: Path) -> list[StationHistory]:
+    raw_series = load_histories(path)
+    return [
+        StationHistory(
+            station_id=str(series["stationId"]),
+            metric=str(series["metric"]),
+            values=[float(value) for value in series["values"]],
+        )
+        for series in raw_series
+    ]
 
 
 def _mean(values: Sequence[float]) -> float:
@@ -175,65 +238,81 @@ class TimeSeriesLab(ReportWorkflow):
     def load_histories(self) -> list[dict[str, Any]]:
         return load_histories(self.data_path)
 
+    def load_station_histories(self) -> list[StationHistory]:
+        return _load_station_histories(self.data_path)
+
+    def _build_leaderboard(self, calibration: Sequence[float], review: Sequence[float]) -> list[dict[str, Any]]:
+        baseline_predictions = _candidate_review_predictions(calibration, self.review_window, self.season_length)
+        leaderboard = [
+            {
+                "baseline": baseline_name,
+                "reviewMae": _mae(review, predictions),
+                "reviewPrediction": predictions,
+            }
+            for baseline_name, predictions in baseline_predictions.items()
+        ]
+        leaderboard.sort(key=lambda candidate: (candidate["reviewMae"], candidate["baseline"]))
+        return leaderboard
+
+    def _build_series_diagnostics(self, series: StationHistory) -> SeriesDiagnostics:
+        values = series.values
+        if len(values) <= self.review_window:
+            raise ValueError("Each series must have more observations than the review window.")
+
+        calibration = values[:-self.review_window]
+        review = values[-self.review_window:]
+        feature_profile = _build_feature_profile(calibration, short_window=self.short_window, long_window=self.long_window)
+        seasonality_profile = _build_seasonality_profile(calibration, self.season_length)
+        change_point_candidate = _detect_change_point(calibration)
+        leaderboard = self._build_leaderboard(calibration, review)
+        selected_baseline = str(leaderboard[0]["baseline"])
+        total_change = round(values[-1] - values[0], 2)
+        trend_label = _trend_label(total_change)
+
+        return SeriesDiagnostics(
+            station_id=series.station_id,
+            metric=series.metric,
+            analysis_window=len(calibration),
+            review_window=len(review),
+            feature_profile=feature_profile,
+            seasonality_profile=seasonality_profile,
+            change_point_candidate=change_point_candidate,
+            rolling_mean_short=_rolling_mean(values, min(self.short_window, len(values))),
+            rolling_mean_long=_rolling_mean(values, min(self.long_window, len(values))),
+            first_differences=_first_differences(values),
+            trend_value=total_change,
+            trend_label=trend_label,
+            baseline_leaderboard=leaderboard,
+            selected_baseline=selected_baseline,
+            selected_review_mae=float(leaderboard[0]["reviewMae"]),
+            review_actual=list(review),
+            review_prediction=list(leaderboard[0]["reviewPrediction"]),
+            latest_value=values[-1],
+        )
+
+    def _build_summary(self, diagnostics: Sequence[SeriesDiagnostics]) -> dict[str, Any]:
+        winning_baselines: Counter[str] = Counter(item.selected_baseline for item in diagnostics)
+        trend_labels: Counter[str] = Counter(item.trend_label for item in diagnostics)
+        dominant_phases: Counter[str] = Counter(item.seasonality_profile["dominantPhase"] for item in diagnostics)
+        change_directions: Counter[str] = Counter(item.change_point_candidate["direction"] for item in diagnostics)
+
+        return {
+            "seriesCount": len(diagnostics),
+            "reviewWindow": self.review_window,
+            "shortWindow": self.short_window,
+            "longWindow": self.long_window,
+            "seasonLength": self.season_length,
+            "averageSelectedReviewMae": round(sum(item.selected_review_mae for item in diagnostics) / len(diagnostics), 2),
+            "averageSeasonalRange": round(sum(item.seasonality_profile["seasonalRange"] for item in diagnostics) / len(diagnostics), 2),
+            "trendLabels": dict(sorted(trend_labels.items())),
+            "dominantPhases": dict(sorted(dominant_phases.items())),
+            "changeDirections": dict(sorted(change_directions.items())),
+            "baselineWins": dict(sorted(winning_baselines.items())),
+        }
+
     def build_report(self) -> dict[str, Any]:
-        histories = self.load_histories()
-        summaries = []
-        winning_baselines: Counter[str] = Counter()
-        trend_labels: Counter[str] = Counter()
-        dominant_phases: Counter[str] = Counter()
-        change_directions: Counter[str] = Counter()
-
-        for series in histories:
-            values = [float(value) for value in series["values"]]
-            if len(values) <= self.review_window:
-                raise ValueError("Each series must have more observations than the review window.")
-
-            calibration = values[:-self.review_window]
-            review = values[-self.review_window:]
-            feature_profile = _build_feature_profile(calibration, short_window=self.short_window, long_window=self.long_window)
-            seasonality_profile = _build_seasonality_profile(calibration, self.season_length)
-            change_point_candidate = _detect_change_point(calibration)
-            baseline_predictions = _candidate_review_predictions(calibration, self.review_window, self.season_length)
-            leaderboard = [
-                {
-                    "baseline": baseline_name,
-                    "reviewMae": _mae(review, predictions),
-                    "reviewPrediction": predictions,
-                }
-                for baseline_name, predictions in baseline_predictions.items()
-            ]
-            leaderboard.sort(key=lambda candidate: (candidate["reviewMae"], candidate["baseline"]))
-            selected_baseline = leaderboard[0]["baseline"]
-            winning_baselines[selected_baseline] += 1
-            dominant_phases[seasonality_profile["dominantPhase"]] += 1
-            change_directions[change_point_candidate["direction"]] += 1
-
-            total_change = round(values[-1] - values[0], 2)
-            trend_label = _trend_label(total_change)
-            trend_labels[trend_label] += 1
-
-            summaries.append(
-                {
-                    "stationId": series["stationId"],
-                    "metric": series["metric"],
-                    "analysisWindow": len(calibration),
-                    "reviewWindow": len(review),
-                    "featureProfile": feature_profile,
-                    "seasonalityProfile": seasonality_profile,
-                    "changePointCandidate": change_point_candidate,
-                    "rollingMeanShort": _rolling_mean(values, min(self.short_window, len(values))),
-                    "rollingMeanLong": _rolling_mean(values, min(self.long_window, len(values))),
-                    "firstDifferences": _first_differences(values),
-                    "trendValue": total_change,
-                    "trendLabel": trend_label,
-                    "baselineLeaderboard": leaderboard,
-                    "selectedBaseline": selected_baseline,
-                    "selectedReviewMae": leaderboard[0]["reviewMae"],
-                    "reviewActual": review,
-                    "reviewPrediction": leaderboard[0]["reviewPrediction"],
-                    "latestValue": values[-1],
-                }
-            )
+        station_histories = self.load_station_histories()
+        diagnostics = [self._build_series_diagnostics(series) for series in station_histories]
 
         return {
             "reportName": self.report_name,
@@ -247,20 +326,8 @@ class TimeSeriesLab(ReportWorkflow):
                 "seasonLength": self.season_length,
                 "candidateBaselineCount": 5,
             },
-            "summary": {
-                "seriesCount": len(histories),
-                "reviewWindow": self.review_window,
-                "shortWindow": self.short_window,
-                "longWindow": self.long_window,
-                "seasonLength": self.season_length,
-                "averageSelectedReviewMae": round(sum(item["selectedReviewMae"] for item in summaries) / len(summaries), 2),
-                "averageSeasonalRange": round(sum(item["seasonalityProfile"]["seasonalRange"] for item in summaries) / len(summaries), 2),
-                "trendLabels": dict(sorted(trend_labels.items())),
-                "dominantPhases": dict(sorted(dominant_phases.items())),
-                "changeDirections": dict(sorted(change_directions.items())),
-                "baselineWins": dict(sorted(winning_baselines.items())),
-            },
-            "seriesDiagnostics": summaries,
+            "summary": self._build_summary(diagnostics),
+            "seriesDiagnostics": [item.to_dict() for item in diagnostics],
             "notes": [
                 "Designed as a public-safe temporal diagnostics workflow with split-based review windows and candidate baseline comparison.",
                 "The lab captures feature profiles, rolling summaries, seasonal fingerprints, and change-point candidates before handing off to forecasting or anomaly pipelines.",

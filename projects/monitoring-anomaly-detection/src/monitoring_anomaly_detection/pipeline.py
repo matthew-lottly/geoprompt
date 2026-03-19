@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
-from collections import Counter, defaultdict
 from pathlib import Path
 from statistics import mean, median, pstdev
 from typing import Any
@@ -26,20 +26,112 @@ DETECTOR_THRESHOLDS = {
 }
 
 
+@dataclass(slots=True)
+class ObservationRecord:
+    station_id: str
+    metric: str
+    timestamp: str
+    value: float
+    is_known_event: bool
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stationId": self.station_id,
+            "metric": self.metric,
+            "timestamp": self.timestamp,
+            "value": self.value,
+            "isKnownEvent": self.is_known_event,
+        }
+
+
+@dataclass(slots=True)
+class DetectorEvaluation:
+    detector: str
+    precision: float
+    recall: float
+    f1_score: float
+    alert_count: int
+    true_positives: int
+    false_positives: int
+    false_negatives: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "detector": self.detector,
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1Score": self.f1_score,
+            "alertCount": self.alert_count,
+            "truePositives": self.true_positives,
+            "falsePositives": self.false_positives,
+            "falseNegatives": self.false_negatives,
+        }
+
+
+@dataclass(slots=True)
+class ScoredEvent:
+    station_id: str
+    metric: str
+    timestamp: str
+    value: float
+    is_known_event: bool
+    scores: dict[str, float]
+    flags: dict[str, bool]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stationId": self.station_id,
+            "metric": self.metric,
+            "timestamp": self.timestamp,
+            "value": self.value,
+            "isKnownEvent": self.is_known_event,
+            "scores": self.scores,
+            "flags": self.flags,
+        }
+
+
+@dataclass(slots=True)
+class SelectedAlert:
+    station_id: str
+    metric: str
+    timestamp: str
+    value: float
+    is_known_event: bool
+    baseline_mean: float
+    selected_score: float
+    selected_detector: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stationId": self.station_id,
+            "metric": self.metric,
+            "timestamp": self.timestamp,
+            "value": self.value,
+            "isKnownEvent": self.is_known_event,
+            "baselineMean": self.baseline_mean,
+            "selectedScore": self.selected_score,
+            "selectedDetector": self.selected_detector,
+        }
+
+
 def load_observations(path: Path) -> list[dict[str, Any]]:
+    return [observation.to_dict() for observation in _load_observation_records(path)]
+
+
+def _load_observation_records(path: Path) -> list[ObservationRecord]:
     with path.open(encoding="utf-8", newline="") as file_handle:
         rows = list(csv.DictReader(file_handle))
     observations = [
-        {
-            "stationId": row["station_id"],
-            "metric": row["metric"],
-            "timestamp": row["timestamp"],
-            "value": float(row["value"]),
-            "isKnownEvent": row.get("is_known_event", "false").lower() == "true",
-        }
+        ObservationRecord(
+            station_id=row["station_id"],
+            metric=row["metric"],
+            timestamp=row["timestamp"],
+            value=float(row["value"]),
+            is_known_event=row.get("is_known_event", "false").lower() == "true",
+        )
         for row in rows
     ]
-    observations.sort(key=lambda observation: (observation["stationId"], observation["timestamp"]))
+    observations.sort(key=lambda observation: (observation.station_id, observation.timestamp))
     return observations
 
 
@@ -80,22 +172,22 @@ def _f1_score(precision: float, recall: float) -> float:
     return round(2 * precision * recall / (precision + recall), 2)
 
 
-def _evaluate_detector(events: list[dict[str, Any]], detector_name: str) -> dict[str, Any]:
-    true_positives = sum(event["isKnownEvent"] and event["flags"][detector_name] for event in events)
-    false_positives = sum((not event["isKnownEvent"]) and event["flags"][detector_name] for event in events)
-    false_negatives = sum(event["isKnownEvent"] and (not event["flags"][detector_name]) for event in events)
+def _evaluate_detector(events: list[ScoredEvent], detector_name: str) -> DetectorEvaluation:
+    true_positives = sum(event.is_known_event and event.flags[detector_name] for event in events)
+    false_positives = sum((not event.is_known_event) and event.flags[detector_name] for event in events)
+    false_negatives = sum(event.is_known_event and (not event.flags[detector_name]) for event in events)
     precision = round(true_positives / (true_positives + false_positives), 2) if true_positives + false_positives else 0.0
     recall = round(true_positives / (true_positives + false_negatives), 2) if true_positives + false_negatives else 0.0
-    return {
-        "detector": detector_name,
-        "precision": precision,
-        "recall": recall,
-        "f1Score": _f1_score(precision, recall),
-        "alertCount": sum(event["flags"][detector_name] for event in events),
-        "truePositives": true_positives,
-        "falsePositives": false_positives,
-        "falseNegatives": false_negatives,
-    }
+    return DetectorEvaluation(
+        detector=detector_name,
+        precision=precision,
+        recall=recall,
+        f1_score=_f1_score(precision, recall),
+        alert_count=sum(event.flags[detector_name] for event in events),
+        true_positives=true_positives,
+        false_positives=false_positives,
+        false_negatives=false_negatives,
+    )
 
 
 @dataclass(slots=True)
@@ -113,14 +205,21 @@ class AnomalyDetectionWorkflow(ReportWorkflow):
     def load_observations(self) -> list[dict[str, Any]]:
         return load_observations(self.data_path)
 
-    def build_report(self) -> dict[str, Any]:
-        observations = self.load_observations()
+    def load_observation_records(self) -> list[ObservationRecord]:
+        return _load_observation_records(self.data_path)
+
+    def _build_station_histories(
+        self, observations: list[ObservationRecord]
+    ) -> tuple[dict[str, list[ObservationRecord]], dict[str, list[float]]]:
+        station_histories: dict[str, list[ObservationRecord]] = defaultdict(list)
         grouped_values: dict[str, list[float]] = defaultdict(list)
-
         for observation in observations:
-            grouped_values[observation["stationId"]].append(observation["value"])
+            station_histories[observation.station_id].append(observation)
+            grouped_values[observation.station_id].append(observation.value)
+        return station_histories, grouped_values
 
-        baselines = {
+    def _build_baselines(self, grouped_values: dict[str, list[float]]) -> dict[str, dict[str, float]]:
+        return {
             station_id: {
                 "mean": round(mean(values), 2),
                 "stddev": round(_safe_stddev(values), 2),
@@ -128,64 +227,78 @@ class AnomalyDetectionWorkflow(ReportWorkflow):
             for station_id, values in grouped_values.items()
         }
 
-        scored_events: list[dict[str, Any]] = []
-        selected_alerts: list[dict[str, Any]] = []
-        station_alert_counts: dict[str, int] = defaultdict(int)
-        detector_wins: Counter[str] = Counter()
-
-        station_histories: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for observation in observations:
-            station_histories[observation["stationId"]].append(observation)
-
+    def _build_scored_events(self, station_histories: dict[str, list[ObservationRecord]]) -> list[ScoredEvent]:
+        scored_events: list[ScoredEvent] = []
         for station_id, station_observations in station_histories.items():
             for index, observation in enumerate(station_observations):
                 if index < self.warmup_window:
                     continue
-                history_values = [item["value"] for item in station_observations[:index]]
+                history_values = [item.value for item in station_observations[:index]]
                 scores = {
                     detector: round(score, 2)
-                    for detector, score in _detector_scores(history_values, observation["value"], self.warmup_window).items()
+                    for detector, score in _detector_scores(history_values, observation.value, self.warmup_window).items()
                 }
                 flags = {
                     detector: score >= DETECTOR_THRESHOLDS[detector]
                     for detector, score in scores.items()
                 }
                 scored_events.append(
-                    {
-                        "stationId": station_id,
-                        "metric": observation["metric"],
-                        "timestamp": observation["timestamp"],
-                        "value": observation["value"],
-                        "isKnownEvent": observation["isKnownEvent"],
-                        "scores": scores,
-                        "flags": flags,
-                    }
+                    ScoredEvent(
+                        station_id=station_id,
+                        metric=observation.metric,
+                        timestamp=observation.timestamp,
+                        value=observation.value,
+                        is_known_event=observation.is_known_event,
+                        scores=scores,
+                        flags=flags,
+                    )
                 )
+        return scored_events
 
-        detector_leaderboard = [_evaluate_detector(scored_events, detector) for detector in DETECTOR_THRESHOLDS]
-        detector_leaderboard.sort(key=lambda detector: (-detector["f1Score"], -detector["precision"], detector["detector"]))
-        selected_detector = detector_leaderboard[0]["detector"]
-        detector_wins[selected_detector] += 1
+    def _build_detector_leaderboard(self, scored_events: list[ScoredEvent]) -> list[DetectorEvaluation]:
+        leaderboard = [_evaluate_detector(scored_events, detector) for detector in DETECTOR_THRESHOLDS]
+        leaderboard.sort(key=lambda detector: (-detector.f1_score, -detector.precision, detector.detector))
+        return leaderboard
 
+    def _build_selected_alerts(
+        self,
+        scored_events: list[ScoredEvent],
+        selected_detector: str,
+        baselines: dict[str, dict[str, float]],
+    ) -> tuple[list[SelectedAlert], dict[str, int]]:
+        selected_alerts: list[SelectedAlert] = []
+        station_alert_counts: dict[str, int] = defaultdict(int)
         for event in scored_events:
-            if event["flags"][selected_detector]:
-                baseline = baselines[event["stationId"]]
-                selected_alerts.append(
-                    {
-                        "stationId": event["stationId"],
-                        "metric": event["metric"],
-                        "timestamp": event["timestamp"],
-                        "value": event["value"],
-                        "isKnownEvent": event["isKnownEvent"],
-                        "baselineMean": baseline["mean"],
-                        "selectedScore": event["scores"][selected_detector],
-                        "selectedDetector": selected_detector,
-                    }
+            if not event.flags[selected_detector]:
+                continue
+            baseline = baselines[event.station_id]
+            selected_alerts.append(
+                SelectedAlert(
+                    station_id=event.station_id,
+                    metric=event.metric,
+                    timestamp=event.timestamp,
+                    value=event.value,
+                    is_known_event=event.is_known_event,
+                    baseline_mean=baseline["mean"],
+                    selected_score=event.scores[selected_detector],
+                    selected_detector=selected_detector,
                 )
-                station_alert_counts[event["stationId"]] += 1
+            )
+            station_alert_counts[event.station_id] += 1
+        return selected_alerts, dict(sorted(station_alert_counts.items()))
 
-        scored_events.sort(key=lambda event: event["scores"][selected_detector], reverse=True)
-        selected_alerts.sort(key=lambda alert: alert["selectedScore"], reverse=True)
+    def build_report(self) -> dict[str, Any]:
+        observations = self.load_observation_records()
+        station_histories, grouped_values = self._build_station_histories(observations)
+        baselines = self._build_baselines(grouped_values)
+        scored_events = self._build_scored_events(station_histories)
+        detector_leaderboard = self._build_detector_leaderboard(scored_events)
+        selected_detector = detector_leaderboard[0].detector
+        selected_alerts, station_alert_counts = self._build_selected_alerts(scored_events, selected_detector, baselines)
+        detector_wins: Counter[str] = Counter()
+        detector_wins[selected_detector] += 1
+        scored_events.sort(key=lambda event: event.scores[selected_detector], reverse=True)
+        selected_alerts.sort(key=lambda alert: alert.selected_score, reverse=True)
 
         return {
             "reportName": self.report_name,
@@ -201,17 +314,17 @@ class AnomalyDetectionWorkflow(ReportWorkflow):
                 "observationCount": len(observations),
                 "stationCount": len(grouped_values),
                 "scoredEventCount": len(scored_events),
-                "knownEventCount": sum(observation["isKnownEvent"] for observation in observations),
+                "knownEventCount": sum(observation.is_known_event for observation in observations),
                 "selectedAlertCount": len(selected_alerts),
                 "selectedDetector": selected_detector,
-                "selectedDetectorF1": detector_leaderboard[0]["f1Score"],
+                "selectedDetectorF1": detector_leaderboard[0].f1_score,
                 "detectorWins": dict(detector_wins),
             },
             "stationBaselines": baselines,
-            "detectorLeaderboard": detector_leaderboard,
-            "rankedEvents": scored_events,
-            "selectedAlerts": selected_alerts,
-            "stationAlertCounts": dict(sorted(station_alert_counts.items())),
+            "detectorLeaderboard": [detector.to_dict() for detector in detector_leaderboard],
+            "rankedEvents": [event.to_dict() for event in scored_events],
+            "selectedAlerts": [alert.to_dict() for alert in selected_alerts],
+            "stationAlertCounts": station_alert_counts,
             "notes": [
                 "Designed as a public-safe anomaly-detection workflow with detector comparison and experiment-style metadata.",
                 "The selected detector is chosen by labeled-event F1 rather than a single hard-coded scoring rule.",
