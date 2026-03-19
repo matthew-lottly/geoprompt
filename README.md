@@ -15,6 +15,7 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 - [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) for the database-engineering lane
 - [projects/qgis-operations-workbench](projects/qgis-operations-workbench) for the desktop GIS and QGIS workflow lane
 - [projects/postgis-service-blueprint](projects/postgis-service-blueprint) for the open spatial services lane
+- [projects/geoprompt](projects/geoprompt) for the custom spatial package lane
 - [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard) for the open web mapping lane
 - [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline) for the raster analysis and monitoring lane
 - [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab) for the Google Earth Engine inundation mapping lane
@@ -43,7 +44,7 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 
 ## Portfolio Shape
 
-This repository is organized as one coherent engineering portfolio with fourteen complementary lanes:
+This repository is organized as one coherent engineering portfolio with fifteen complementary lanes:
 
 - backend and GIS delivery
 - analytics and reporting
@@ -55,6 +56,7 @@ This repository is organized as one coherent engineering portfolio with fourteen
 - database modeling and warehouse design
 - desktop GIS and QGIS-oriented operations workflows
 - open spatial services and publication planning
+- custom spatial package and library design
 - open web mapping and layer review
 - raster analysis and monitoring pipelines
 - satellite flood mapping and Earth Engine analysis
@@ -76,10 +78,11 @@ Start with the flagship backend project, then move outward by lane.
 8. [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse): database engineering and warehouse modeling
 9. [projects/qgis-operations-workbench](projects/qgis-operations-workbench): Python-based desktop GIS workbench for route layouts, bookmarks, and analyst review packs
 10. [projects/postgis-service-blueprint](projects/postgis-service-blueprint): SQL and Python blueprint for PostGIS-backed collections, publication views, and open spatial service contracts
-11. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
-12. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
-13. [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab): Google Earth Engine and Python inundation-mapping lab for Landsat-based flood frequency review and gauge-correlation summaries
-14. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
+11. [projects/geoprompt](projects/geoprompt): custom Python spatial package with a GeoPandas-style frame object and reusable GeoPrompt equations
+12. [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard): React and TypeScript open web map dashboard with a live MapLibre surface for operational layer review and filtering
+13. [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline): Python raster change-detection pipeline for hotspot review, tile planning, and monitoring summaries
+14. [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab): Google Earth Engine and Python inundation-mapping lab for Landsat-based flood frequency review and gauge-correlation summaries
+15. [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget): React and TypeScript GIS widget prototype inspired by Experience Builder interaction patterns
 
 ## Core Stack
 
@@ -102,6 +105,7 @@ Start with the flagship backend project, then move outward by lane.
 | [projects/monitoring-data-warehouse](projects/monitoring-data-warehouse) | Database Engineering | Warehouse-style schema design, dimensional modeling, SQL transformations, and repeatable data quality checks for monitoring data. |
 | [projects/qgis-operations-workbench](projects/qgis-operations-workbench) | Desktop GIS | Python-driven desktop GIS review pack builder for QGIS-oriented bookmarks, route layouts, and analyst task preparation. |
 | [projects/postgis-service-blueprint](projects/postgis-service-blueprint) | Spatial Services | Open spatial service blueprint for PostGIS-backed collections, publication views, and delivery planning across FastAPI, PostgREST, or OGC API Features. |
+| [projects/geoprompt](projects/geoprompt) | Package Design | Custom Python spatial package with a GeoPandas-style frame, mixed-geometry helpers, and reusable GeoPrompt equations for influence, corridor, and area scoring. |
 | [projects/open-web-map-operations-dashboard](projects/open-web-map-operations-dashboard) | Web Mapping | React and TypeScript dashboard for open-stack layer review, map filtering, and a live MapLibre map surface. |
 | [projects/raster-monitoring-pipeline](projects/raster-monitoring-pipeline) | Raster Analysis | Python pipeline for raster snapshot comparison, hotspot ranking, and downstream monitoring summaries. |
 | [projects/gulf-coast-inundation-lab](projects/gulf-coast-inundation-lab) | Remote Sensing | Google Earth Engine and Python workflow for Landsat-based inundation-frequency mapping, QA masking, and gauge-correlation validation summaries. |
@@ -181,11 +185,18 @@ Open-stack spatial services project focused on separating source tables from pub
 Demo asset: [projects/postgis-service-blueprint/assets/published-service-footprint-live.png](projects/postgis-service-blueprint/assets/published-service-footprint-live.png)
 Demo narrative: [projects/postgis-service-blueprint/docs/demo-storyboard.md](projects/postgis-service-blueprint/docs/demo-storyboard.md)
 
+### Geoprompt
+
+Spatial package project focused on building a reusable Python analysis library with a GeoPandas-style frame object, mixed-geometry support, and custom GeoPrompt equations for influence, corridor, and area scoring.
+
+Demo asset: [projects/geoprompt/assets/neighborhood-pressure-review-live.png](projects/geoprompt/assets/neighborhood-pressure-review-live.png)
+Demo narrative: [projects/geoprompt/docs/demo-storyboard.md](projects/geoprompt/docs/demo-storyboard.md)
+
 ### Open Web Map Operations Dashboard
 
 Open web mapping project focused on layer review, region/status filtering, and a live MapLibre client that can grow into a fuller operational map application.
 
-Live review output: run the local dashboard and use the active browser surface until a committed screenshot or GIF is added.
+Demo asset: [projects/open-web-map-operations-dashboard/assets/dashboard-live-screenshot.png](projects/open-web-map-operations-dashboard/assets/dashboard-live-screenshot.png)
 Site map: [projects/open-web-map-operations-dashboard/docs/site-map.md](projects/open-web-map-operations-dashboard/docs/site-map.md)
 Demo narrative: [projects/open-web-map-operations-dashboard/docs/demo-storyboard.md](projects/open-web-map-operations-dashboard/docs/demo-storyboard.md)
 

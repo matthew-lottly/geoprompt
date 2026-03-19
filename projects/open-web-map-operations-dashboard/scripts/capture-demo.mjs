@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import net from "node:net";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
@@ -10,9 +11,28 @@ import { chromium } from "playwright";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const previewUrl = "http://127.0.0.1:4173";
 const outputPath = path.join(repoRoot, "assets", "dashboard-live-screenshot.png");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
+
+
+function getAvailablePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+
+    server.unref();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+
+      if (!address || typeof address === "string") {
+        server.close(() => reject(new Error("Could not determine preview port.")));
+        return;
+      }
+
+      server.close(() => resolve(address.port));
+    });
+  });
+}
 
 
 function runCommand(args) {
@@ -37,8 +57,8 @@ function runCommand(args) {
 }
 
 
-function startPreviewServer() {
-  return spawn(`${npmCommand} run preview -- --host 127.0.0.1 --port 4173`, [], {
+function startPreviewServer(port) {
+  return spawn(`${npmCommand} run preview -- --host 127.0.0.1 --port ${port} --strictPort`, [], {
     cwd: repoRoot,
     stdio: "pipe",
     shell: true,
@@ -46,7 +66,7 @@ function startPreviewServer() {
 }
 
 
-async function waitForPreview() {
+async function waitForPreview(previewUrl) {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
       const response = await fetch(previewUrl);
@@ -60,11 +80,11 @@ async function waitForPreview() {
     await delay(1000);
   }
 
-  throw new Error("Preview server did not become available at http://127.0.0.1:4173.");
+  throw new Error(`Preview server did not become available at ${previewUrl}.`);
 }
 
 
-async function captureScreenshot() {
+async function captureScreenshot(previewUrl) {
   const browser = await chromium.launch({ headless: true });
 
   try {
@@ -88,7 +108,10 @@ async function captureScreenshot() {
 async function main() {
   await runCommand(["run", "build"]);
 
-  const previewServer = startPreviewServer();
+  const port = await getAvailablePort();
+  const previewUrl = `http://127.0.0.1:${port}`;
+
+  const previewServer = startPreviewServer(port);
 
   previewServer.stdout.on("data", (chunk) => {
     process.stdout.write(chunk);
@@ -99,8 +122,8 @@ async function main() {
   });
 
   try {
-    await waitForPreview();
-    await captureScreenshot();
+    await waitForPreview(previewUrl);
+    await captureScreenshot(previewUrl);
   } finally {
     previewServer.kill();
   }

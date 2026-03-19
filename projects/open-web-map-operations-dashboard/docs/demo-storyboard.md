@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference artifact: a real application screenshot or short screen capture from the running dashboard.
+Reference artifact: `assets/dashboard-live-screenshot.png`, generated from the running dashboard with `npm run capture:demo`.
 
 ## 1. Frame the use case
 
@@ -14,7 +14,7 @@ Switch between regions and layer statuses to show how the operational layer list
 
 Point out that the current map is already a live MapLibre surface backed by checked-in data and OpenStreetMap raster tiles.
 
-If no committed screenshot or GIF is present yet, use the running dashboard itself as the reviewer artifact instead of adding placeholder art.
+If the interface changes, refresh the screenshot with `npm run capture:demo` or capture a short GIF from the same filter sequence.
 
 ## 4. Explain the stack progression
 

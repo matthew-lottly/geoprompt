@@ -1,0 +1,390 @@
+{
+  "package": "geoprompt",
+  "comparison": {
+    "output_dir": "D:\\GitHub\\projects\\geoprompt\\outputs",
+    "tolerance": 1e-08,
+    "engines": [
+      "geoprompt",
+      "shapely",
+      "geopandas"
+    ],
+    "corpus": [
+      "sample",
+      "benchmark"
+    ],
+    "notes": [
+      "Planar metric comparisons use raw coordinate space so Geoprompt matches Shapely and GeoPandas defaults.",
+      "Geographic haversine distance is a separate Geoprompt mode and is not directly compared to Shapely or GeoPandas here.",
+      "Projection comparisons use EPSG:3857 as a common reference target."
+    ]
+  },
+  "summary": {
+    "all_bounds_match": true,
+    "all_nearest_neighbor_match": true,
+    "all_bounds_query_match": true,
+    "all_geometry_metrics_within_tolerance": true,
+    "all_projected_bounds_match": true,
+    "all_clip_matches": true,
+    "all_spatial_joins_match": true
+  },
+  "datasets": [
+    {
+      "dataset": "sample",
+      "input_path": "D:\\GitHub\\projects\\geoprompt\\data\\sample_features.json",
+      "join_path": null,
+      "crs": "EPSG:4326",
+      "correctness": {
+        "bounds_match": true,
+        "nearest_neighbor_match": true,
+        "bounds_query_match": true,
+        "geometry_metrics_within_tolerance": true,
+        "projected_bounds_match": true,
+        "geometry_comparison": [
+          {
+            "site_id": "north-hub-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "central-yard-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "west-corridor-line",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "south-corridor-line",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "east-service-zone",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 8.970116316397991e-13,
+            "centroid_x_delta": 4.1331418287882116e-09,
+            "centroid_y_delta": 1.5011423215582909e-09
+          },
+          {
+            "site_id": "central-service-zone",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 8.947721036323131e-13,
+            "centroid_x_delta": 3.7087346527187037e-09,
+            "centroid_y_delta": 1.3502656770469912e-09
+          }
+        ],
+        "clip": null,
+        "spatial_join": null
+      },
+      "benchmarks": [
+        {
+          "operation": "sample.geoprompt.geometry_metrics",
+          "median_seconds": 3.1050003599375486e-05,
+          "min_seconds": 3.0399998649954796e-05,
+          "max_seconds": 0.00042829994345083833,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.reference.geometry_metrics",
+          "median_seconds": 0.00042344999383203685,
+          "min_seconds": 0.0003227999550290406,
+          "max_seconds": 0.0011332000140100718,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.geoprompt.nearest_neighbors",
+          "median_seconds": 0.0002461500116623938,
+          "min_seconds": 0.00015769997844472528,
+          "max_seconds": 0.00035560003016144037,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.reference.nearest_neighbors",
+          "median_seconds": 0.0002724499790929258,
+          "min_seconds": 0.0002626000205054879,
+          "max_seconds": 0.007220199971925467,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.geoprompt.query_bounds",
+          "median_seconds": 2.020000829361379e-05,
+          "min_seconds": 1.9499973859637976e-05,
+          "max_seconds": 5.329999839887023e-05,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.reference.query_bounds",
+          "median_seconds": 0.0013496500032488257,
+          "min_seconds": 0.0007918000337667763,
+          "max_seconds": 0.004314699966926128,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.geoprompt.to_crs",
+          "median_seconds": 0.000994150002952665,
+          "min_seconds": 0.0007401999901048839,
+          "max_seconds": 0.006677300028968602,
+          "repeats": 20
+        },
+        {
+          "operation": "sample.reference.to_crs",
+          "median_seconds": 0.001577749993884936,
+          "min_seconds": 0.0009805000154301524,
+          "max_seconds": 0.005958500027190894,
+          "repeats": 20
+        }
+      ]
+    },
+    {
+      "dataset": "benchmark",
+      "input_path": "D:\\GitHub\\projects\\geoprompt\\data\\benchmark_features.json",
+      "join_path": "D:\\GitHub\\projects\\geoprompt\\data\\benchmark_regions.json",
+      "crs": "EPSG:4326",
+      "correctness": {
+        "bounds_match": true,
+        "nearest_neighbor_match": true,
+        "bounds_query_match": true,
+        "geometry_metrics_within_tolerance": true,
+        "projected_bounds_match": true,
+        "geometry_comparison": [
+          {
+            "site_id": "alpha-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "beta-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "gamma-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "delta-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "north-connector-line",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "west-spine-line",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "south-arc-line",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "north-campus-zone",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 4.00604029116014e-13,
+            "centroid_x_delta": 5.982656148262322e-09,
+            "centroid_y_delta": 2.17626450194075e-09
+          },
+          {
+            "site_id": "east-campus-zone",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 5.997147223268939e-13,
+            "centroid_x_delta": 5.326313612386002e-09,
+            "centroid_y_delta": 1.9407977447372105e-09
+          },
+          {
+            "site_id": "central-overlap-zone",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 2.1273087458251183e-13,
+            "centroid_x_delta": 1.2341985211605788e-09,
+            "centroid_y_delta": 4.532125785772223e-10
+          },
+          {
+            "site_id": "remote-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          }
+        ],
+        "clip": {
+          "feature_count_match": true,
+          "geoprompt_feature_count": 10,
+          "reference_feature_count": 10
+        },
+        "spatial_join": {
+          "pair_match": true,
+          "geoprompt_pairs": [
+            "northeast-sector->beta-point",
+            "northeast-sector->central-overlap-zone",
+            "northeast-sector->east-campus-zone",
+            "northeast-sector->north-connector-line",
+            "northwest-sector->alpha-point",
+            "northwest-sector->central-overlap-zone",
+            "northwest-sector->north-campus-zone",
+            "northwest-sector->north-connector-line",
+            "northwest-sector->west-spine-line",
+            "southeast-sector->central-overlap-zone",
+            "southeast-sector->delta-point",
+            "southeast-sector->east-campus-zone",
+            "southeast-sector->south-arc-line",
+            "southwest-sector->central-overlap-zone",
+            "southwest-sector->gamma-point",
+            "southwest-sector->south-arc-line",
+            "southwest-sector->west-spine-line"
+          ],
+          "reference_pairs": [
+            "northeast-sector->beta-point",
+            "northeast-sector->central-overlap-zone",
+            "northeast-sector->east-campus-zone",
+            "northeast-sector->north-connector-line",
+            "northwest-sector->alpha-point",
+            "northwest-sector->central-overlap-zone",
+            "northwest-sector->north-campus-zone",
+            "northwest-sector->north-connector-line",
+            "northwest-sector->west-spine-line",
+            "southeast-sector->central-overlap-zone",
+            "southeast-sector->delta-point",
+            "southeast-sector->east-campus-zone",
+            "southeast-sector->south-arc-line",
+            "southwest-sector->central-overlap-zone",
+            "southwest-sector->gamma-point",
+            "southwest-sector->south-arc-line",
+            "southwest-sector->west-spine-line"
+          ]
+        }
+      },
+      "benchmarks": [
+        {
+          "operation": "benchmark.geoprompt.geometry_metrics",
+          "median_seconds": 5.060000694356859e-05,
+          "min_seconds": 4.7099951189011335e-05,
+          "max_seconds": 0.00011809996794909239,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.geometry_metrics",
+          "median_seconds": 0.00043700000969693065,
+          "min_seconds": 0.0002541999565437436,
+          "max_seconds": 0.0015769999590702355,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.geoprompt.nearest_neighbors",
+          "median_seconds": 0.0008518500253558159,
+          "min_seconds": 0.0004934999742545187,
+          "max_seconds": 0.007364200020674616,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.nearest_neighbors",
+          "median_seconds": 0.001805449981475249,
+          "min_seconds": 0.0013274999801069498,
+          "max_seconds": 0.006593700032681227,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.geoprompt.query_bounds",
+          "median_seconds": 8.779999916441739e-05,
+          "min_seconds": 7.899996126070619e-05,
+          "max_seconds": 0.00023229996440932155,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.query_bounds",
+          "median_seconds": 0.000838999985717237,
+          "min_seconds": 0.0006215999601408839,
+          "max_seconds": 0.0035841999924741685,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.geoprompt.to_crs",
+          "median_seconds": 0.0013425999786704779,
+          "min_seconds": 0.0009224000386893749,
+          "max_seconds": 0.0041387000237591565,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.to_crs",
+          "median_seconds": 0.001185000000987202,
+          "min_seconds": 0.0008546999888494611,
+          "max_seconds": 0.003283000027295202,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.geoprompt.spatial_join",
+          "median_seconds": 0.0012741000100504607,
+          "min_seconds": 0.0011137000401504338,
+          "max_seconds": 0.004291699966415763,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.spatial_join",
+          "median_seconds": 0.000278150022495538,
+          "min_seconds": 0.0002767000114545226,
+          "max_seconds": 0.00036589999217540026,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.geoprompt.clip",
+          "median_seconds": 0.0016570499865338206,
+          "min_seconds": 0.0014457999495789409,
+          "max_seconds": 0.004967599990777671,
+          "repeats": 20
+        },
+        {
+          "operation": "benchmark.reference.clip",
+          "median_seconds": 0.000680199998896569,
+          "min_seconds": 0.0006336999940685928,
+          "max_seconds": 0.002100299985613674,
+          "repeats": 20
+        }
+      ]
+    }
+  ]
+}

@@ -2,6 +2,8 @@
 
 Open-stack GIS frontend project for reviewing operational layers, regional filters, and map-driven status patterns without relying on vendor-specific UI framing.
 
+![Browser screenshot of the open web map operations dashboard](assets/dashboard-live-screenshot.png)
+
 ## Snapshot
 
 - Lane: Open web mapping
@@ -28,6 +30,10 @@ The current implementation is public-safe and intentionally self-contained. It u
 open-web-map-operations-dashboard/
 |-- data/
 |   `-- dashboard_layers.json
+|-- assets/
+|   `-- dashboard-live-screenshot.png
+|-- scripts/
+|   `-- capture-demo.mjs
 |-- src/
 |   |-- App.tsx
 |   |-- main.tsx
@@ -66,6 +72,12 @@ Build the app:
 npm run build
 ```
 
+Refresh the committed screenshot:
+
+```bash
+npm run capture:demo
+```
+
 ## Current Output
 
 The current dashboard includes:
@@ -75,15 +87,17 @@ The current dashboard includes:
 - operational layer counts and feature totals
 - a GeoJSON overlay generated from the checked-in layer metadata
 - a local browser-ready demo surface available through `npm run dev`
+- a committed browser screenshot in `assets/dashboard-live-screenshot.png`
 
-This repo does not include a committed static screenshot yet. Until a real browser capture is added, the live dashboard output is the intended review artifact.
+The screenshot is captured from the local Vite preview with `npm run capture:demo`. If the UI changes, regenerate the asset instead of replacing it with mock illustration art.
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.
 See [docs/site-map.md](docs/site-map.md) for the interface map.
 
-Primary demo asset type: live dashboard surface.
-Preferred committed asset type when captured: browser screenshot or GIF.
+Primary demo asset type: browser screenshot.
+Secondary review surface: live dashboard run locally with `npm run dev`.
+Preferred second asset type when captured: short GIF of the filter-to-map workflow.
 
 ## Publication
 
