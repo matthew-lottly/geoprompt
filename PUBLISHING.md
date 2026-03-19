@@ -34,7 +34,8 @@
 4. Run `python -m build`.
 5. Run `python -m twine check dist/*`.
 6. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
-7. Tag the release and publish to PyPI.
+7. Confirm the PyPI Trusted Publisher is linked to `.github/workflows/publish-pypi.yml` in the `geoprompt` GitHub repository.
+8. Push a version tag such as `v0.1.0` to trigger the publish workflow, or run the workflow manually from GitHub Actions.
 
 ## PyPI Commands
 
@@ -43,6 +44,25 @@ python -m pip install --upgrade build twine
 python -m build
 python -m twine check dist/*
 python -m twine upload dist/*
+```
+
+## GitHub Actions Publish Flow
+
+The standalone repository includes `.github/workflows/publish-pypi.yml`.
+
+Use this flow when PyPI Trusted Publishing is connected to GitHub:
+
+1. Ensure the Trusted Publisher entry in PyPI points at the `matthew-lottly/geoprompt` repository.
+2. Set the workflow file to `.github/workflows/publish-pypi.yml`.
+3. Set the environment name to `pypi` if PyPI asks for it.
+4. Push a tag such as `v0.1.0`.
+5. Watch the `Publish To PyPI` workflow in GitHub Actions.
+
+Example tag commands:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
 
 ## First Public Polish Pass
