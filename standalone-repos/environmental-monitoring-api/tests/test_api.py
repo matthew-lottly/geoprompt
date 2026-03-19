@@ -2,6 +2,8 @@
 
 # pyright: reportMissingImports=false
 
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,7 +15,7 @@ client = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
-def reset_repository_cache() -> None:
+def reset_repository_cache() -> Generator[None, None, None]:
     get_repository.cache_clear()
     yield
     get_repository.cache_clear()

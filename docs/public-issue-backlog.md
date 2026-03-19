@@ -4,11 +4,21 @@ This file tracks the initial public issue backlog created across the standalone 
 
 ## Recommended Delivery Order
 
-No open public backlog items remain from the current issue wave.
+1. environmental-monitoring-api#7
+2. environmental-monitoring-api#8
+3. monitoring-data-warehouse#7
+4. experience-builder-station-brief-widget#7
+5. environmental-monitoring-analytics#7
+6. environmental-monitoring-analytics#8
+7. experience-builder-station-brief-widget#8
+8. monitoring-data-warehouse#8
 
 This order keeps the flagship backend moving first, then deepens the analytics story, then adds richer widget interactions, and finally expands warehouse engineering discipline.
 
 ## environmental-monitoring-api
+
+- [#7 Add observation export endpoint for analysts](https://github.com/matthew-lottly/environmental-monitoring-api/issues/7)
+- [#8 Add bounding-box filters for map-driven queries](https://github.com/matthew-lottly/environmental-monitoring-api/issues/8)
 
 Completed recently:
 
@@ -19,6 +29,9 @@ Completed recently:
 
 ## environmental-monitoring-analytics
 
+- [#7 Add anomaly detection for outlier observations](https://github.com/matthew-lottly/environmental-monitoring-analytics/issues/7)
+- [#8 Use API threshold metadata in report classification](https://github.com/matthew-lottly/environmental-monitoring-analytics/issues/8)
+
 Completed recently:
 
 - [#1 Add time-window trend analysis to the operations brief](https://github.com/matthew-lottly/environmental-monitoring-analytics/issues/1)
@@ -28,6 +41,9 @@ Completed recently:
 
 ## monitoring-data-warehouse
 
+- [#7 Add freshness and completeness SLA validators](https://github.com/matthew-lottly/monitoring-data-warehouse/issues/7)
+- [#8 Export contract results as CI-friendly artifacts](https://github.com/matthew-lottly/monitoring-data-warehouse/issues/8)
+
 Completed recently:
 
 - [#1 Add a slowly changing dimension example for station attributes](https://github.com/matthew-lottly/monitoring-data-warehouse/issues/1)
@@ -36,6 +52,9 @@ Completed recently:
 - [#6 Add data contract checks for warehouse quality gates](https://github.com/matthew-lottly/monitoring-data-warehouse/issues/6)
 
 ## experience-builder-station-brief-widget
+
+- [#7 Connect widget to the live monitoring API](https://github.com/matthew-lottly/experience-builder-station-brief-widget/issues/7)
+- [#8 Add side-by-side station comparison mode](https://github.com/matthew-lottly/experience-builder-station-brief-widget/issues/8)
 
 Completed recently:
 
@@ -52,5 +71,6 @@ Completed recently:
 - The analytics lane now ships rolling recent-vs-previous window trend analysis, parameterized date-window comparisons, category-level deep dives in markdown and HTML output, and API-derived snapshot input support. Issues `environmental-monitoring-analytics#1`, `environmental-monitoring-analytics#2`, `environmental-monitoring-analytics#5`, and `environmental-monitoring-analytics#6` are closed.
 - The widget lane now persists mock configuration across reloads, includes an interaction walkthrough asset, supports persistent multi-select status filters, and ships a station observation history modal. Issues `experience-builder-station-brief-widget#1`, `experience-builder-station-brief-widget#2`, `experience-builder-station-brief-widget#5`, and `experience-builder-station-brief-widget#6` are closed.
 - The warehouse lane now includes a Type 2 station-attribute history example, concrete PostgreSQL migration notes, dbt-style model metadata, and manifest-driven contract checks. Issues `monitoring-data-warehouse#1`, `monitoring-data-warehouse#2`, `monitoring-data-warehouse#5`, and `monitoring-data-warehouse#6` are closed.
-- The second backlog wave is complete across all four standalone repos.
+- A third backlog wave is now open across all four standalone repos, focused on API data egress and map-driven filtering, live widget integration, statistical analytics, and warehouse SLA automation.
+- The real standalone widget checkout now lives at `standalone-checkouts/experience-builder-station-brief-widget` because `standalone-repos/experience-builder-station-brief-widget` is a mirrored folder inside the main repo rather than its own git root.
 - GitHub profile pinning still needs to be set manually in the GitHub UI.
