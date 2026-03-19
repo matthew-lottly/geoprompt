@@ -19,7 +19,7 @@ Use this file to push the main `Matt-Powell` portfolio repository after the READ
 ```powershell
 Set-Location d:\GitHub
 git status --short
-git add README.md docs .github projects standalone-repos
+git add README.md docs .github .vscode pyrightconfig.json projects
 git commit -m "Finalize portfolio launch materials"
 git push -u origin main
 ```

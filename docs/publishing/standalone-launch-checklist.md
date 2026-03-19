@@ -1,6 +1,6 @@
 # Standalone Launch Checklist
 
-Use this file when you are ready to publish the extracted repositories under [standalone-repos](standalone-repos).
+Use this file when you are ready to publish or update the extracted repositories under [standalone-checkouts](standalone-checkouts).
 
 ## Publish Order
 
@@ -29,6 +29,8 @@ For each repository:
 
 Before starting the standalone repositories, push the portfolio hub using [publish-main-portfolio.md](publish-main-portfolio.md).
 
+If a repository already exists under `standalone-checkouts`, use that real git checkout and skip the `git init`, `git branch`, and `git remote add` steps.
+
 ## Repository 1: environmental-monitoring-api
 
 ### Create On GitHub
@@ -45,7 +47,7 @@ Before starting the standalone repositories, push the portfolio hub using [publi
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\environmental-monitoring-api
+Set-Location d:\GitHub\standalone-checkouts\environmental-monitoring-api
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -76,7 +78,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\environmental-monitoring-analytics
+Set-Location d:\GitHub\standalone-checkouts\environmental-monitoring-analytics
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -107,7 +109,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\monitoring-data-warehouse
+Set-Location d:\GitHub\standalone-checkouts\monitoring-data-warehouse
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -138,7 +140,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\experience-builder-station-brief-widget
+Set-Location d:\GitHub\standalone-checkouts\experience-builder-station-brief-widget
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -169,7 +171,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\qgis-operations-workbench
+Set-Location d:\GitHub\standalone-checkouts\qgis-operations-workbench
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -200,7 +202,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\postgis-service-blueprint
+Set-Location d:\GitHub\standalone-checkouts\postgis-service-blueprint
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -231,7 +233,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\open-web-map-operations-dashboard
+Set-Location d:\GitHub\standalone-checkouts\open-web-map-operations-dashboard
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -262,7 +264,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\raster-monitoring-pipeline
+Set-Location d:\GitHub\standalone-checkouts\raster-monitoring-pipeline
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -293,7 +295,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\monitoring-anomaly-detection
+Set-Location d:\GitHub\standalone-checkouts\monitoring-anomaly-detection
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -318,7 +320,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\environmental-time-series-lab
+Set-Location d:\GitHub\standalone-checkouts\environmental-time-series-lab
 git init
 git add .
 git commit -m "Initial standalone release"
@@ -343,7 +345,7 @@ git push -u origin main
 ### Push Commands
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\station-forecasting-workbench
+Set-Location d:\GitHub\standalone-checkouts\station-forecasting-workbench
 git init
 git add .
 git commit -m "Initial standalone release"

@@ -3,7 +3,7 @@
 Create an empty GitHub repository named `experience-builder-station-brief-widget`, then run:
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\experience-builder-station-brief-widget
+Set-Location d:\GitHub\standalone-checkouts\experience-builder-station-brief-widget
 git init
 git add .
 git commit -m "Initial standalone release"

@@ -21,7 +21,7 @@ I build practical systems around data-heavy problems. My work spans enterprise G
 - [projects/environmental-time-series-lab](projects/environmental-time-series-lab) for the time-series analysis lane
 - [projects/station-forecasting-workbench](projects/station-forecasting-workbench) for the forecasting data science lane
 - [projects/experience-builder-station-brief-widget](projects/experience-builder-station-brief-widget) for the GIS frontend prototype lane
-- [standalone-repos](standalone-repos) for publishable split-out repository copies
+- [standalone-checkouts](standalone-checkouts) for real standalone repository checkouts
 - [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md) for the standalone repo roadmap
 - [docs/next-gis-repo-sequence.md](docs/next-gis-repo-sequence.md) for the next non-Esri GIS expansion plan
 
@@ -182,9 +182,9 @@ The next public repo wave broadens beyond Esri-centered work while keeping the c
 
 ## Publication Status
 
-- Standalone-ready copies have been prepared in [standalone-repos](standalone-repos)
+- Standalone repositories now live under [standalone-checkouts](standalone-checkouts)
 - Split instructions and helper scripts are in [docs/publishing/repo-split-plan.md](docs/publishing/repo-split-plan.md)
-- Each standalone repository now includes its own CI workflow, publishing notes, and license file, including the new raster and data science mirrors
+- Each standalone repository now includes its own CI workflow, publishing notes, and license file, including the raster and data science repos
 
 ## Connect
 

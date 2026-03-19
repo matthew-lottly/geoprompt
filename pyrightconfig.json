@@ -1,7 +1,7 @@
 {
   "include": [
     "projects",
-    "standalone-repos"
+    "standalone-checkouts"
   ],
   "executionEnvironments": [
     {
@@ -17,7 +17,7 @@
       ]
     },
     {
-      "root": "standalone-repos/monitoring-anomaly-detection",
+      "root": "standalone-checkouts/monitoring-anomaly-detection",
       "extraPaths": [
         "src"
       ]
@@ -29,7 +29,7 @@
       ]
     },
     {
-      "root": "standalone-repos/environmental-time-series-lab",
+      "root": "standalone-checkouts/environmental-time-series-lab",
       "extraPaths": [
         "src"
       ]
@@ -41,13 +41,13 @@
       ]
     },
     {
-      "root": "standalone-repos/station-forecasting-workbench",
+      "root": "standalone-checkouts/station-forecasting-workbench",
       "extraPaths": [
         "src"
       ]
     },
     {
-      "root": "standalone-repos/environmental-monitoring-api",
+      "root": "standalone-checkouts/environmental-monitoring-api",
       "extraPaths": [
         "src"
       ]
@@ -59,7 +59,7 @@
       ]
     },
     {
-      "root": "standalone-repos/qgis-operations-workbench",
+      "root": "standalone-checkouts/qgis-operations-workbench",
       "extraPaths": [
         "src"
       ]
@@ -71,7 +71,7 @@
       ]
     },
     {
-      "root": "standalone-repos/postgis-service-blueprint",
+      "root": "standalone-checkouts/postgis-service-blueprint",
       "extraPaths": [
         "src"
       ]
@@ -83,7 +83,7 @@
       ]
     },
     {
-      "root": "standalone-repos/raster-monitoring-pipeline",
+      "root": "standalone-checkouts/raster-monitoring-pipeline",
       "extraPaths": [
         "src"
       ]

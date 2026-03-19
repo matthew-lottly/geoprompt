@@ -3,7 +3,7 @@
 Create an empty GitHub repository named `environmental-monitoring-analytics`, then run:
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\environmental-monitoring-analytics
+Set-Location d:\GitHub\standalone-checkouts\environmental-monitoring-analytics
 git init
 git add .
 git commit -m "Initial standalone release"

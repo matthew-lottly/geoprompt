@@ -3,7 +3,7 @@
 Create an empty GitHub repository named `monitoring-data-warehouse`, then run:
 
 ```powershell
-Set-Location d:\GitHub\standalone-repos\monitoring-data-warehouse
+Set-Location d:\GitHub\standalone-checkouts\monitoring-data-warehouse
 git init
 git add .
 git commit -m "Initial standalone release"
