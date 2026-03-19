@@ -21,6 +21,7 @@ Environmental and operational monitoring workflows often stop at files, dashboar
 - File-backed repository for local development
 - Optional PostGIS-backed repository for standalone deployment
 - Filtering by category, region, and station status
+- Per-station threshold configuration for derived alert logic
 - Summary endpoint for quick monitoring rollups
 - Recent-observation and per-station observation-history endpoints with filtered summary rollups
 - Browser dashboard for quick visual review of service health, alert stations, recent alert readings, and status changes
@@ -44,11 +45,13 @@ Environmental and operational monitoring workflows often stop at files, dashboar
 - `GET /api/v1/features`
 - `GET /api/v1/features/summary`
 - `GET /api/v1/features/{feature_id}`
+- `POST /api/v1/stations/{feature_id}/thresholds`
 - `GET /api/v1/observations/recent`
 - `GET /api/v1/features/{feature_id}/observations`
 
 Observation endpoints accept optional `start_at` and `end_at` ISO timestamps for time-window filtering.
 Observation responses also include a summary block with total observations, category counts, status counts, metric counts, and earliest/latest timestamps for the filtered result set.
+Threshold updates let the API derive station alert state from the latest observation while falling back to the seeded sample status when no threshold override exists.
 
 Example monitoring domains in the sample data:
 
@@ -168,10 +171,9 @@ This gives the project a ready-to-run monitoring-station table and seed dataset 
 
 ## Next Steps
 
-- Add station threshold configuration so alert status can be derived from observed values
 - Add an ingestion pipeline for new monitoring feeds
 - Add authentication and access control
-- Add container image publishing
+- Add an operations summary endpoint
 
 ## Publication
 

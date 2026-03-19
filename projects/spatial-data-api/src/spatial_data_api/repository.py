@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from spatial_data_api.core.config import get_settings
+from spatial_data_api.database import get_engine
 from spatial_data_api.schemas import (
     FeatureCollection,
     FeatureRecord,
@@ -14,8 +15,9 @@ from spatial_data_api.schemas import (
     ObservationCollection,
     ObservationRecord,
     ObservationSummary,
+    StationThreshold,
+    StationThresholdUpdate,
 )
-from spatial_data_api.database import get_engine
 
 
 def _build_observation_summary(
@@ -43,12 +45,22 @@ def _build_observation_summary(
     )
 
 
+def _default_thresholds() -> dict[str, StationThreshold]:
+    return {
+        "station-001": StationThreshold(featureId="station-001", metricName="river_stage_ft", maxValue=13.0),
+        "station-002": StationThreshold(featureId="station-002", metricName="pm25", maxValue=35.0),
+        "station-003": StationThreshold(featureId="station-003", metricName="dissolved_oxygen", minValue=4.0),
+    }
+
+
 class FeatureRepository:
     def __init__(self, data_path: Path):
         self.data_path = data_path
         self.observations_path = data_path.with_name("sample_observations.json")
         self._collection = self._load_collection()
         self._observations = self._load_observations()
+        self._thresholds = _default_thresholds()
+        self._latest_observations = self._build_latest_observation_lookup(self._observations.observations)
 
     def _load_collection(self) -> FeatureCollection:
         payload = json.loads(self.data_path.read_text(encoding="utf-8"))
@@ -64,7 +76,7 @@ class FeatureRepository:
         region: str | None = None,
         status: str | None = None,
     ) -> list[FeatureRecord]:
-        features = self._collection.features
+        features = [self._apply_feature_status(feature) for feature in self._collection.features]
         if category:
             features = [feature for feature in features if feature.properties.category.lower() == category.lower()]
         if region:
@@ -74,10 +86,23 @@ class FeatureRepository:
         return features
 
     def get_feature(self, feature_id: str) -> FeatureRecord | None:
-        return next(
+        feature = next(
             (feature for feature in self._collection.features if feature.properties.feature_id == feature_id),
             None,
         )
+        if feature is None:
+            return None
+        return self._apply_feature_status(feature)
+
+    def update_threshold(self, feature_id: str, threshold: StationThresholdUpdate) -> StationThreshold:
+        station_threshold = StationThreshold(
+            featureId=feature_id,
+            metricName=threshold.metric_name,
+            minValue=threshold.min_value,
+            maxValue=threshold.max_value,
+        )
+        self._thresholds[feature_id] = station_threshold
+        return station_threshold
 
     def list_recent_observations(
         self,
@@ -119,7 +144,7 @@ class FeatureRepository:
         categories: dict[str, int] = {}
         statuses: dict[str, int] = {}
         regions: set[str] = set()
-        for feature in self._collection.features:
+        for feature in self.list_features():
             categories[feature.properties.category] = categories.get(feature.properties.category, 0) + 1
             statuses[feature.properties.status] = statuses.get(feature.properties.status, 0) + 1
             regions.add(feature.properties.region)
@@ -135,6 +160,58 @@ class FeatureRepository:
 
     def data_source_name(self) -> str:
         return self.data_path.name
+
+    @staticmethod
+    def _build_latest_observation_lookup(
+        observations: list[ObservationRecord],
+    ) -> dict[str, ObservationRecord]:
+        latest: dict[str, ObservationRecord] = {}
+        for observation in sorted(
+            observations,
+            key=lambda current: FeatureRepository._parse_timestamp(current.observed_at),
+            reverse=True,
+        ):
+            latest.setdefault(observation.feature_id, observation)
+        return latest
+
+    def _apply_feature_status(self, feature: FeatureRecord) -> FeatureRecord:
+        latest_observation = self._latest_observations.get(feature.properties.feature_id)
+        derived_status = self._derive_feature_status(feature, latest_observation)
+        return FeatureRecord.model_validate(
+            {
+                "type": feature.type,
+                "properties": {
+                    "featureId": feature.properties.feature_id,
+                    "name": feature.properties.name,
+                    "category": feature.properties.category,
+                    "region": feature.properties.region,
+                    "status": derived_status,
+                    "lastObservationAt": feature.properties.last_observation_at,
+                },
+                "geometry": {
+                    "type": feature.geometry.type,
+                    "coordinates": feature.geometry.coordinates,
+                },
+            }
+        )
+
+    def _derive_feature_status(
+        self,
+        feature: FeatureRecord,
+        latest_observation: ObservationRecord | None,
+    ) -> str:
+        if latest_observation is None:
+            return feature.properties.status
+        if latest_observation.status == "offline":
+            return "offline"
+
+        threshold = self._thresholds.get(feature.properties.feature_id)
+        if threshold is None or threshold.metric_name != latest_observation.metric_name:
+            return feature.properties.status
+
+        below_min = threshold.min_value is not None and latest_observation.value < threshold.min_value
+        above_max = threshold.max_value is not None and latest_observation.value > threshold.max_value
+        return "alert" if below_min or above_max else "normal"
 
     @staticmethod
     def _parse_timestamp(value: str) -> datetime:
@@ -157,6 +234,7 @@ class FeatureRepository:
 class PostGISFeatureRepository:
     def __init__(self, database_url: str):
         self.engine = get_engine(database_url)
+        self._thresholds = _default_thresholds()
 
     def list_features(
         self,
@@ -177,15 +255,17 @@ class PostGISFeatureRepository:
         FROM public.monitoring_stations
         WHERE (:category IS NULL OR category = :category)
           AND (:region IS NULL OR region = :region)
-          AND (:status IS NULL OR status = :status)
         ORDER BY feature_id
         """
         with self.engine.connect() as connection:
             rows = connection.execute(
                 text(query),
-                {"category": category, "region": region, "status": status},
+                {"category": category, "region": region},
             ).mappings().all()
-        return [self._row_to_feature(dict(row)) for row in rows]
+        features = [self._apply_feature_status(self._row_to_feature(dict(row))) for row in rows]
+        if status:
+            features = [feature for feature in features if feature.properties.status.lower() == status.lower()]
+        return features
 
     def get_feature(self, feature_id: str) -> FeatureRecord | None:
         query = """
@@ -205,7 +285,17 @@ class PostGISFeatureRepository:
             row = connection.execute(text(query), {"feature_id": feature_id}).mappings().first()
         if row is None:
             return None
-        return self._row_to_feature(dict(row))
+        return self._apply_feature_status(self._row_to_feature(dict(row)))
+
+    def update_threshold(self, feature_id: str, threshold: StationThresholdUpdate) -> StationThreshold:
+        station_threshold = StationThreshold(
+            featureId=feature_id,
+            metricName=threshold.metric_name,
+            minValue=threshold.min_value,
+            maxValue=threshold.max_value,
+        )
+        self._thresholds[feature_id] = station_threshold
+        return station_threshold
 
     def list_recent_observations(
         self,
@@ -272,20 +362,19 @@ class PostGISFeatureRepository:
         return _build_observation_summary(observations, category_lookup)
 
     def summary(self) -> FeatureSummary:
-        category_query = "SELECT category, COUNT(*) AS count FROM public.monitoring_stations GROUP BY category ORDER BY category"
-        status_query = "SELECT status, COUNT(*) AS count FROM public.monitoring_stations GROUP BY status ORDER BY status"
-        region_query = "SELECT DISTINCT region FROM public.monitoring_stations ORDER BY region"
-        count_query = "SELECT COUNT(*) AS count FROM public.monitoring_stations"
-        with self.engine.connect() as connection:
-            categories = connection.execute(text(category_query)).mappings().all()
-            statuses = connection.execute(text(status_query)).mappings().all()
-            regions = connection.execute(text(region_query)).scalars().all()
-            total_features = connection.execute(text(count_query)).scalar_one()
+        categories: dict[str, int] = {}
+        statuses: dict[str, int] = {}
+        regions: set[str] = set()
+        features = self.list_features()
+        for feature in features:
+            categories[feature.properties.category] = categories.get(feature.properties.category, 0) + 1
+            statuses[feature.properties.status] = statuses.get(feature.properties.status, 0) + 1
+            regions.add(feature.properties.region)
         return FeatureSummary(
-            total_features=total_features,
-            categories={row["category"]: row["count"] for row in categories},
-            statuses={row["status"]: row["count"] for row in statuses},
-            regions=list(regions),
+            total_features=len(features),
+            categories=categories,
+            statuses=statuses,
+            regions=sorted(regions),
         )
 
     def is_ready(self) -> bool:
@@ -300,6 +389,51 @@ class PostGISFeatureRepository:
     @staticmethod
     def data_source_name() -> str:
         return "monitoring_stations"
+
+    def _apply_feature_status(self, feature: FeatureRecord) -> FeatureRecord:
+        latest_observation = self._latest_observation_for_feature(feature.properties.feature_id)
+        derived_status = self._derive_feature_status(feature, latest_observation)
+        return FeatureRecord.model_validate(
+            {
+                "type": feature.type,
+                "properties": {
+                    "featureId": feature.properties.feature_id,
+                    "name": feature.properties.name,
+                    "category": feature.properties.category,
+                    "region": feature.properties.region,
+                    "status": derived_status,
+                    "lastObservationAt": feature.properties.last_observation_at,
+                },
+                "geometry": {
+                    "type": feature.geometry.type,
+                    "coordinates": feature.geometry.coordinates,
+                },
+            }
+        )
+
+    def _latest_observation_for_feature(self, feature_id: str) -> ObservationRecord | None:
+        observations = self.list_feature_observations(feature_id=feature_id, limit=1)
+        if not observations:
+            return None
+        return observations[0]
+
+    def _derive_feature_status(
+        self,
+        feature: FeatureRecord,
+        latest_observation: ObservationRecord | None,
+    ) -> str:
+        if latest_observation is None:
+            return feature.properties.status
+        if latest_observation.status == "offline":
+            return "offline"
+
+        threshold = self._thresholds.get(feature.properties.feature_id)
+        if threshold is None or threshold.metric_name != latest_observation.metric_name:
+            return feature.properties.status
+
+        below_min = threshold.min_value is not None and latest_observation.value < threshold.min_value
+        above_max = threshold.max_value is not None and latest_observation.value > threshold.max_value
+        return "alert" if below_min or above_max else "normal"
 
     @staticmethod
     def _row_to_feature(row: dict[str, object]) -> FeatureRecord:

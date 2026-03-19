@@ -11,6 +11,8 @@ from spatial_data_api.schemas import (
     HealthStatus,
     ObservationCollection,
     ServiceMetadata,
+    StationThreshold,
+    StationThresholdUpdate,
 )
 
 
@@ -118,3 +120,19 @@ def get_feature_observations(
         end_at=end_at,
     )
     return ObservationCollection(observations=observations, summary=repository.observation_summary(observations))
+
+
+@router.post(
+    f"{settings.api_prefix}/stations/{{feature_id}}/thresholds",
+    response_model=StationThreshold,
+    tags=["features"],
+)
+def upsert_station_threshold(
+    feature_id: str,
+    threshold: StationThresholdUpdate,
+    repository: Repository = Depends(get_repository),
+) -> StationThreshold:
+    feature = repository.get_feature(feature_id)
+    if feature is None:
+        raise HTTPException(status_code=404, detail="Feature not found")
+    return repository.update_threshold(feature_id, threshold)

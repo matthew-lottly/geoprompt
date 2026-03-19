@@ -2,13 +2,21 @@
 
 # pyright: reportMissingImports=false
 
+import pytest
 from fastapi.testclient import TestClient
 
 from spatial_data_api.main import app
-
+from spatial_data_api.repository import get_repository
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_repository_cache() -> None:
+    get_repository.cache_clear()
+    yield
+    get_repository.cache_clear()
 
 
 def test_healthcheck() -> None:
@@ -74,6 +82,51 @@ def test_feature_summary() -> None:
     payload = response.json()
     assert payload["statuses"]["alert"] == 1
     assert payload["categories"]["water_quality"] == 1
+
+
+def test_threshold_update_changes_feature_status() -> None:
+    response = client.post(
+        "/api/v1/stations/station-002/thresholds",
+        json={"metricName": "pm25", "maxValue": 45.0},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "featureId": "station-002",
+        "metricName": "pm25",
+        "minValue": None,
+        "maxValue": 45.0,
+    }
+
+    feature_response = client.get("/api/v1/features/station-002")
+    assert feature_response.status_code == 200
+    assert feature_response.json()["properties"]["status"] == "normal"
+
+    summary_response = client.get("/api/v1/features/summary")
+    assert summary_response.status_code == 200
+    assert summary_response.json()["statuses"] == {"normal": 2, "offline": 1}
+
+
+def test_threshold_update_validates_bounds() -> None:
+    response = client.post(
+        "/api/v1/stations/station-002/thresholds",
+        json={"metricName": "pm25", "minValue": 50.0, "maxValue": 45.0},
+    )
+    assert response.status_code == 422
+
+
+def test_feature_status_uses_seeded_value_without_threshold_override() -> None:
+    response = client.get("/api/v1/features/station-001")
+    assert response.status_code == 200
+    assert response.json()["properties"]["status"] == "normal"
+
+
+def test_threshold_update_feature_not_found() -> None:
+    response = client.post(
+        "/api/v1/stations/missing/thresholds",
+        json={"metricName": "pm25", "maxValue": 45.0},
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Feature not found"
 
 
 def test_recent_observations() -> None:

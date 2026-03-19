@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Geometry(BaseModel):
@@ -50,6 +50,24 @@ class ObservationSummary(BaseModel):
 class ObservationCollection(BaseModel):
     observations: list[ObservationRecord]
     summary: ObservationSummary | None = None
+
+
+class StationThresholdUpdate(BaseModel):
+    metric_name: str = Field(alias="metricName")
+    min_value: float | None = Field(default=None, alias="minValue")
+    max_value: float | None = Field(default=None, alias="maxValue")
+
+    @model_validator(mode="after")
+    def validate_threshold_bounds(self) -> "StationThresholdUpdate":
+        if self.min_value is None and self.max_value is None:
+            raise ValueError("At least one threshold bound must be provided")
+        if self.min_value is not None and self.max_value is not None and self.min_value >= self.max_value:
+            raise ValueError("minValue must be less than maxValue")
+        return self
+
+
+class StationThreshold(StationThresholdUpdate):
+    feature_id: str = Field(alias="featureId")
 
 
 class FeatureSummary(BaseModel):
