@@ -248,17 +248,17 @@ git push -u origin main
    - `environmental-monitoring-api`
    - `environmental-monitoring-analytics`
    - `monitoring-data-warehouse`
-   - `experience-builder-station-brief-widget`
    - `qgis-operations-workbench`
    - `postgis-service-blueprint`
    - `open-web-map-operations-dashboard`
-   - `Matt-Powell`
-2. Set the About section for `Matt-Powell`:
+2. Use `experience-builder-station-brief-widget` as a swap-in when you want the Esri-adjacent frontend lane visible.
+3. Use `Matt-Powell` as a swap-in when you want the umbrella portfolio repo visible.
+4. Set the About section for `Matt-Powell`:
    - Description: `Portfolio repository for backend, GIS, frontend, database, and analytics engineering work.`
    - Website: `https://lottly-ai.com/`
    - Topics: `portfolio`, `software-engineering`, `gis`, `geospatial`, `frontend`, `python`, `sql`, `data-engineering`, `backend`
-3. Review your pinned repos from the perspective of someone who knows nothing about your background and check that the order reads as one coherent story.
-4. Use [github-profile-finish-checklist.md](github-profile-finish-checklist.md) to apply the final About box values and run the last GitHub smoke check.
+5. Review your pinned repos from the perspective of someone who knows nothing about your background and check that the order reads as one coherent story.
+6. Use [github-profile-finish-checklist.md](github-profile-finish-checklist.md) to apply the final About box values and run the last GitHub smoke check.
 
 ## If A Remote Already Exists
 

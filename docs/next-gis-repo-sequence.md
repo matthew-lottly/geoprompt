@@ -36,7 +36,7 @@ Purpose: replace vendor-specific UI framing with a clearly owned frontend mappin
 - Stack: MapLibre GL JS or OpenLayers, TypeScript, Vite, vector tiles or GeoJSON
 - Deliverables: interactive web map, layer toggles, feature inspection, filtering, and operational overlays
 - Why third: it gives the portfolio a real open-stack web map surface to pair with the API and service repos
-- Status: started in the portfolio as `open-web-map-operations-dashboard`
+- Status: started in the portfolio and published as `open-web-map-operations-dashboard`
 
 ### 4. Raster and Remote Sensing Pipeline
 

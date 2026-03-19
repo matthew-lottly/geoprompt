@@ -132,7 +132,7 @@ Demo narrative: [projects/experience-builder-station-brief-widget/docs/demo-stor
 
 ## Next GIS Expansion
 
-The next public repo wave broadens beyond Esri-centered work while keeping the current Experience Builder-inspired prototype in place. The QGIS workbench and PostGIS service blueprint are now live as standalone repos, and the open web map dashboard has been started inside the portfolio.
+The next public repo wave broadens beyond Esri-centered work while keeping the current Experience Builder-inspired prototype in place. The QGIS workbench, PostGIS service blueprint, and open web map dashboard are now live as standalone repos.
 
 - [docs/next-gis-repo-sequence.md](docs/next-gis-repo-sequence.md) outlines the next sequence across QGIS desktop automation, open web mapping, spatial services, and raster pipelines.
 

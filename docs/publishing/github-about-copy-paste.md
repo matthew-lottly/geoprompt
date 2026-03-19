@@ -168,11 +168,16 @@ react, typescript, maplibre, openlayers, gis, geospatial, frontend
 1. environmental-monitoring-api
 2. environmental-monitoring-analytics
 3. monitoring-data-warehouse
-4. experience-builder-station-brief-widget
-5. qgis-operations-workbench
-6. postgis-service-blueprint
-7. open-web-map-operations-dashboard
-8. Matt-Powell
+4. qgis-operations-workbench
+5. postgis-service-blueprint
+6. open-web-map-operations-dashboard
+```
+
+Optional swap-ins when you want a different story:
+
+```text
+- experience-builder-station-brief-widget for an Esri-adjacent frontend lane
+- Matt-Powell for the umbrella portfolio repo
 ```
 
 ## Optional GitHub Profile Bio
