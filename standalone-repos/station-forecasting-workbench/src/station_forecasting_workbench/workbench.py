@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import UTC, datetime
 import json
 from collections import Counter
 from pathlib import Path
@@ -10,7 +11,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "forecast_histories.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
-DEFAULT_FORECAST_HORIZON = 2
+DEFAULT_VALIDATION_HORIZON = 1
+DEFAULT_TEST_HORIZON = 1
 DEFAULT_PROJECTION_HORIZON = 3
 
 
@@ -88,33 +90,56 @@ def _candidate_predictions(values: list[float], horizon: int) -> dict[str, list[
     }
 
 
+def _feature_set_for_model(model_name: str) -> str:
+    if model_name in {"drift", "linear_regression"}:
+        return "trend_profile"
+    return "recent_level"
+
+
+def _split_series(values: list[float], validation_horizon: int, test_horizon: int) -> tuple[list[float], list[float], list[float]]:
+    train_end = len(values) - validation_horizon - test_horizon
+    train = values[:train_end]
+    validation = values[train_end:train_end + validation_horizon]
+    test = values[-test_horizon:]
+    return train, validation, test
+
+
 def build_forecast_report(
     data_path: Path = DEFAULT_DATA_PATH,
-    horizon: int = DEFAULT_FORECAST_HORIZON,
+    validation_horizon: int = DEFAULT_VALIDATION_HORIZON,
+    test_horizon: int = DEFAULT_TEST_HORIZON,
     projection_horizon: int = DEFAULT_PROJECTION_HORIZON,
     report_name: str = "Station Forecasting Workbench",
+    run_label: str = "baseline-model-review",
 ) -> dict[str, Any]:
     histories = load_histories(data_path)
     forecasts = []
     winning_models: Counter[str] = Counter()
+    feature_set_wins: Counter[str] = Counter()
 
     for series in histories:
         values = series["values"]
-        train = values[:-horizon]
-        holdout = values[-horizon:]
+        train, validation, test = _split_series(values, validation_horizon, test_horizon)
         feature_profile = _build_feature_profile(train)
-        holdout_predictions = _candidate_predictions(train, horizon)
+        validation_predictions = _candidate_predictions(train, validation_horizon)
         leaderboard = [
             {
                 "model": model_name,
-                "holdoutMae": _mae(holdout, predictions),
-                "holdoutPredictions": predictions,
+                "featureSet": _feature_set_for_model(model_name),
+                "validationMae": _mae(validation, predictions),
+                "validationPredictions": predictions,
             }
-            for model_name, predictions in holdout_predictions.items()
+            for model_name, predictions in validation_predictions.items()
         ]
-        leaderboard.sort(key=lambda candidate: (candidate["holdoutMae"], candidate["model"]))
+        leaderboard.sort(key=lambda candidate: (candidate["validationMae"], candidate["model"]))
         selected_model = leaderboard[0]["model"]
+        selected_feature_set = leaderboard[0]["featureSet"]
         winning_models[selected_model] += 1
+        feature_set_wins[selected_feature_set] += 1
+
+        refit_history = train + validation
+        test_predictions = _candidate_predictions(refit_history, test_horizon)
+        selected_test_prediction = test_predictions[selected_model]
         future_projections = _candidate_predictions(values, projection_horizon)[selected_model]
 
         forecasts.append(
@@ -122,11 +147,21 @@ def build_forecast_report(
                 "stationId": series["stationId"],
                 "metric": series["metric"],
                 "trainingWindow": len(train),
+                "validationWindow": len(validation),
+                "testWindow": len(test),
                 "featureProfile": feature_profile,
-                "holdoutActual": holdout,
+                "datasetSplit": {
+                    "train": train,
+                    "validation": validation,
+                    "test": test,
+                },
                 "modelLeaderboard": leaderboard,
                 "selectedModel": selected_model,
-                "selectedHoldoutMae": leaderboard[0]["holdoutMae"],
+                "selectedFeatureSet": selected_feature_set,
+                "selectedValidationMae": leaderboard[0]["validationMae"],
+                "testActual": test,
+                "testPrediction": selected_test_prediction,
+                "selectedTestMae": _mae(test, selected_test_prediction),
                 "projectionHorizon": projection_horizon,
                 "projection": future_projections,
                 "nextForecast": future_projections[0],
@@ -135,18 +170,29 @@ def build_forecast_report(
 
     return {
         "reportName": report_name,
+        "experiment": {
+            "runLabel": run_label,
+            "generatedAt": datetime.now(UTC).isoformat(),
+            "candidateModelCount": 4,
+            "validationHorizon": validation_horizon,
+            "testHorizon": test_horizon,
+            "projectionHorizon": projection_horizon,
+        },
         "summary": {
             "seriesCount": len(histories),
-            "forecastHorizon": horizon,
+            "validationHorizon": validation_horizon,
+            "testHorizon": test_horizon,
             "projectionHorizon": projection_horizon,
-            "averageWinningMae": round(sum(item["selectedHoldoutMae"] for item in forecasts) / len(forecasts), 2),
+            "averageValidationMae": round(sum(item["selectedValidationMae"] for item in forecasts) / len(forecasts), 2),
+            "averageTestMae": round(sum(item["selectedTestMae"] for item in forecasts) / len(forecasts), 2),
             "modelWins": dict(sorted(winning_models.items())),
+            "featureSetWins": dict(sorted(feature_set_wins.items())),
         },
         "forecasts": forecasts,
         "notes": [
-            "Designed as a public-safe forecasting workflow with feature profiling and candidate-model comparison.",
-            "The workbench evaluates simple baselines against trend-aware methods before selecting a station-level forecast.",
-            "The same structure can later support richer feature engineering, cross-validation, and experiment tracking backends.",
+            "Designed as a public-safe forecasting workflow with feature profiling, candidate-model comparison, and experiment-style evaluation.",
+            "The workbench selects models on validation performance and records separate test error for each station series.",
+            "The same structure can later support richer feature engineering, run registries, and external experiment tracking backends.",
         ],
     }
 
@@ -166,7 +212,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a sample station forecast report.")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR, help="Directory for generated JSON output.")
     parser.add_argument("--report-name", default="Station Forecasting Workbench", help="Display name embedded in the output report.")
-    parser.add_argument("--forecast-horizon", type=int, default=DEFAULT_FORECAST_HORIZON, help="Number of holdout steps used for model evaluation.")
+    parser.add_argument("--run-label", default="baseline-model-review", help="Label stored with the experiment-style report output.")
+    parser.add_argument("--validation-horizon", type=int, default=DEFAULT_VALIDATION_HORIZON, help="Number of validation steps used for model selection.")
+    parser.add_argument("--test-horizon", type=int, default=DEFAULT_TEST_HORIZON, help="Number of test steps used for post-selection evaluation.")
     parser.add_argument("--projection-horizon", type=int, default=DEFAULT_PROJECTION_HORIZON, help="Number of future steps projected by the selected model.")
     return parser.parse_args()
 
@@ -176,9 +224,11 @@ def main() -> None:
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     report = build_forecast_report(
-        horizon=args.forecast_horizon,
+        validation_horizon=args.validation_horizon,
+        test_horizon=args.test_horizon,
         projection_horizon=args.projection_horizon,
         report_name=args.report_name,
+        run_label=args.run_label,
     )
     output_path = output_dir / "station_forecast_report.json"
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")

@@ -16,15 +16,22 @@ def test_load_histories() -> None:
 def test_build_forecast_report() -> None:
     report = build_forecast_report(PROJECT_ROOT / "data" / "forecast_histories.json")
 
+    assert report["experiment"]["runLabel"] == "baseline-model-review"
     assert report["summary"]["seriesCount"] == 3
-    assert report["summary"]["forecastHorizon"] == 2
+    assert report["summary"]["validationHorizon"] == 1
+    assert report["summary"]["testHorizon"] == 1
     assert report["summary"]["projectionHorizon"] == 3
-    assert report["summary"]["averageWinningMae"] < 0.2
+    assert report["summary"]["averageValidationMae"] <= report["summary"]["averageTestMae"]
     assert report["forecasts"][0]["trainingWindow"] == 6
     assert report["forecasts"][0]["featureProfile"]["trailingMean3"] == 13.03
+    assert report["forecasts"][0]["validationWindow"] == 1
+    assert report["forecasts"][0]["testWindow"] == 1
     assert report["forecasts"][0]["selectedModel"] in {"drift", "linear_regression", "last_value", "trailing_average_3"}
     assert len(report["forecasts"][0]["modelLeaderboard"]) == 4
-    assert report["forecasts"][0]["modelLeaderboard"][0]["holdoutMae"] <= report["forecasts"][0]["modelLeaderboard"][1]["holdoutMae"]
+    assert report["forecasts"][0]["modelLeaderboard"][0]["validationMae"] <= report["forecasts"][0]["modelLeaderboard"][1]["validationMae"]
+    assert report["forecasts"][0]["selectedFeatureSet"] in {"recent_level", "trend_profile"}
+    assert len(report["forecasts"][0]["datasetSplit"]["validation"]) == 1
+    assert len(report["forecasts"][0]["testPrediction"]) == 1
     assert len(report["forecasts"][0]["projection"]) == 3
 
 
@@ -32,4 +39,6 @@ def test_export_forecast_report(tmp_path: Path) -> None:
     output_path = export_forecast_report(tmp_path, report_name="Forecast Review")
 
     assert output_path.exists()
-    assert "Forecast Review" in output_path.read_text(encoding="utf-8")
+    content = output_path.read_text(encoding="utf-8")
+    assert "Forecast Review" in content
+    assert "baseline-model-review" in content
