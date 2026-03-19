@@ -168,6 +168,20 @@ def test_clip_and_overlay_intersections() -> None:
     assert any(record["region_id"] == "southeast-sector" and record["site_id"] == "delta-point" for record in intersections)
 
 
+def test_dissolve_regions_by_band() -> None:
+    regions = read_features(PROJECT_ROOT / "data" / "benchmark_regions.json", crs="EPSG:4326")
+
+    dissolved = regions.dissolve(by="region_band", aggregations={"region_name": "count"})
+    records = sorted(dissolved.to_records(), key=lambda item: str(item["region_band"]))
+
+    assert len(records) == 2
+    assert records[0]["region_band"] == "north"
+    assert records[0]["region_name"] == 2
+    assert records[1]["region_band"] == "south"
+    assert records[1]["region_name"] == 2
+    assert all(record["geometry"]["type"] == "Polygon" for record in records)
+
+
 def test_area_similarity_equation() -> None:
     similarity = area_similarity(origin_area=0.010, destination_area=0.009, distance_value=0.05, scale=0.2, power=1.2)
     corridor = corridor_strength(weight=0.95, corridor_length=0.15, distance_value=0.08, scale=0.18, power=1.4)

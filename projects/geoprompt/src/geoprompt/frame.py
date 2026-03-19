@@ -6,13 +6,14 @@ from typing import Any, Iterable, Literal, Sequence
 
 from .equations import area_similarity, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
-from .overlay import clip_geometries, overlay_intersections
+from .overlay import clip_geometries, dissolve_geometries, overlay_intersections
 
 
 Record = dict[str, Any]
 BoundsQueryMode = Literal["intersects", "within", "centroid"]
 SpatialJoinPredicate = Literal["intersects", "within", "contains"]
 SpatialJoinMode = Literal["inner", "left"]
+AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
 
 
 Coordinate = tuple[float, float]
@@ -264,6 +265,49 @@ class GeoPromptFrame:
                 merged_row[self.geometry_column] = geometry
                 rows.append(merged_row)
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
+    def dissolve(
+        self,
+        by: str,
+        aggregations: dict[str, AggregationName] | None = None,
+    ) -> "GeoPromptFrame":
+        self._require_column(by)
+        grouped_rows: dict[Any, list[Record]] = {}
+        for row in self._rows:
+            grouped_rows.setdefault(row[by], []).append(row)
+
+        rows: list[Record] = []
+        for group_value, group_rows in grouped_rows.items():
+            dissolved_geometries = dissolve_geometries([row[self.geometry_column] for row in group_rows])
+            aggregate_values: dict[str, Any] = {by: group_value}
+            for column in self.columns:
+                if column in {by, self.geometry_column}:
+                    continue
+                operation = (aggregations or {}).get(column)
+                values = [row[column] for row in group_rows if column in row]
+                if not values:
+                    continue
+                if operation is None:
+                    aggregate_values[column] = values[0]
+                elif operation == "sum":
+                    aggregate_values[column] = sum(float(value) for value in values)
+                elif operation == "mean":
+                    aggregate_values[column] = sum(float(value) for value in values) / len(values)
+                elif operation == "min":
+                    aggregate_values[column] = min(values)
+                elif operation == "max":
+                    aggregate_values[column] = max(values)
+                elif operation == "first":
+                    aggregate_values[column] = values[0]
+                elif operation == "count":
+                    aggregate_values[column] = len(values)
+                else:
+                    raise ValueError(f"unsupported aggregation: {operation}")
+
+            for geometry in dissolved_geometries:
+                rows.append({**aggregate_values, self.geometry_column: geometry})
+
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def with_column(self, name: str, values: Sequence[Any]) -> "GeoPromptFrame":
         if len(values) != len(self._rows):

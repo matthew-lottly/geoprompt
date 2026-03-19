@@ -1,7 +1,7 @@
 from .equations import area_similarity, coordinate_distance, corridor_strength, directional_alignment, directional_bearing, euclidean_distance, haversine_distance, prompt_decay, prompt_influence, prompt_interaction
 from .frame import Bounds, GeoPromptFrame
 from .geometry import geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, transform_geometry
-from .overlay import geometry_from_shapely, geometry_to_geojson, geometry_to_shapely
+from .overlay import dissolve_geometries, geometry_from_shapely, geometry_to_geojson, geometry_to_shapely
 from .io import frame_to_geojson, read_features, read_geojson, read_points, write_geojson
 
 
@@ -11,6 +11,7 @@ __all__ = [
     "area_similarity",
     "coordinate_distance",
     "corridor_strength",
+    "dissolve_geometries",
     "directional_alignment",
     "directional_bearing",
     "euclidean_distance",

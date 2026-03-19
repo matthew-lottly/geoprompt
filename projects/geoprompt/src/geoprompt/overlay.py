@@ -79,8 +79,17 @@ def overlay_intersections(left_geometries: list[Geometry], right_geometries: lis
     return intersections
 
 
+def dissolve_geometries(geometries: list[Geometry]) -> list[Geometry]:
+    if not geometries:
+        return []
+    _, _, unary_union = _load_shapely()
+    dissolved = unary_union([geometry_to_shapely(geometry) for geometry in geometries])
+    return geometry_from_shapely(dissolved)
+
+
 __all__ = [
     "clip_geometries",
+    "dissolve_geometries",
     "geometry_from_shapely",
     "geometry_to_geojson",
     "geometry_to_shapely",

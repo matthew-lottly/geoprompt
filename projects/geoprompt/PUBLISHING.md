@@ -32,8 +32,9 @@
 2. Run `geoprompt-demo`.
 3. Run `geoprompt-compare`.
 4. Run `python -m build`.
-5. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
-6. Tag the release and publish to PyPI.
+5. Run `python -m twine check dist/*`.
+6. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
+7. Tag the release and publish to PyPI.
 
 ## PyPI Commands
 
@@ -46,7 +47,7 @@ python -m twine upload dist/*
 
 ## First Public Polish Pass
 
-- Add richer geometry behavior beyond the current point, line, polygon, and first overlay support
+- Add richer geometry behavior beyond the current point, line, polygon, dissolve, and first overlay support
 - Add dataframe adapters or pandas interop where it helps the API
 - Expand the GeoPrompt equation family with more operators once the first API settles
 - Add larger real-world benchmark corpora alongside the current checked-in fixtures

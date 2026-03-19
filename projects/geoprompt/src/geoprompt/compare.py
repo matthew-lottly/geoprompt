@@ -167,6 +167,7 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
 
     join_report: dict[str, Any] | None = None
     clip_report: dict[str, Any] | None = None
+    dissolve_report: dict[str, Any] | None = None
     if case.join_path is not None:
         regions = read_features(case.join_path, crs=case.crs)
         geoprompt_join = regions.spatial_join(frame, predicate="intersects")
@@ -197,6 +198,17 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             "feature_count_match": len(clipped) == len(reference_clip_geometries),
             "geoprompt_feature_count": len(clipped),
             "reference_feature_count": len(reference_clip_geometries),
+        }
+
+        geoprompt_dissolved = regions.dissolve(by="region_band", aggregations={"region_name": "count"})
+        geopandas_dissolved = geopandas.GeoDataFrame(
+            [{key: value for key, value in record.items() if key != "geometry"} for record in regions.to_records()],
+            geometry=region_geometries,
+            crs=case.crs,
+        ).dissolve(by="region_band", aggfunc={"region_name": "count"}).reset_index()
+        dissolve_report = {
+            "feature_count_match": len(geoprompt_dissolved) == len(geopandas_dissolved),
+            "bands_match": sorted(str(record["region_band"]) for record in geoprompt_dissolved) == sorted(str(value) for value in geopandas_dissolved["region_band"].tolist()),
         }
 
     benchmarks: list[dict[str, Any]] = []
@@ -248,6 +260,20 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             ],
         )
         benchmarks.append(benchmark)
+        benchmark, _ = _benchmark(
+            f"{case.name}.geoprompt.dissolve",
+            lambda: regions.dissolve(by="region_band", aggregations={"region_name": "count"}),
+        )
+        benchmarks.append(benchmark)
+        benchmark, _ = _benchmark(
+            f"{case.name}.reference.dissolve",
+            lambda: geopandas.GeoDataFrame(
+                [{key: value for key, value in record.items() if key != "geometry"} for record in regions.to_records()],
+                geometry=region_geometries,
+                crs=case.crs,
+            ).dissolve(by="region_band", aggfunc={"region_name": "count"}).reset_index(),
+        )
+        benchmarks.append(benchmark)
 
     return {
         "dataset": case.name,
@@ -282,6 +308,7 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             ),
             "geometry_comparison": geometry_comparison,
             "clip": clip_report,
+            "dissolve": dissolve_report,
             "spatial_join": join_report,
         },
         "benchmarks": benchmarks,
@@ -327,6 +354,12 @@ def build_comparison_report(
             "all_projected_bounds_match": all(dataset["correctness"]["projected_bounds_match"] for dataset in datasets),
             "all_clip_matches": all(
                 dataset["correctness"]["clip"] is None or dataset["correctness"]["clip"]["feature_count_match"]
+                for dataset in datasets
+            ),
+            "all_dissolve_matches": all(
+                dataset["correctness"]["dissolve"] is None or (
+                    dataset["correctness"]["dissolve"]["feature_count_match"] and dataset["correctness"]["dissolve"]["bands_match"]
+                )
                 for dataset in datasets
             ),
             "all_spatial_joins_match": all(

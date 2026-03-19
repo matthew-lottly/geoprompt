@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, spatial joins, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, spatial joins, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -27,6 +27,7 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Bounding-box queries for quick map-window style filtering
 - CRS assignment and reprojection through `GeoPromptFrame.to_crs(...)`
 - Spatial joins with `intersects`, `within`, and `contains` predicates
+- Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
 - Geographic distance support for longitude/latitude point workflows through haversine distance
 - Pairwise interaction analysis without requiring pandas or geopandas
@@ -92,6 +93,17 @@ intersections = regions.overlay_intersections(assets)
 
 print(clipped.head(3))
 print(intersections.head(3))
+```
+
+Dissolve example:
+
+```python
+import geoprompt as gp
+
+regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
+dissolved = regions.dissolve(by="region_band", aggregations={"region_name": "count"})
+
+print(dissolved.head())
 ```
 
 GeoJSON example:
@@ -200,6 +212,7 @@ The default demo command writes `outputs/geoprompt_demo_report.json` and `output
 - a committed pressure plot in `assets/neighborhood-pressure-review-live.png`
 
 CI validation is defined in `.github/workflows/geoprompt-ci.yml` and runs tests, demo generation, comparison validation, and package builds.
+It also runs `python -m twine check dist/*` so distribution metadata is validated before release.
 
 See [docs/architecture.md](docs/architecture.md) for the package design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.
@@ -233,6 +246,7 @@ The main package entry points are:
 - `GeoPromptFrame.nearest_neighbors(...)`
 - `GeoPromptFrame.query_bounds(...)`
 - `GeoPromptFrame.spatial_join(...)`
+- `GeoPromptFrame.dissolve(...)`
 - `GeoPromptFrame.clip(...)`
 - `GeoPromptFrame.overlay_intersections(...)`
 - `GeoPromptFrame.neighborhood_pressure(...)`
@@ -253,10 +267,11 @@ This writes `outputs/geoprompt_comparison_report.json` with:
 
 - core metric agreement across the built-in sample and benchmark corpora
 - reprojection agreement against GeoPandas in EPSG:3857
+- dissolve agreement against GeoPandas on the benchmark region corpus
 - spatial-join agreement against Shapely and GeoPandas-style predicate behavior
 - nearest-neighbor agreement against a Shapely centroid-distance reference
 - bounding-box query agreement against GeoPandas
-- timing summaries for geometry metrics, reprojection, bounds queries, nearest neighbors, and joins
+- timing summaries for geometry metrics, reprojection, bounds queries, nearest neighbors, dissolve, clip, and joins
 
 ## Release Readiness
 
