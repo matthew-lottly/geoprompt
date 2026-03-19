@@ -2,6 +2,8 @@
 
 Desktop GIS portfolio project for packaging repeatable QGIS-oriented review workflows, layout tasks, bookmarks, and field-ready inspection context.
 
+![Generated station review map from the QGIS workbench workflow](assets/station-review-map-live.png)
+
 ## Snapshot
 
 - Lane: Desktop GIS and operations workflows
@@ -80,6 +82,7 @@ The default command writes `outputs/qgis_workbench_pack.json` with:
 - region bookmarks
 - map-theme groupings
 - prioritized analyst review tasks
+- a generated review map in `outputs/charts/station-review-map.png`
 
 With `--export-geopackage`, the command also writes `outputs/qgis_review_bundle.gpkg` containing:
 

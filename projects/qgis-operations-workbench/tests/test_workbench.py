@@ -43,6 +43,8 @@ def test_export_workbench_pack(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Desktop GIS Review Pack" in content
     assert "qgis_workbench_pack.json" in str(output_path)
+    assert '"station_review_map"' in content
+    assert (tmp_path / "charts" / "station-review-map.png").exists()
 
 
 def test_export_geopackage(tmp_path: Path) -> None:

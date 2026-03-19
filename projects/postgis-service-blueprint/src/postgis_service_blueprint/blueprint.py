@@ -7,11 +7,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "service_layers.geojson"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_SEED_SQL_PATH = DEFAULT_OUTPUT_DIR / "sample_seed.sql"
+DEFAULT_CHART_DIR_NAME = "charts"
 
 
 @dataclass(frozen=True)
@@ -125,6 +128,50 @@ def _build_endpoints(collections: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return endpoints
 
 
+def _plot_service_footprint(features: list[LayerFeature], chart_path: Path) -> Path:
+    chart_path.parent.mkdir(parents=True, exist_ok=True)
+    color_by_layer = {
+        "maintenance_zones": "#b56576",
+        "monitoring_sites": "#457b9d",
+    }
+
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.set_facecolor("#f6f4ef")
+    figure.patch.set_facecolor("#f6f4ef")
+
+    for layer_name in sorted({feature.layer_name for feature in features}):
+        matching_features = [feature for feature in features if feature.layer_name == layer_name]
+        axis.scatter(
+            [feature.coordinates[0] for feature in matching_features],
+            [feature.coordinates[1] for feature in matching_features],
+            s=180,
+            c=color_by_layer.get(layer_name, "#4f5d75"),
+            edgecolors="#1f2933",
+            linewidths=0.8,
+            label=layer_name.replace("_", " ").title(),
+        )
+
+    for feature in features:
+        axis.annotate(
+            f"{feature.layer_name.replace('_', ' ').title()}\n{feature.region}",
+            xy=feature.coordinates,
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=8,
+            color="#1f2933",
+        )
+
+    axis.set_title("Published Service Footprint", fontsize=16, color="#1f2933")
+    axis.set_xlabel("Longitude")
+    axis.set_ylabel("Latitude")
+    axis.grid(color="#d8d2c6", linewidth=0.7, alpha=0.7)
+    axis.legend(frameon=False, loc="lower left")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    return chart_path
+
+
 def build_service_blueprint(project_root: Path = PROJECT_ROOT, service_name: str = "PostGIS Service Blueprint") -> dict[str, Any]:
     features = load_layer_features(project_root / "data" / "service_layers.geojson")
     collections = _build_collections(features)
@@ -149,7 +196,17 @@ def build_service_blueprint(project_root: Path = PROJECT_ROOT, service_name: str
 
 def export_service_blueprint(output_dir: Path = DEFAULT_OUTPUT_DIR, service_name: str = "PostGIS Service Blueprint") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
+    features = load_layer_features(PROJECT_ROOT / "data" / "service_layers.geojson")
     blueprint = build_service_blueprint(PROJECT_ROOT, service_name=service_name)
+    chart_path = _plot_service_footprint(features, output_dir / DEFAULT_CHART_DIR_NAME / "published-service-footprint.png")
+    blueprint["artifacts"] = {
+        "charts": [
+            {
+                "name": "published_service_footprint",
+                "chart": str(chart_path.relative_to(output_dir)).replace("\\", "/"),
+            }
+        ]
+    }
     output_path = output_dir / "postgis_service_blueprint.json"
     output_path.write_text(json.dumps(blueprint, indent=2), encoding="utf-8")
     return output_path

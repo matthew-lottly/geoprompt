@@ -2,6 +2,8 @@
 
 Data science portfolio project for detector comparison, labeled-event evaluation, ranking suspicious sensor events, and packaging triage-ready anomaly reports.
 
+![Generated detector ranking chart from the anomaly workflow](assets/selected-detector-ranking-live.png)
+
 ## Snapshot
 
 - Lane: Data science and anomaly detection
@@ -58,7 +60,7 @@ pytest
 
 ## Current Output
 
-The default command writes `outputs/anomaly_report.json` with:
+The default command writes `outputs/anomaly_report.json` and a chart pack under `outputs/charts/` with:
 
 - experiment run metadata and detector thresholds
 - a persisted `outputs/run_registry.json` entry for each export
@@ -68,6 +70,7 @@ The default command writes `outputs/anomaly_report.json` with:
 - selected alerts from the winning detector
 - per-station alert counts
 - operational notes for triage
+- a selected-detector ranking chart showing the highest-scored events from the winning anomaly detector
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.

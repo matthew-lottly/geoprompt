@@ -38,6 +38,9 @@ def test_export_anomaly_report(tmp_path: Path) -> None:
     assert "Telemetry Watch" in content
     assert "detector-comparison-pass" in content
     assert "anomaly_report.json" in str(output_path)
+    assert "selected-detector-ranking.png" in content
+    chart_path = tmp_path / "charts" / "selected-detector-ranking.png"
+    assert chart_path.exists()
     registry_path = tmp_path / "run_registry.json"
     assert registry_path.exists()
     registry = registry_path.read_text(encoding="utf-8")

@@ -2,6 +2,8 @@
 
 Open-stack GIS portfolio project for shaping how PostGIS-backed layers become publishable spatial services.
 
+![Generated published service footprint from the blueprint workflow](assets/published-service-footprint-live.png)
+
 ## Snapshot
 
 - Lane: Spatial services and data publishing
@@ -79,6 +81,7 @@ The default command writes `outputs/postgis_service_blueprint.json` with:
 - service endpoints and query patterns
 - publication-plan notes for PostGIS indexes and delivery options
 - bounds and summary counts for the sample layers
+- a generated review map in `outputs/charts/published-service-footprint.png`
 
 With `--export-seed-sql`, the command also writes `outputs/sample_seed.sql`, which mirrors the sample GeoJSON into `INSERT` statements for the local PostGIS container.
 

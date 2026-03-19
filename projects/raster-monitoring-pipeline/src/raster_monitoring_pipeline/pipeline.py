@@ -5,11 +5,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_BASELINE_PATH = PROJECT_ROOT / "data" / "baseline_grid.json"
 DEFAULT_LATEST_PATH = PROJECT_ROOT / "data" / "latest_grid.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DEFAULT_CHART_DIR_NAME = "charts"
 HOTSPOT_DELTA_THRESHOLD = 4
 
 
@@ -23,6 +26,33 @@ def _iter_cells(grid: list[list[int]]) -> list[tuple[int, int, int]]:
         for column_index, value in enumerate(row):
             cells.append((row_index, column_index, value))
     return cells
+
+
+def _plot_delta_heatmap(output_dir: Path, baseline_grid: list[list[int]], latest_grid: list[list[int]]) -> str:
+    chart_dir = output_dir / DEFAULT_CHART_DIR_NAME
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    chart_path = chart_dir / "delta-heatmap-review.png"
+
+    delta_grid = [
+        [latest_value - baseline_value for baseline_value, latest_value in zip(baseline_row, latest_row, strict=True)]
+        for baseline_row, latest_row in zip(baseline_grid, latest_grid, strict=True)
+    ]
+
+    figure, axis = plt.subplots(figsize=(6.8, 5.8))
+    heatmap = axis.imshow(delta_grid, cmap="YlOrRd")
+    axis.set_title("Raster delta heatmap review")
+    axis.set_xlabel("Column")
+    axis.set_ylabel("Row")
+
+    for row_index, row in enumerate(delta_grid):
+        for column_index, value in enumerate(row):
+            axis.text(column_index, row_index, str(value), ha="center", va="center", color="#1f1f1f", fontsize=10)
+
+    figure.colorbar(heatmap, ax=axis, label="Delta")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(output_dir).as_posix()
 
 
 def build_change_report(
@@ -104,6 +134,16 @@ def export_change_report(
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     report = build_change_report(pipeline_name=pipeline_name)
+    baseline = load_grid(DEFAULT_BASELINE_PATH)
+    latest = load_grid(DEFAULT_LATEST_PATH)
+    report["artifacts"] = {
+        "charts": [
+            {
+                "name": "delta_heatmap_review",
+                "chart": _plot_delta_heatmap(output_dir, baseline["grid"], latest["grid"]),
+            }
+        ]
+    }
     output_path = output_dir / "raster_change_report.json"
     output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
     return output_path

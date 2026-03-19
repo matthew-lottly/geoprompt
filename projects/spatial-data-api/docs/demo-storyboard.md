@@ -8,7 +8,7 @@
 
 ## Narrative Arc
 
-1. Start on the dashboard and frame the project as an operational monitoring service, not just an API toy.
+1. Start with [assets/monitoring-status-footprint-live.png](assets/monitoring-status-footprint-live.png) and frame the project as an operational monitoring service, not just an API toy.
 2. Use the status cards and map to show that the service is exposing geospatially meaningful information.
 3. Open the alert list and explain how API consumers can triage active issues.
 4. Move to Swagger and show typed endpoints, filters, and summaries.
@@ -26,3 +26,5 @@
 - Map with labeled alert station
 - Swagger docs showing the typed monitoring endpoints
 - Docker containers running with the API and database side by side
+
+Use the generated map asset as the README-safe visual, then use the live `/dashboard` and `/docs` routes for the fuller browser walkthrough.

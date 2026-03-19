@@ -2,19 +2,24 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 from gulf_coast_inundation_lab.workflow_base import ReportWorkflow
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "gauge_validation_sample.csv"
+DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "data" / "gauge_validation_manifest.geojson"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_REGISTRY_NAME = "run_registry.json"
+DEFAULT_CHART_DIR_NAME = "charts"
 
 
 @dataclass(slots=True)
@@ -80,6 +85,92 @@ def _validation_category(r_squared: float) -> str:
     if r_squared >= 0.25:
         return "weak_to_moderate"
     return "poor"
+
+
+def _plot_gauge_validation_footprint(chart_path: Path, manifest_path: Path = DEFAULT_MANIFEST_PATH) -> Path:
+    chart_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    huc_colors = {
+        "03": "#4c78a8",
+        "08": "#f58518",
+        "12": "#54a24b",
+    }
+
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.set_facecolor("#f3f0e8")
+    figure.patch.set_facecolor("#f3f0e8")
+
+    for huc2 in sorted({feature["properties"]["huc2"] for feature in payload["features"]}):
+        matching_features = [feature for feature in payload["features"] if feature["properties"]["huc2"] == huc2]
+        axis.scatter(
+            [float(feature["geometry"]["coordinates"][0]) for feature in matching_features],
+            [float(feature["geometry"]["coordinates"][1]) for feature in matching_features],
+            s=150,
+            c=huc_colors.get(huc2, "#6d597a"),
+            edgecolors="#1f2933",
+            linewidths=0.8,
+            label=f"HUC2 {huc2}",
+        )
+
+    for feature in payload["features"]:
+        axis.annotate(
+            feature["properties"]["gaugeId"],
+            xy=(float(feature["geometry"]["coordinates"][0]), float(feature["geometry"]["coordinates"][1])),
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=8,
+            color="#1f2933",
+        )
+
+    axis.set_title("Gauge Validation Footprint", fontsize=16, color="#1f2933")
+    axis.set_xlabel("Longitude")
+    axis.set_ylabel("Latitude")
+    axis.grid(color="#d8d2c6", linewidth=0.7, alpha=0.7)
+    axis.legend(frameon=False, loc="lower left")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    return chart_path
+
+
+def _plot_gauge_validation_ranking(gauges: list[dict[str, Any]], chart_path: Path) -> Path:
+    chart_path.parent.mkdir(parents=True, exist_ok=True)
+    category_colors = {
+        "very_strong": "#2a9d8f",
+        "adequate": "#e9c46a",
+        "weak_to_moderate": "#f4a261",
+        "poor": "#e76f51",
+    }
+
+    labels = [str(gauge["gaugeId"]) for gauge in gauges]
+    scores = [float(gauge["rSquared"]) for gauge in gauges]
+    colors = [category_colors.get(str(gauge["category"]), "#6d597a") for gauge in gauges]
+
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.set_facecolor("#f7f4ef")
+    figure.patch.set_facecolor("#f7f4ef")
+    bars = axis.bar(labels, scores, color=colors, edgecolor="#1f2933", linewidth=0.8)
+
+    for bar, score in zip(bars, scores, strict=True):
+        axis.text(
+            bar.get_x() + (bar.get_width() / 2),
+            score + 0.02,
+            f"{score:.2f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            color="#1f2933",
+        )
+
+    axis.set_ylim(0, 1.05)
+    axis.set_title("Gauge Validation Ranking", fontsize=16, color="#1f2933")
+    axis.set_xlabel("Gauge ID")
+    axis.set_ylabel("R squared")
+    axis.grid(axis="y", color="#d8d2c6", linewidth=0.7, alpha=0.7)
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    return chart_path
 
 
 @dataclass(slots=True)
@@ -159,6 +250,33 @@ class GulfCoastValidationWorkflow(ReportWorkflow):
             "adequateGaugeCount": report["summary"]["adequateGaugeCount"],
             "meanRSquared": report["summary"]["meanRSquared"],
         }
+
+    def export_report(self, output_dir: Path) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        ranking_chart_path = _plot_gauge_validation_ranking(
+            report["gauges"],
+            output_dir / DEFAULT_CHART_DIR_NAME / "gauge-validation-ranking.png",
+        )
+        footprint_chart_path = _plot_gauge_validation_footprint(
+            output_dir / DEFAULT_CHART_DIR_NAME / "gauge-validation-footprint.png",
+        )
+        report["artifacts"] = {
+            "charts": [
+                {
+                    "name": "gauge_validation_ranking",
+                    "chart": str(ranking_chart_path.relative_to(output_dir)).replace("\\", "/"),
+                },
+                {
+                    "name": "gauge_validation_footprint",
+                    "chart": str(footprint_chart_path.relative_to(output_dir)).replace("\\", "/"),
+                }
+            ]
+        }
+        output_path = output_dir / self.output_filename
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        self._update_run_registry(output_dir, self.build_registry_entry(report, output_path))
+        return output_path
 
 
 def build_validation_report(input_path: Path = DEFAULT_INPUT_PATH) -> dict[str, Any]:

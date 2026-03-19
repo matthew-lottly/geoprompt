@@ -11,12 +11,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_POINTS_PATH = PROJECT_ROOT / "data" / "station_review_points.geojson"
 DEFAULT_ROUTES_PATH = PROJECT_ROOT / "data" / "inspection_routes.csv"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_GEOPACKAGE_PATH = DEFAULT_OUTPUT_DIR / "qgis_review_bundle.gpkg"
+DEFAULT_CHART_DIR_NAME = "charts"
 
 
 @dataclass(frozen=True)
@@ -376,6 +379,71 @@ def _recommended_action(feature: StationFeature) -> str:
     return "Include in the next standard inspection packet and verify recent field notes."
 
 
+def _plot_station_review_map(
+    features: list[StationFeature],
+    routes: list[InspectionRoute],
+    chart_path: Path,
+) -> Path:
+    chart_path.parent.mkdir(parents=True, exist_ok=True)
+    feature_lookup = {feature.feature_id: feature for feature in features}
+    color_by_status = {
+        "alert": "#d64545",
+        "normal": "#4c8c4a",
+        "offline": "#4f5d75",
+    }
+
+    figure, axis = plt.subplots(figsize=(10, 6))
+    axis.set_facecolor("#f5f3ea")
+    figure.patch.set_facecolor("#f5f3ea")
+
+    for route in routes:
+        route_features = [feature_lookup[station_id] for station_id in route.station_ids if station_id in feature_lookup]
+        if len(route_features) < 2:
+            continue
+        axis.plot(
+            [feature.coordinates[0] for feature in route_features],
+            [feature.coordinates[1] for feature in route_features],
+            color="#8a6d3b",
+            linewidth=1.8,
+            linestyle="--",
+            alpha=0.8,
+            zorder=1,
+        )
+
+    for status in sorted({feature.status for feature in features}):
+        matching_features = [feature for feature in features if feature.status == status]
+        axis.scatter(
+            [feature.coordinates[0] for feature in matching_features],
+            [feature.coordinates[1] for feature in matching_features],
+            s=150,
+            c=color_by_status.get(status, "#3f6c7a"),
+            edgecolors="#1f2933",
+            linewidths=0.8,
+            label=status.title(),
+            zorder=2,
+        )
+
+    for feature in features:
+        axis.annotate(
+            feature.name,
+            xy=feature.coordinates,
+            xytext=(6, 6),
+            textcoords="offset points",
+            fontsize=8,
+            color="#1f2933",
+        )
+
+    axis.set_title("Station Review Map", fontsize=16, color="#1f2933")
+    axis.set_xlabel("Longitude")
+    axis.set_ylabel("Latitude")
+    axis.grid(color="#d3cec4", linewidth=0.7, alpha=0.7)
+    axis.legend(frameon=False, loc="lower left")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    return chart_path
+
+
 def build_workbench_pack(project_root: Path = PROJECT_ROOT, project_name: str = "QGIS Operations Workbench") -> dict[str, Any]:
     points_path = project_root / "data" / "station_review_points.geojson"
     routes_path = project_root / "data" / "inspection_routes.csv"
@@ -407,6 +475,17 @@ def build_workbench_pack(project_root: Path = PROJECT_ROOT, project_name: str = 
 def export_workbench_pack(output_dir: Path = DEFAULT_OUTPUT_DIR, project_name: str = "QGIS Operations Workbench") -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     pack = build_workbench_pack(PROJECT_ROOT, project_name=project_name)
+    features = load_station_features(PROJECT_ROOT / "data" / "station_review_points.geojson")
+    routes = load_inspection_routes(PROJECT_ROOT / "data" / "inspection_routes.csv")
+    chart_path = _plot_station_review_map(features, routes, output_dir / DEFAULT_CHART_DIR_NAME / "station-review-map.png")
+    pack["artifacts"] = {
+        "charts": [
+            {
+                "name": "station_review_map",
+                "chart": str(chart_path.relative_to(output_dir)).replace("\\", "/"),
+            }
+        ]
+    }
     output_path = output_dir / "qgis_workbench_pack.json"
     output_path.write_text(json.dumps(pack, indent=2), encoding="utf-8")
     return output_path

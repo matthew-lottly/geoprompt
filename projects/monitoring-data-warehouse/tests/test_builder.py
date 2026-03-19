@@ -25,9 +25,11 @@ def test_build_warehouse(tmp_path: Path) -> None:
     assert summary["metadata"]["source_count"] == 2
     assert summary["metadata"]["model_count"] == 7
     assert "fact_observation" in summary["metadata"]["documented_models"]
+    assert summary["artifacts"]["charts"][0]["chart"].endswith("warehouse-build-summary.png")
     assert summary["contracts"]["failed_checks"] == []
     assert any(check["name"] == "non_null_dimension_keys" for check in summary["contracts"]["checks"])
     assert summary["sla"]["failed_checks"] == []
     assert any(check["name"] == "freshness_lag_hours" for check in summary["sla"]["checks"])
     assert artifact_path.exists()
+    assert (tmp_path / "charts" / "warehouse-build-summary.png").exists()
     assert '"sla_failures": 0' in artifact_path.read_text(encoding="utf-8")

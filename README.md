@@ -113,6 +113,8 @@ Start with the flagship backend project, then move outward by lane.
 
 Applied backend project with a map-backed dashboard, PostGIS-ready repository layer, Docker runtime, readiness checks, and integration tests.
 
+Demo asset: [projects/spatial-data-api/assets/monitoring-status-footprint-live.png](projects/spatial-data-api/assets/monitoring-status-footprint-live.png)
+Site map: [projects/spatial-data-api/docs/site-map.md](projects/spatial-data-api/docs/site-map.md)
 Demo narrative: [projects/spatial-data-api/docs/demo-storyboard.md](projects/spatial-data-api/docs/demo-storyboard.md)
 
 ### Environmental Monitoring Analytics
@@ -126,12 +128,14 @@ Demo narrative: [projects/environmental-monitoring-analytics/docs/demo-storyboar
 
 Data science project focused on anomaly scoring, deviation ranking, and triage-ready telemetry review for monitoring stations.
 
+Demo asset: [projects/monitoring-anomaly-detection/assets/selected-detector-ranking-live.png](projects/monitoring-anomaly-detection/assets/selected-detector-ranking-live.png)
 Demo narrative: [projects/monitoring-anomaly-detection/docs/demo-storyboard.md](projects/monitoring-anomaly-detection/docs/demo-storyboard.md)
 
 ### Environmental Time Series Lab
 
 Data science project focused on rolling summaries, trend labeling, and temporal review outputs across station histories.
 
+Demo asset: [projects/environmental-time-series-lab/assets/station-west-air-001-diagnostics-review-live.png](projects/environmental-time-series-lab/assets/station-west-air-001-diagnostics-review-live.png)
 Demo narrative: [projects/environmental-time-series-lab/docs/demo-storyboard.md](projects/environmental-time-series-lab/docs/demo-storyboard.md)
 
 ### Arroyo Flood Forecasting Lab
@@ -160,36 +164,43 @@ Demo narrative: [projects/station-risk-classification-lab/docs/demo-storyboard.m
 
 Database-engineering project focused on modeling, loading, and validating a monitoring warehouse with dimensions, facts, and quality checks.
 
+Demo asset: [projects/monitoring-data-warehouse/assets/warehouse-build-summary-live.png](projects/monitoring-data-warehouse/assets/warehouse-build-summary-live.png)
 Demo narrative: [projects/monitoring-data-warehouse/docs/demo-storyboard.md](projects/monitoring-data-warehouse/docs/demo-storyboard.md)
 
 ### QGIS Operations Workbench
 
 Desktop GIS project focused on packaging repeatable analyst review workflows with route-based layouts, bookmarks, and prioritized field follow-up tasks.
 
+Demo asset: [projects/qgis-operations-workbench/assets/station-review-map-live.png](projects/qgis-operations-workbench/assets/station-review-map-live.png)
 Demo narrative: [projects/qgis-operations-workbench/docs/demo-storyboard.md](projects/qgis-operations-workbench/docs/demo-storyboard.md)
 
 ### PostGIS Service Blueprint
 
 Open-stack spatial services project focused on separating source tables from publication-ready views and shaping collection-level service contracts before delivery implementation.
 
+Demo asset: [projects/postgis-service-blueprint/assets/published-service-footprint-live.png](projects/postgis-service-blueprint/assets/published-service-footprint-live.png)
 Demo narrative: [projects/postgis-service-blueprint/docs/demo-storyboard.md](projects/postgis-service-blueprint/docs/demo-storyboard.md)
 
 ### Open Web Map Operations Dashboard
 
 Open web mapping project focused on layer review, region/status filtering, and a live MapLibre client that can grow into a fuller operational map application.
 
+Live review output: run the local dashboard and use the active browser surface until a committed screenshot or GIF is added.
+Site map: [projects/open-web-map-operations-dashboard/docs/site-map.md](projects/open-web-map-operations-dashboard/docs/site-map.md)
 Demo narrative: [projects/open-web-map-operations-dashboard/docs/demo-storyboard.md](projects/open-web-map-operations-dashboard/docs/demo-storyboard.md)
 
 ### Raster Monitoring Pipeline
 
 Raster analysis project focused on comparing baseline and latest raster snapshots, flagging hotspots, and exporting structured change summaries for downstream review.
 
+Demo asset: [projects/raster-monitoring-pipeline/assets/delta-heatmap-review-live.png](projects/raster-monitoring-pipeline/assets/delta-heatmap-review-live.png)
 Demo narrative: [projects/raster-monitoring-pipeline/docs/demo-storyboard.md](projects/raster-monitoring-pipeline/docs/demo-storyboard.md)
 
 ### Gulf Coast Inundation Lab
 
 Remote sensing project focused on Landsat-based inundation-frequency mapping, Earth Engine export workflows, and gauge-validation summaries for Gulf Coast floodplain analysis.
 
+Demo asset: [projects/gulf-coast-inundation-lab/assets/gauge-validation-footprint-live.png](projects/gulf-coast-inundation-lab/assets/gauge-validation-footprint-live.png)
 Demo narrative: [projects/gulf-coast-inundation-lab/docs/demo-storyboard.md](projects/gulf-coast-inundation-lab/docs/demo-storyboard.md)
 
 ### Experience Builder Station Brief Widget
@@ -197,6 +208,7 @@ Demo narrative: [projects/gulf-coast-inundation-lab/docs/demo-storyboard.md](pro
 Frontend GIS project focused on widget-style interaction patterns, station filtering, and selection-driven detail panels. The visuals are conceptual portfolio assets informed by ArcGIS Experience Builder patterns, not product screenshots.
 
 Demo asset: [projects/experience-builder-station-brief-widget/assets/widget-live-screenshot.png](projects/experience-builder-station-brief-widget/assets/widget-live-screenshot.png)
+Site map: [projects/experience-builder-station-brief-widget/docs/site-map.md](projects/experience-builder-station-brief-widget/docs/site-map.md)
 Demo narrative: [projects/experience-builder-station-brief-widget/docs/demo-storyboard.md](projects/experience-builder-station-brief-widget/docs/demo-storyboard.md)
 
 ## Next GIS Expansion

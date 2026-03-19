@@ -22,6 +22,6 @@ Click `Sierra Air Quality Node` to highlight the detail panel and show the readi
 
 Close by noting that the code reflects the interaction and component patterns of Experience Builder-style widget work without exposing any private employer implementation or presenting the visuals as official ArcGIS product captures.
 
-## 7. Reviewer shortcut
+## 6. Reviewer shortcut
 
-If a reviewer does not want to run the demo locally, use the walkthrough SVG to show the same sequence in one lightweight asset.
+If a reviewer does not want to run the demo locally, use the README screenshot and [docs/site-map.md](docs/site-map.md) together to explain the same sequence.

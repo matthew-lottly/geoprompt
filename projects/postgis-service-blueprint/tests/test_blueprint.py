@@ -32,6 +32,8 @@ def test_export_service_blueprint(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Open Spatial Service" in content
     assert "postgis_service_blueprint.json" in str(output_path)
+    assert '"published_service_footprint"' in content
+    assert (tmp_path / "charts" / "published-service-footprint.png").exists()
 
 
 def test_export_seed_sql(tmp_path: Path) -> None:

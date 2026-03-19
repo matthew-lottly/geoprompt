@@ -2,6 +2,8 @@
 
 Remote sensing portfolio project recreating a Gulf Coast flood-inundation study with Google Earth Engine, Landsat classification, and gauge-validation summary workflows.
 
+![Generated Gulf Coast gauge validation footprint from the local workflow inputs](assets/gauge-validation-footprint-live.png)
+
 ## Snapshot
 
 - Lane: Remote sensing and inundation mapping
@@ -57,6 +59,8 @@ The local CLI writes `outputs/gulf_coast_validation_summary.json` with:
 - strongest and weakest gauge summaries
 - adequate-validation counts using the article-style $R^2 > 0.6$ rule
 - run-registry metadata for repeated review runs
+- a generated gauge footprint map in `outputs/charts/gauge-validation-footprint.png`
+- a generated review chart in `outputs/charts/gauge-validation-ranking.png`
 
 The Earth Engine scripts provide:
 

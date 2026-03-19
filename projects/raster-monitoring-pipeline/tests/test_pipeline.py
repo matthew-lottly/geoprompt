@@ -33,3 +33,6 @@ def test_export_change_report(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Heat Watch Pipeline" in content
     assert "raster_change_report.json" in str(output_path)
+    assert "delta-heatmap-review.png" in content
+    chart_path = tmp_path / "charts" / "delta-heatmap-review.png"
+    assert chart_path.exists()

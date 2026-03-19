@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference artifact: a real API response screenshot, schema diagram, or published service output.
+Reference artifact: [assets/published-service-footprint-live.png](assets/published-service-footprint-live.png) plus generated blueprint artifacts.
 
 ## 1. Frame the use case
 
@@ -12,7 +12,7 @@ Point out that the repository includes base-table SQL and publication views, so 
 
 ## 3. Run the blueprint builder
 
-Generate `outputs/postgis_service_blueprint.json` and show the collections, endpoint patterns, and publication notes.
+Generate `outputs/postgis_service_blueprint.json` and show the collections, endpoint patterns, publication notes, and the generated `outputs/charts/published-service-footprint.png` review map.
 
 Then rerun with `--export-seed-sql` and point out that the same repo can generate `outputs/sample_seed.sql` for a local PostGIS container.
 

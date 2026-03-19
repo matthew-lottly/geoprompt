@@ -12,7 +12,7 @@ Show the JSON fixture and note that each station includes one simple daily serie
 
 ## 3. Run the lab
 
-Generate `outputs/time_series_report.json` and review the experiment metadata, baseline leaderboard, seasonal profile, change-point candidate, and rolling-window diagnostics.
+Generate `outputs/time_series_report.json`, open `assets/station-west-air-001-diagnostics-review-live.png` as the committed real visual, then review the fuller `outputs/charts/*.png` set alongside the experiment metadata, baseline leaderboard, seasonal profile, change-point candidate, and rolling-window diagnostics.
 
 ## 4. Explain the extension path
 

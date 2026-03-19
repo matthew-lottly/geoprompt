@@ -24,7 +24,7 @@
 2. Copy the contents of this project folder into the new repository root.
 3. Preserve `.env.example`, Docker files, `sql/`, `src/`, and `tests/`.
 4. Set the repository About description and topics using the values above.
-5. Add one real screenshot or GIF from the running API UI, Swagger, or another actual result view. Do not base it on placeholder illustration art.
+5. Keep the generated monitoring-status map in the README, add one real screenshot or GIF from the running API UI or Swagger as a second artifact when available, and preserve [docs/site-map.md](docs/site-map.md).
 
 For a local copy operation, use [docs/publishing/extract-environmental-monitoring-api.ps1](../../docs/publishing/extract-environmental-monitoring-api.ps1).
 
@@ -34,3 +34,4 @@ For a local copy operation, use [docs/publishing/extract-environmental-monitorin
 - Add a screenshot of the dashboard and one screenshot of Swagger
 - Add badges for CI, Docker, and Python version
 - Add a short architecture diagram if this becomes a centerpiece repo
+- If those captures are not ready yet, keep the generated map asset and avoid mock visuals

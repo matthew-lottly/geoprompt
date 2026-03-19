@@ -8,12 +8,15 @@ import json
 from pathlib import Path
 from typing import Any, Sequence
 
+import matplotlib.pyplot as plt
+
 from environmental_time_series_lab.workflow_base import ReportWorkflow
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "station_histories.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DEFAULT_CHART_DIR_NAME = "charts"
 DEFAULT_REGISTRY_NAME = "run_registry.json"
 DEFAULT_REVIEW_WINDOW = 2
 DEFAULT_SHORT_WINDOW = 3
@@ -220,6 +223,68 @@ def _detect_change_point(values: Sequence[float]) -> dict[str, Any]:
     }
 
 
+def _sanitize_chart_slug(value: str) -> str:
+    return value.replace("_", "-")
+
+
+def _plot_series_diagnostics(output_dir: Path, diagnostics: dict[str, Any]) -> str:
+    chart_dir = output_dir / DEFAULT_CHART_DIR_NAME
+    chart_dir.mkdir(parents=True, exist_ok=True)
+
+    chart_slug = _sanitize_chart_slug(diagnostics["stationId"])
+    chart_path = chart_dir / f"{chart_slug}-diagnostics-review.png"
+    observed_series = diagnostics["observedSeries"]
+    series_actual = diagnostics["reviewActual"]
+    review_prediction = diagnostics["reviewPrediction"]
+    rolling_short = diagnostics["rollingMeanShort"]
+    rolling_long = diagnostics["rollingMeanLong"]
+    series_length = diagnostics["analysisWindow"] + diagnostics["reviewWindow"]
+
+    figure, axis = plt.subplots(figsize=(10, 5.5))
+    observed_steps = list(range(1, series_length + 1))
+    axis.plot(observed_steps, observed_series, color="#305f8c", linewidth=2.2, marker="o", label="Observed series")
+    axis.plot(list(range(3, 3 + len(rolling_short))), rolling_short, color="#c76a2d", linewidth=2, label="Rolling mean short")
+    axis.plot(list(range(5, 5 + len(rolling_long))), rolling_long, color="#6d8f4e", linewidth=2, label="Rolling mean long")
+    axis.plot(list(range(series_length - len(series_actual) + 1, series_length + 1)), review_prediction, color="#7a3e8e", linestyle="--", linewidth=2, marker="o", label="Review prediction")
+    axis.axvspan(series_length - len(series_actual) + 0.5, series_length + 0.5, color="#ece2a8", alpha=0.3, label="Review window")
+    axis.set_title(f"{diagnostics['stationId']} diagnostics review", fontsize=14)
+    axis.set_xlabel("Time step")
+    axis.set_ylabel(diagnostics["metric"])
+    axis.grid(alpha=0.25)
+    axis.legend(loc="best")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(output_dir).as_posix()
+
+
+def _build_observed_series(diagnostics: dict[str, Any]) -> list[float]:
+    review_window = len(diagnostics["reviewActual"])
+    first_differences = diagnostics["firstDifferences"]
+    total_points = len(first_differences) + 1
+    calibration_points = total_points - review_window
+    latest_calibration = diagnostics["featureProfile"]["latestValue"]
+
+    calibration_values = [latest_calibration]
+    prior_differences = first_differences[:calibration_points - 1]
+    for difference in reversed(prior_differences):
+        calibration_values.append(round(calibration_values[-1] - difference, 2))
+    calibration_values.reverse()
+    return calibration_values + diagnostics["reviewActual"]
+
+
+def _export_diagnostic_charts(output_dir: Path, diagnostics: list[dict[str, Any]]) -> list[dict[str, str]]:
+    chart_entries: list[dict[str, str]] = []
+    for item in diagnostics:
+        chart_ready = dict(item)
+        chart_ready["observedSeries"] = _build_observed_series(item)
+        chart_entries.append({
+            "stationId": item["stationId"],
+            "chart": _plot_series_diagnostics(output_dir, chart_ready),
+        })
+    return chart_entries
+
+
 @dataclass(slots=True)
 class TimeSeriesLab(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
@@ -349,7 +414,15 @@ class TimeSeriesLab(ReportWorkflow):
         }
 
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        return super().export_report(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        report["artifacts"] = {
+            "charts": _export_diagnostic_charts(output_dir, report["seriesDiagnostics"]),
+        }
+        output_path = output_dir / self.output_filename
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        self._update_run_registry(output_dir, self.build_registry_entry(report, output_path))
+        return output_path
 
 
 def build_time_series_report(

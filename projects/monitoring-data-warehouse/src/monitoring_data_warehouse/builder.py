@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import duckdb
+import matplotlib.pyplot as plt
 import yaml
 
 
@@ -13,6 +14,28 @@ TRANSFORM_PATH = PROJECT_ROOT / "sql" / "transforms.sql"
 METADATA_PATH = PROJECT_ROOT / "metadata" / "warehouse_models.yml"
 WAREHOUSE_PATH = PROJECT_ROOT / "monitoring_warehouse.duckdb"
 ARTIFACT_PATH = PROJECT_ROOT / "artifacts" / "warehouse-build-summary.json"
+
+
+def _write_summary_chart(summary: dict, artifact_path: Path) -> str:
+    chart_dir = artifact_path.parent / "charts"
+    chart_dir.mkdir(parents=True, exist_ok=True)
+    chart_path = chart_dir / "warehouse-build-summary.png"
+
+    counts = summary["counts"]
+    labels = list(counts.keys())
+    values = list(counts.values())
+
+    figure, axis = plt.subplots(figsize=(10.5, 5.8))
+    axis.bar(range(len(labels)), values, color="#3d6f8e")
+    axis.set_xticks(range(len(labels)))
+    axis.set_xticklabels(labels, rotation=25, ha="right")
+    axis.set_ylabel("Row count")
+    axis.set_title("Warehouse build summary")
+    axis.grid(axis="y", alpha=0.25)
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(artifact_path.parent).as_posix()
 
 
 def _scalar(connection: duckdb.DuckDBPyConnection, query: str) -> int:
@@ -197,6 +220,14 @@ def build_warehouse(database_path: Path | None = None, artifact_path: Path | Non
         },
         "warehouse_path": str(db_path),
         "artifact_path": str(artifact_path or ARTIFACT_PATH),
+    }
+    summary["artifacts"] = {
+        "charts": [
+            {
+                "name": "warehouse_build_summary",
+                "chart": _write_summary_chart(summary, artifact_path or ARTIFACT_PATH),
+            }
+        ]
     }
     _write_artifact(summary, artifact_path or ARTIFACT_PATH)
     return summary

@@ -2,6 +2,8 @@
 
 Open-stack GIS analysis project for comparing raster snapshots, flagging hotspots, and packaging change-detection output for downstream review.
 
+![Generated raster delta heatmap from the monitoring workflow](assets/delta-heatmap-review-live.png)
+
 ## Snapshot
 
 - Lane: Raster analysis and monitoring
@@ -64,12 +66,13 @@ python -m raster_monitoring_pipeline.pipeline --pipeline-name "Heat Watch Pipeli
 
 ## Current Output
 
-The default command writes `outputs/raster_change_report.json` with:
+The default command writes `outputs/raster_change_report.json` and a chart pack under `outputs/charts/` with:
 
 - cell-by-cell delta summaries
 - hotspot counts
 - top-change ranking
 - tile manifest metadata for downstream processing
+- a raster delta heatmap showing the generated change surface from the baseline and latest grids
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.

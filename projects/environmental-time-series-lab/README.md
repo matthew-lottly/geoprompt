@@ -2,6 +2,8 @@
 
 Data science portfolio project for temporal diagnostics, baseline comparison, and reviewable time-series outputs across environmental monitoring stations.
 
+![Generated diagnostics chart from the time-series workflow](assets/station-west-air-001-diagnostics-review-live.png)
+
 ## Snapshot
 
 - Lane: Data science and time-series analysis
@@ -24,6 +26,7 @@ This project focuses on time-series analysis rather than GIS surface area. It lo
 - Baseline leaderboard output for a held-out review window
 - A persisted `outputs/run_registry.json` trail for exported runs
 - Clean export artifacts for downstream reporting, diagnostics, or model preparation
+- Real diagnostics charts under `outputs/charts/` showing observed series behavior, rolling means, and held-out review predictions
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.

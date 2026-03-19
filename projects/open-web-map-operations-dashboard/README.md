@@ -40,7 +40,8 @@ open-web-map-operations-dashboard/
 |   `-- app.test.tsx
 |-- docs/
 |   |-- architecture.md
-|   `-- demo-storyboard.md
+|   |-- demo-storyboard.md
+|   `-- site-map.md
 |-- package.json
 |-- tsconfig.json
 `-- vite.config.ts
@@ -73,9 +74,16 @@ The current dashboard includes:
 - a live MapLibre map backed by OpenStreetMap raster tiles
 - operational layer counts and feature totals
 - a GeoJSON overlay generated from the checked-in layer metadata
+- a local browser-ready demo surface available through `npm run dev`
+
+This repo does not include a committed static screenshot yet. Until a real browser capture is added, the live dashboard output is the intended review artifact.
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.
+See [docs/site-map.md](docs/site-map.md) for the interface map.
+
+Primary demo asset type: live dashboard surface.
+Preferred committed asset type when captured: browser screenshot or GIF.
 
 ## Publication
 

@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference artifact: a real map export, layout screenshot, or other generated analyst output.
+Reference artifact: [assets/station-review-map-live.png](assets/station-review-map-live.png) plus generated workbench artifacts.
 
 ## 1. Frame the use case
 
@@ -12,7 +12,7 @@ Point out that the repository includes a checked-in station point layer and rout
 
 ## 3. Run the workbench builder
 
-Generate `outputs/qgis_workbench_pack.json` and show the summary, bookmarks, themes, and layout jobs.
+Generate `outputs/qgis_workbench_pack.json` and show the summary, bookmarks, themes, layout jobs, and the generated `outputs/charts/station-review-map.png` review map.
 
 Then rerun with `--export-geopackage` and show that the repo also produces a QGIS-loadable `outputs/qgis_review_bundle.gpkg` file for the same review session.
 

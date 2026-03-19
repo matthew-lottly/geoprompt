@@ -12,7 +12,7 @@ Show the station observation fixture and note that each row represents a timesta
 
 ## 3. Run the pipeline
 
-Generate `outputs/anomaly_report.json` and highlight the detector leaderboard, ranked events, selected alerts, and station alert counts.
+Generate `outputs/anomaly_report.json`, open `assets/selected-detector-ranking-live.png` as the committed real visual, then review the fuller `outputs/charts/*.png` set alongside the detector leaderboard, ranked events, selected alerts, and station alert counts.
 
 ## 4. Explain the extension path
 

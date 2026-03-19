@@ -2,6 +2,8 @@
 
 Database-engineering project for modeling, building, and validating a monitoring warehouse from operational station data.
 
+![Generated warehouse build summary chart from the builder workflow](assets/warehouse-build-summary-live.png)
+
 ## Snapshot
 
 - Lane: Database engineering
@@ -71,6 +73,7 @@ monitoring-data-warehouse/
 - A local DuckDB warehouse file
 - Row-count and quality-check summary
 - A JSON warehouse-build artifact for CI upload and review
+- A generated warehouse build summary chart under `artifacts/charts/`
 - A slowly changing dimension example for station ownership and response tier
 - Sample daily alert and regional status marts
 - A manifest-backed model catalog and contract check summary

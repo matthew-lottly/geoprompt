@@ -2,6 +2,8 @@
 
 Production-style backend for monitoring stations, environmental observations, and spatial status reporting through a typed API.
 
+![Generated monitoring status footprint from the sample API dataset](assets/monitoring-status-footprint-live.png)
+
 ## Snapshot
 
 - Lane: Backend + GIS
@@ -113,6 +115,7 @@ For a visual demo, open `http://127.0.0.1:8000/dashboard`.
 
 See [docs/demo-script.md](docs/demo-script.md) for a short presentation flow.
 See [docs/architecture.md](docs/architecture.md) for the project structure overview.
+See [docs/site-map.md](docs/site-map.md) for the reviewer-facing surface map.
 See [docs/roadmap.md](docs/roadmap.md) for the next planned improvements.
 See [docs/public-issues.md](docs/public-issues.md) for good first public follow-up tasks.
 
@@ -141,6 +144,21 @@ docker run --rm -p 8000:8000 ghcr.io/matthew-lottly/environmental-monitoring-api
 ```
 
 For a PostGIS-backed run, provide the same environment variables used in `.env.example`.
+
+## Current Output
+
+The current backend provides:
+
+- a live browser dashboard at `http://127.0.0.1:8000/dashboard`
+- typed Swagger docs at `http://127.0.0.1:8000/docs`
+- file-backed API responses for feature, summary, and observation review
+- optional PostGIS-backed runtime through Docker
+- a generated map artifact in `outputs/charts/monitoring-status-footprint.png`
+
+The generated map asset is a real output from the checked-in sample dataset. Dashboard and Swagger screenshots are still useful secondary captures for the browser surface.
+
+Primary demo asset type: generated map.
+Secondary review surfaces: dashboard and Swagger UI.
 
 ## Validation
 

@@ -43,6 +43,9 @@ experience-builder-station-brief-widget/
 |   `-- transform.test.ts
 |-- assets/
 |-- docs/
+|   |-- architecture.md
+|   |-- demo-storyboard.md
+|   `-- site-map.md
 |-- package.json
 |-- tsconfig.json
 `-- vite.config.ts
@@ -71,14 +74,18 @@ npm run build
 
 This is not a full ArcGIS Experience Builder export or a screenshot of ArcGIS software. It is a deliberately public-safe prototype that demonstrates component structure, interaction patterns, and data-shaping logic relevant to Experience Builder-style widget work.
 
-The browser screenshot in this README comes from the Vite app in this repository. The SVG assets are conceptual walkthrough graphics used to explain the interaction flow without implying access to ArcGIS product imagery.
+The browser screenshot in this README comes from the Vite app in this repository. Additional visuals should be real browser captures or GIFs from the same local app rather than mock product imagery.
 
 The configuration panel now persists key widget settings in browser local storage so a reviewer can see settings survive refresh without requiring a backend. That now includes the multi-select status filter alongside the region and display settings.
 
-The interaction walkthrough asset highlights the main reviewer path: switch the region filter to `West`, keep only alert stations visible, select `Sierra Air Quality Node`, and open the history modal to inspect recent observation notes.
+The main reviewer path is: switch the region filter to `West`, keep only alert stations visible, select `Sierra Air Quality Node`, and open the history modal to inspect recent observation notes.
 
 See [docs/architecture.md](docs/architecture.md) for the widget design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for a short walkthrough script.
+See [docs/site-map.md](docs/site-map.md) for the widget surface map.
+
+Primary demo asset type: browser screenshot.
+Preferred second asset type when captured: GIF of the filter-to-detail workflow.
 
 ## Publication
 

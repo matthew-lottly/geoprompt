@@ -8,7 +8,9 @@ version = "0.1.0"
 description = "Open spatial service blueprint for publishing PostGIS-backed layers."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "matplotlib>=3.9,<4.0",
+]
 
 [project.optional-dependencies]
 dev = [

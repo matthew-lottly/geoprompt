@@ -10,12 +10,15 @@ from pathlib import Path
 from statistics import mean, median, pstdev
 from typing import Any
 
+import matplotlib.pyplot as plt
+
 from monitoring_anomaly_detection.workflow_base import ReportWorkflow
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "station_observations.csv"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DEFAULT_CHART_DIR_NAME = "charts"
 DEFAULT_REGISTRY_NAME = "run_registry.json"
 DEFAULT_WARMUP_WINDOW = 3
 DETECTOR_THRESHOLDS = {
@@ -190,6 +193,29 @@ def _evaluate_detector(events: list[ScoredEvent], detector_name: str) -> Detecto
     )
 
 
+def _plot_selected_detector_ranking(output_dir: Path, selected_detector: str, ranked_events: list[dict[str, Any]]) -> str:
+    chart_dir = output_dir / DEFAULT_CHART_DIR_NAME
+    chart_dir.mkdir(parents=True, exist_ok=True)
+
+    chart_path = chart_dir / "selected-detector-ranking.png"
+    top_events = ranked_events[:6]
+    labels = [f"{event['stationId']}\n{event['timestamp'][5:10]}" for event in top_events]
+    scores = [event["scores"][selected_detector] for event in top_events]
+    colors = ["#c76a2d" if event["isKnownEvent"] else "#3d6f8e" for event in top_events]
+
+    figure, axis = plt.subplots(figsize=(10, 5.5))
+    axis.bar(range(len(top_events)), scores, color=colors)
+    axis.set_xticks(range(len(top_events)))
+    axis.set_xticklabels(labels, rotation=20, ha="right")
+    axis.set_ylabel(f"{selected_detector} score")
+    axis.set_title("Selected detector ranking review")
+    axis.grid(axis="y", alpha=0.25)
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(output_dir).as_posix()
+
+
 @dataclass(slots=True)
 class AnomalyDetectionWorkflow(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
@@ -345,7 +371,20 @@ class AnomalyDetectionWorkflow(ReportWorkflow):
         }
 
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        return super().export_report(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        report["artifacts"] = {
+            "charts": [
+                {
+                    "name": "selected_detector_ranking",
+                    "chart": _plot_selected_detector_ranking(output_dir, report["summary"]["selectedDetector"], report["rankedEvents"]),
+                }
+            ]
+        }
+        output_path = output_dir / self.output_filename
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        self._update_run_registry(output_dir, self.build_registry_entry(report, output_path))
+        return output_path
 
 
 def build_anomaly_report(

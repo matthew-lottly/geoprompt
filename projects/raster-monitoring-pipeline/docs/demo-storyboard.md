@@ -12,7 +12,7 @@ Point out that the repository includes baseline and latest raster-style grid fix
 
 ## 3. Run the pipeline
 
-Generate `outputs/raster_change_report.json` and show the hotspot counts, top changes, and tile manifest.
+Generate `outputs/raster_change_report.json`, open `assets/delta-heatmap-review-live.png` as the committed real visual, then review the fuller `outputs/charts/*.png` set with the hotspot counts, top changes, and tile manifest.
 
 ## 4. Explain the extension path
 

@@ -67,6 +67,9 @@ def test_export_time_series_report(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Temporal Review" in content
     assert "temporal-diagnostics-review" in content
+    assert "station-west-air-001-diagnostics-review.png" in content
+    chart_path = tmp_path / "charts" / "station-west-air-001-diagnostics-review.png"
+    assert chart_path.exists()
     registry_path = tmp_path / "run_registry.json"
     assert registry_path.exists()
     registry = registry_path.read_text(encoding="utf-8")

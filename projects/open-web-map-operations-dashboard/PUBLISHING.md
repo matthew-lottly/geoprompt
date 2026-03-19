@@ -24,10 +24,10 @@
 2. Copy this project folder into the new repository root.
 3. Preserve `data/`, `src/`, `tests/`, and the frontend build files.
 4. Use a real screenshot or GIF captured from the running dashboard. Do not use placeholder illustration art.
-5. Reference [docs/architecture.md](docs/architecture.md) and [docs/demo-storyboard.md](docs/demo-storyboard.md) from the README when polishing the public pitch.
+5. Reference [docs/architecture.md](docs/architecture.md), [docs/demo-storyboard.md](docs/demo-storyboard.md), and [docs/site-map.md](docs/site-map.md) from the README when polishing the public pitch.
 
 ## First Public Polish Pass
 
-- Replace the conceptual surface with MapLibre or OpenLayers
 - Connect the layer list to a real service response from the PostGIS lane
-- Add one browser screenshot alongside the SVG preview
+- Add one browser screenshot or short GIF from the running dashboard
+- Do not add any placeholder SVG or illustration-style preview while that capture is still missing

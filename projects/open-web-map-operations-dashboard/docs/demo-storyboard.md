@@ -12,7 +12,9 @@ Switch between regions and layer statuses to show how the operational layer list
 
 ## 3. Show the map surface
 
-Point out that the current map is a conceptual surface designed to be replaced by MapLibre or OpenLayers without changing the surrounding review workflow.
+Point out that the current map is already a live MapLibre surface backed by checked-in data and OpenStreetMap raster tiles.
+
+If no committed screenshot or GIF is present yet, use the running dashboard itself as the reviewer artifact instead of adding placeholder art.
 
 ## 4. Explain the stack progression
 

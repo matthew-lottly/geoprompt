@@ -36,7 +36,11 @@ def test_export_report_writes_summary_and_registry(tmp_path: Path) -> None:
 
     assert output_path.name == "gulf_coast_validation_summary.json"
     assert report["summary"]["gaugeCount"] == 3
+    assert report["artifacts"]["charts"][0]["name"] == "gauge_validation_ranking"
+    assert report["artifacts"]["charts"][1]["name"] == "gauge_validation_footprint"
     assert registry["runs"][0]["reportFile"] == output_path.name
+    assert (tmp_path / "charts" / "gauge-validation-ranking.png").exists()
+    assert (tmp_path / "charts" / "gauge-validation-footprint.png").exists()
 
 
 def test_main_writes_report_from_cli_arguments(tmp_path: Path) -> None:
