@@ -58,6 +58,7 @@ python -m environmental_monitoring_analytics.reporting
 - Alert rate
 - Average alert score
 - Regional alert breakdown
+- Time-window trend analysis with recent vs previous alert-rate comparison
 - Latest alert stations section in markdown
 - Exportable HTML brief with visual summary blocks and regional alert bars
 
@@ -67,8 +68,8 @@ See [docs/architecture.md](docs/architecture.md) for the reporting flow overview
 
 ## Next Steps
 
-- Add trend analysis over time windows
 - Connect the analytics dataset to the API project as a downstream consumer
+- Add parameterized report windows for longer operational comparisons
 
 ## Publication
 
