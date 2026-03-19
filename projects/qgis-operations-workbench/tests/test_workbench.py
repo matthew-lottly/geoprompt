@@ -1,6 +1,7 @@
 from pathlib import Path
+import sqlite3
 
-from qgis_operations_workbench.workbench import build_workbench_pack, export_workbench_pack, load_inspection_routes, load_station_features
+from qgis_operations_workbench.workbench import build_workbench_pack, export_geopackage, export_workbench_pack, load_inspection_routes, load_station_features
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -42,3 +43,19 @@ def test_export_workbench_pack(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Desktop GIS Review Pack" in content
     assert "qgis_workbench_pack.json" in str(output_path)
+
+
+def test_export_geopackage(tmp_path: Path) -> None:
+    output_path = export_geopackage(tmp_path / "review_bundle.gpkg", project_root=PROJECT_ROOT)
+
+    assert output_path.exists()
+
+    with sqlite3.connect(output_path) as connection:
+        contents = dict(connection.execute("SELECT table_name, data_type FROM gpkg_contents").fetchall())
+        station_count = connection.execute("SELECT COUNT(*) FROM station_review_points").fetchone()[0]
+        route_count = connection.execute("SELECT COUNT(*) FROM inspection_routes").fetchone()[0]
+
+    assert contents["station_review_points"] == "features"
+    assert contents["inspection_routes"] == "attributes"
+    assert station_count == 4
+    assert route_count == 3

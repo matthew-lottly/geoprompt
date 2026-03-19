@@ -122,6 +122,26 @@ Topics
 qgis, pyqgis, python, gdal, geopackage, gis, geospatial
 ```
 
+## postgis-service-blueprint
+
+Description
+
+```text
+Open spatial service blueprint for publishing PostGIS-backed layers with collection metadata and query patterns.
+```
+
+Website
+
+```text
+https://lottly-ai.com/
+```
+
+Topics
+
+```text
+postgis, postgresql, sql, python, ogc-api-features, gis, geospatial
+```
+
 ## Pin Order
 
 ```text

@@ -18,6 +18,7 @@ Purpose: demonstrate desktop GIS strength with repeatable analyst workflows.
 - Stack: QGIS, PyQGIS, Python, GeoPackage, GDAL
 - Deliverables: processing scripts, layout export automation, project packaging, and reviewable sample data
 - Why first: it reinforces workstation-grade GIS fundamentals and broadens the portfolio immediately beyond Esri
+- Status: started in the portfolio and published as a standalone repo
 
 ### 2. PostGIS Service and Data Publishing Repo
 
@@ -26,6 +27,7 @@ Purpose: show how cleaned spatial data becomes reusable services.
 - Stack: PostgreSQL, PostGIS, FastAPI or PostgREST, Docker
 - Deliverables: service-ready schemas, API endpoints or SQL-first service exposure, seed data, and spatial QA checks
 - Why second: it extends the existing backend lane while moving into a more open spatial platform story
+- Status: started in the portfolio as `postgis-service-blueprint`
 
 ### 3. Open Web Map Client
 

@@ -5,12 +5,39 @@
   ],
   "executionEnvironments": [
     {
-      "root": ".",
+      "root": "projects/spatial-data-api",
       "extraPaths": [
-        "projects/spatial-data-api/src",
-        "standalone-repos/environmental-monitoring-api/src",
-        "projects/qgis-operations-workbench/src",
+        "projects/spatial-data-api/src"
+      ]
+    },
+    {
+      "root": "standalone-repos/environmental-monitoring-api",
+      "extraPaths": [
+        "standalone-repos/environmental-monitoring-api/src"
+      ]
+    },
+    {
+      "root": "projects/qgis-operations-workbench",
+      "extraPaths": [
+        "projects/qgis-operations-workbench/src"
+      ]
+    },
+    {
+      "root": "standalone-repos/qgis-operations-workbench",
+      "extraPaths": [
         "standalone-repos/qgis-operations-workbench/src"
+      ]
+    },
+    {
+      "root": "projects/postgis-service-blueprint",
+      "extraPaths": [
+        "projects/postgis-service-blueprint/src"
+      ]
+    },
+    {
+      "root": "standalone-repos/postgis-service-blueprint",
+      "extraPaths": [
+        "standalone-repos/postgis-service-blueprint/src"
       ]
     }
   ]

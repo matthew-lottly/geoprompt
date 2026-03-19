@@ -29,5 +29,5 @@
 ## First Public Polish Pass
 
 - Add one exported JSON example or QGIS screenshot from a local workstation run
-- Add a PyQGIS automation script for project or layout export
+- Include the generated GeoPackage in the walkthrough notes and optionally add a PyQGIS automation script for project or layout export
 - Link this repository back to the API and warehouse repos as the desktop GIS companion lane

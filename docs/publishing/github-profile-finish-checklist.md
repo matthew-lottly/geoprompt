@@ -13,8 +13,9 @@ Verified on GitHub on 2026-03-18:
 - `environmental-monitoring-analytics` is public and its README renders the live HTML report screenshot.
 - `monitoring-data-warehouse` is public and renders its README correctly.
 - `experience-builder-station-brief-widget` is public and its README renders the live widget screenshot.
-- `qgis-operations-workbench` has been scaffolded locally but is not yet published.
-- All five repositories still show `No description, website, or topics provided` in the GitHub About box.
+- `qgis-operations-workbench` is public and includes the standalone initial release.
+- `postgis-service-blueprint` has been scaffolded locally but is not yet published.
+- Several repositories still need GitHub About metadata reviewed or refreshed as the new lanes are published.
 
 ## Pin Order
 
@@ -66,6 +67,12 @@ This reads as a coherent story: flagship backend first, then analytics, then war
 - Description: `QGIS-oriented Python project for packaging desktop GIS review workflows, bookmarks, and route-based layout jobs.`
 - Website: `https://lottly-ai.com/`
 - Topics: `qgis`, `pyqgis`, `python`, `gdal`, `geopackage`, `gis`, `geospatial`
+
+### postgis-service-blueprint
+
+- Description: `Open spatial service blueprint for publishing PostGIS-backed layers with collection metadata and query patterns.`
+- Website: `https://lottly-ai.com/`
+- Topics: `postgis`, `postgresql`, `sql`, `python`, `ogc-api-features`, `gis`, `geospatial`
 
 ## GitHub UI Steps
 

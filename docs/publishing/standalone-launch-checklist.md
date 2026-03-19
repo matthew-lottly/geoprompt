@@ -9,8 +9,9 @@ Use this file when you are ready to publish the extracted repositories under [st
 3. `monitoring-data-warehouse`
 4. `experience-builder-station-brief-widget`
 5. `qgis-operations-workbench`
+6. `postgis-service-blueprint`
 
-This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, adds the frontend GIS lane, and then broadens the public stack with a desktop QGIS workflow repo.
+This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, adds the frontend GIS lane, broadens the public stack with a desktop QGIS workflow repo, and then adds an open spatial publishing repo.
 
 ## Before You Start
 
@@ -177,6 +178,37 @@ git push -u origin main
 1. Confirm the preview asset renders in the README.
 2. Confirm the workflow appears under Actions.
 3. Pin this repo after the widget or swap it into the top five once you want the desktop GIS lane visible.
+
+## Repository 6: postgis-service-blueprint
+
+### Create On GitHub
+
+- Name: `postgis-service-blueprint`
+- Visibility: Public
+
+### About Box
+
+- Description: Open spatial service blueprint for publishing PostGIS-backed layers with collection metadata and query patterns.
+- Website: `https://lottly-ai.com/`
+- Topics: `postgis`, `postgresql`, `sql`, `python`, `ogc-api-features`, `gis`, `geospatial`
+
+### Push Commands
+
+```powershell
+Set-Location d:\GitHub\standalone-repos\postgis-service-blueprint
+git init
+git add .
+git commit -m "Initial standalone release"
+git branch -M main
+git remote add origin https://github.com/matthew-lottly/postgis-service-blueprint.git
+git push -u origin main
+```
+
+### After Push
+
+1. Confirm the preview asset renders in the README.
+2. Confirm the workflow appears under Actions.
+3. Pin it when you want the open spatial publishing lane visible on the profile.
 
 ## After All Five Are Live
 
