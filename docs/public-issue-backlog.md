@@ -43,5 +43,5 @@ Completed recently:
 - The standalone repositories now each have an initial issue backlog.
 - The API lane now ships filtered observation rollup summaries in the observation endpoints.
 - The standalone API dashboard now highlights recent alert readings and recent status changes, and issue `environmental-monitoring-api#1` is closed.
-- The analytics lane now ships rolling recent-vs-previous window trend analysis in the generated operations brief, and issue `environmental-monitoring-analytics#1` is ready to close.
+- The analytics lane now ships rolling recent-vs-previous window trend analysis in the generated operations brief, and issue `environmental-monitoring-analytics#1` is closed.
 - GitHub profile pinning still needs to be set manually in the GitHub UI.
