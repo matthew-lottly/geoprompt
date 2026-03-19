@@ -10,8 +10,9 @@ Use this file when you are ready to publish the extracted repositories under [st
 4. `experience-builder-station-brief-widget`
 5. `qgis-operations-workbench`
 6. `postgis-service-blueprint`
+7. `open-web-map-operations-dashboard`
 
-This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, adds the frontend GIS lane, broadens the public stack with a desktop QGIS workflow repo, and then adds an open spatial publishing repo.
+This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, adds the frontend GIS lane, broadens the public stack with a desktop QGIS workflow repo, adds an open spatial publishing repo, and then adds an open web map client.
 
 ## Before You Start
 
@@ -210,7 +211,38 @@ git push -u origin main
 2. Confirm the workflow appears under Actions.
 3. Pin it when you want the open spatial publishing lane visible on the profile.
 
-## After All Five Are Live
+## Repository 7: open-web-map-operations-dashboard
+
+### Create On GitHub
+
+- Name: `open-web-map-operations-dashboard`
+- Visibility: Public
+
+### About Box
+
+- Description: React and TypeScript open web map dashboard for operational layer review, map filtering, and feature inspection patterns.
+- Website: `https://lottly-ai.com/`
+- Topics: `react`, `typescript`, `maplibre`, `openlayers`, `gis`, `geospatial`, `frontend`
+
+### Push Commands
+
+```powershell
+Set-Location d:\GitHub\standalone-repos\open-web-map-operations-dashboard
+git init
+git add .
+git commit -m "Initial standalone release"
+git branch -M main
+git remote add origin https://github.com/matthew-lottly/open-web-map-operations-dashboard.git
+git push -u origin main
+```
+
+### After Push
+
+1. Confirm the preview asset renders in the README.
+2. Confirm the workflow appears under Actions.
+3. Pin it when you want the open web mapping lane visible on the profile.
+
+## After All Seven Are Live
 
 1. Pin repositories in this order:
    - `environmental-monitoring-api`
@@ -218,6 +250,8 @@ git push -u origin main
    - `monitoring-data-warehouse`
    - `experience-builder-station-brief-widget`
    - `qgis-operations-workbench`
+   - `postgis-service-blueprint`
+   - `open-web-map-operations-dashboard`
    - `Matt-Powell`
 2. Set the About section for `Matt-Powell`:
    - Description: `Portfolio repository for backend, GIS, frontend, database, and analytics engineering work.`

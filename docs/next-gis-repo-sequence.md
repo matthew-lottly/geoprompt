@@ -27,7 +27,7 @@ Purpose: show how cleaned spatial data becomes reusable services.
 - Stack: PostgreSQL, PostGIS, FastAPI or PostgREST, Docker
 - Deliverables: service-ready schemas, API endpoints or SQL-first service exposure, seed data, and spatial QA checks
 - Why second: it extends the existing backend lane while moving into a more open spatial platform story
-- Status: started in the portfolio as `postgis-service-blueprint`
+- Status: started in the portfolio and published as `postgis-service-blueprint`
 
 ### 3. Open Web Map Client
 
@@ -36,6 +36,7 @@ Purpose: replace vendor-specific UI framing with a clearly owned frontend mappin
 - Stack: MapLibre GL JS or OpenLayers, TypeScript, Vite, vector tiles or GeoJSON
 - Deliverables: interactive web map, layer toggles, feature inspection, filtering, and operational overlays
 - Why third: it gives the portfolio a real open-stack web map surface to pair with the API and service repos
+- Status: started in the portfolio as `open-web-map-operations-dashboard`
 
 ### 4. Raster and Remote Sensing Pipeline
 

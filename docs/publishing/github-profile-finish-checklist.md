@@ -14,7 +14,8 @@ Verified on GitHub on 2026-03-18:
 - `monitoring-data-warehouse` is public and renders its README correctly.
 - `experience-builder-station-brief-widget` is public and its README renders the live widget screenshot.
 - `qgis-operations-workbench` is public and includes the standalone initial release.
-- `postgis-service-blueprint` has been scaffolded locally but is not yet published.
+- `postgis-service-blueprint` is public and includes the standalone initial release.
+- `open-web-map-operations-dashboard` has been scaffolded locally but is not yet published.
 - Several repositories still need GitHub About metadata reviewed or refreshed as the new lanes are published.
 
 ## Pin Order
@@ -26,9 +27,11 @@ Pin repositories in this order:
 3. `monitoring-data-warehouse`
 4. `experience-builder-station-brief-widget`
 5. `qgis-operations-workbench`
-6. `Matt-Powell`
+6. `postgis-service-blueprint`
+7. `open-web-map-operations-dashboard`
+8. `Matt-Powell`
 
-This reads as a coherent story: flagship backend first, then analytics, then warehouse/data engineering depth, then frontend GIS, then desktop GIS tooling, with the umbrella portfolio repo last.
+This reads as a coherent story: flagship backend first, then analytics, then warehouse/data engineering depth, then frontend GIS, then desktop GIS tooling, then open spatial publishing, then open web mapping, with the umbrella portfolio repo last.
 
 ## Repository Metadata
 
@@ -73,6 +76,12 @@ This reads as a coherent story: flagship backend first, then analytics, then war
 - Description: `Open spatial service blueprint for publishing PostGIS-backed layers with collection metadata and query patterns.`
 - Website: `https://lottly-ai.com/`
 - Topics: `postgis`, `postgresql`, `sql`, `python`, `ogc-api-features`, `gis`, `geospatial`
+
+### open-web-map-operations-dashboard
+
+- Description: `React and TypeScript open web map dashboard for operational layer review, map filtering, and feature inspection patterns.`
+- Website: `https://lottly-ai.com/`
+- Topics: `react`, `typescript`, `maplibre`, `openlayers`, `gis`, `geospatial`, `frontend`
 
 ## GitHub UI Steps
 

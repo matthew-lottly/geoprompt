@@ -10,6 +10,7 @@ Use this when you are ready to move project folders into their own public reposi
 4. `experience-builder-station-brief-widget`
 5. `qgis-operations-workbench`
 6. `postgis-service-blueprint`
+7. `open-web-map-operations-dashboard`
 
 ## Why This Order
 
@@ -19,6 +20,7 @@ Use this when you are ready to move project folders into their own public reposi
 - The widget project closes the loop by showing the frontend GIS interaction layer that complements the backend and data work.
 - The QGIS workbench extends the portfolio into desktop GIS and open-stack analyst workflows.
 - The PostGIS service blueprint adds a distinct open spatial publishing lane between raw GIS data and delivery endpoints.
+- The open web map dashboard adds the open-stack frontend consumer for those spatial services.
 
 ## Proposed Repo Names
 
@@ -28,6 +30,7 @@ Use this when you are ready to move project folders into their own public reposi
 - `experience-builder-station-brief-widget`
 - `qgis-operations-workbench`
 - `postgis-service-blueprint`
+- `open-web-map-operations-dashboard`
 
 ## Shared Publication Checklist
 

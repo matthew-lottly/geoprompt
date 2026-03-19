@@ -142,6 +142,26 @@ Topics
 postgis, postgresql, sql, python, ogc-api-features, gis, geospatial
 ```
 
+## open-web-map-operations-dashboard
+
+Description
+
+```text
+React and TypeScript open web map dashboard for operational layer review, map filtering, and feature inspection patterns.
+```
+
+Website
+
+```text
+https://lottly-ai.com/
+```
+
+Topics
+
+```text
+react, typescript, maplibre, openlayers, gis, geospatial, frontend
+```
+
 ## Pin Order
 
 ```text
@@ -150,7 +170,9 @@ postgis, postgresql, sql, python, ogc-api-features, gis, geospatial
 3. monitoring-data-warehouse
 4. experience-builder-station-brief-widget
 5. qgis-operations-workbench
-6. Matt-Powell
+6. postgis-service-blueprint
+7. open-web-map-operations-dashboard
+8. Matt-Powell
 ```
 
 ## Optional GitHub Profile Bio
