@@ -8,6 +8,7 @@ Use this when you are ready to move project folders into their own public reposi
 2. `environmental-monitoring-analytics`
 3. `monitoring-data-warehouse`
 4. `experience-builder-station-brief-widget`
+5. `qgis-operations-workbench`
 
 ## Why This Order
 
@@ -15,6 +16,7 @@ Use this when you are ready to move project folders into their own public reposi
 - The analytics project is lightweight and fast to publish once the API repo is visible.
 - The warehouse project rounds out the portfolio by showing database-engineering depth.
 - The widget project closes the loop by showing the frontend GIS interaction layer that complements the backend and data work.
+- The QGIS workbench extends the portfolio into desktop GIS and open-stack analyst workflows.
 
 ## Proposed Repo Names
 
@@ -22,6 +24,7 @@ Use this when you are ready to move project folders into their own public reposi
 - `environmental-monitoring-analytics`
 - `monitoring-data-warehouse`
 - `experience-builder-station-brief-widget`
+- `qgis-operations-workbench`
 
 ## Shared Publication Checklist
 

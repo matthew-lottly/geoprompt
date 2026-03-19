@@ -8,7 +8,9 @@
       "root": ".",
       "extraPaths": [
         "projects/spatial-data-api/src",
-        "standalone-repos/environmental-monitoring-api/src"
+        "standalone-repos/environmental-monitoring-api/src",
+        "projects/qgis-operations-workbench/src",
+        "standalone-repos/qgis-operations-workbench/src"
       ]
     }
   ]

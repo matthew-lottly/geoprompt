@@ -8,8 +8,9 @@ Use this file when you are ready to publish the extracted repositories under [st
 2. `environmental-monitoring-analytics`
 3. `monitoring-data-warehouse`
 4. `experience-builder-station-brief-widget`
+5. `qgis-operations-workbench`
 
-This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, and then adds the frontend GIS lane.
+This order puts the strongest flagship repo live first, adds analytics depth, closes the backend/data story with warehouse modeling, adds the frontend GIS lane, and then broadens the public stack with a desktop QGIS workflow repo.
 
 ## Before You Start
 
@@ -146,13 +147,45 @@ git push -u origin main
 2. Confirm the workflow appears under Actions.
 3. Pin this repo fourth on your GitHub profile.
 
-## After All Four Are Live
+## Repository 5: qgis-operations-workbench
+
+### Create On GitHub
+
+- Name: `qgis-operations-workbench`
+- Visibility: Public
+
+### About Box
+
+- Description: QGIS-oriented Python project for packaging desktop GIS review workflows, bookmarks, and route-based layout jobs.
+- Website: `https://lottly-ai.com/`
+- Topics: `qgis`, `pyqgis`, `python`, `gdal`, `geopackage`, `gis`, `geospatial`
+
+### Push Commands
+
+```powershell
+Set-Location d:\GitHub\standalone-repos\qgis-operations-workbench
+git init
+git add .
+git commit -m "Initial standalone release"
+git branch -M main
+git remote add origin https://github.com/matthew-lottly/qgis-operations-workbench.git
+git push -u origin main
+```
+
+### After Push
+
+1. Confirm the preview asset renders in the README.
+2. Confirm the workflow appears under Actions.
+3. Pin this repo after the widget or swap it into the top five once you want the desktop GIS lane visible.
+
+## After All Five Are Live
 
 1. Pin repositories in this order:
    - `environmental-monitoring-api`
    - `environmental-monitoring-analytics`
    - `monitoring-data-warehouse`
    - `experience-builder-station-brief-widget`
+   - `qgis-operations-workbench`
    - `Matt-Powell`
 2. Set the About section for `Matt-Powell`:
    - Description: `Portfolio repository for backend, GIS, frontend, database, and analytics engineering work.`

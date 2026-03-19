@@ -13,6 +13,7 @@ Verified on GitHub on 2026-03-18:
 - `environmental-monitoring-analytics` is public and its README renders the live HTML report screenshot.
 - `monitoring-data-warehouse` is public and renders its README correctly.
 - `experience-builder-station-brief-widget` is public and its README renders the live widget screenshot.
+- `qgis-operations-workbench` has been scaffolded locally but is not yet published.
 - All five repositories still show `No description, website, or topics provided` in the GitHub About box.
 
 ## Pin Order
@@ -23,9 +24,10 @@ Pin repositories in this order:
 2. `environmental-monitoring-analytics`
 3. `monitoring-data-warehouse`
 4. `experience-builder-station-brief-widget`
-5. `Matt-Powell`
+5. `qgis-operations-workbench`
+6. `Matt-Powell`
 
-This reads as a coherent story: flagship backend first, then analytics, then warehouse/data engineering depth, then frontend GIS, with the umbrella portfolio repo last.
+This reads as a coherent story: flagship backend first, then analytics, then warehouse/data engineering depth, then frontend GIS, then desktop GIS tooling, with the umbrella portfolio repo last.
 
 ## Repository Metadata
 
@@ -58,6 +60,12 @@ This reads as a coherent story: flagship backend first, then analytics, then war
 - Description: `React and TypeScript GIS widget prototype inspired by ArcGIS Experience Builder patterns for filtering, summaries, and station detail interaction.`
 - Website: `https://lottly-ai.com/`
 - Topics: `react`, `typescript`, `arcgis`, `experience-builder`, `gis`, `frontend`, `geospatial`
+
+### qgis-operations-workbench
+
+- Description: `QGIS-oriented Python project for packaging desktop GIS review workflows, bookmarks, and route-based layout jobs.`
+- Website: `https://lottly-ai.com/`
+- Topics: `qgis`, `pyqgis`, `python`, `gdal`, `geopackage`, `gis`, `geospatial`
 
 ## GitHub UI Steps
 

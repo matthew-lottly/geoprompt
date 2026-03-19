@@ -102,6 +102,26 @@ Topics
 react, typescript, arcgis, experience-builder, gis, frontend, geospatial
 ```
 
+## qgis-operations-workbench
+
+Description
+
+```text
+QGIS-oriented Python project for packaging desktop GIS review workflows, bookmarks, and route-based layout jobs.
+```
+
+Website
+
+```text
+https://lottly-ai.com/
+```
+
+Topics
+
+```text
+qgis, pyqgis, python, gdal, geopackage, gis, geospatial
+```
+
 ## Pin Order
 
 ```text
@@ -109,7 +129,8 @@ react, typescript, arcgis, experience-builder, gis, frontend, geospatial
 2. environmental-monitoring-analytics
 3. monitoring-data-warehouse
 4. experience-builder-station-brief-widget
-5. Matt-Powell
+5. qgis-operations-workbench
+6. Matt-Powell
 ```
 
 ## Optional GitHub Profile Bio
