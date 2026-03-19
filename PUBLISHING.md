@@ -54,15 +54,15 @@ Use this flow when PyPI Trusted Publishing is connected to GitHub:
 
 1. Ensure the Trusted Publisher entry in PyPI points at the `matthew-lottly/geoprompt` repository.
 2. Set the workflow file to `.github/workflows/publish-pypi.yml`.
-3. Set the environment name to `pypi` if PyPI asks for it.
-4. Push a tag such as `v0.1.0`.
+3. Leave the environment name empty unless you explicitly add an environment requirement to the workflow.
+4. Push a tag such as `v0.1.1`.
 5. Watch the `Publish To PyPI` workflow in GitHub Actions.
 
 Example tag commands:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 ## First Public Polish Pass
