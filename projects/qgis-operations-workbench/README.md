@@ -2,8 +2,6 @@
 
 Desktop GIS portfolio project for packaging repeatable QGIS-oriented review workflows, layout tasks, bookmarks, and field-ready inspection context.
 
-![Workbench preview](assets/workbench-preview.svg)
-
 ## Snapshot
 
 - Lane: Desktop GIS and operations workflows
@@ -44,8 +42,6 @@ qgis-operations-workbench/
 |   `-- workbench.py
 |-- tests/
 |   `-- test_workbench.py
-|-- assets/
-|   `-- workbench-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md

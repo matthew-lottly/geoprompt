@@ -9,12 +9,15 @@ from math import sqrt
 from pathlib import Path
 from typing import Any, Sequence
 
+import matplotlib.pyplot as plt
+
 from station_risk_classification_lab.workflow_base import ReportWorkflow
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "station_risk_samples.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DEFAULT_CHART_DIR_NAME = "charts"
 DEFAULT_REGISTRY_NAME = "run_registry.json"
 DEFAULT_TEST_SIZE = 3
 FEATURE_NAMES = (
@@ -227,6 +230,33 @@ def _build_training_profile(samples: Sequence[SampleRecord]) -> dict[str, Any]:
     }
 
 
+def _plot_leaderboard_chart(output_dir: Path, leaderboard: list[dict[str, Any]]) -> str:
+    chart_dir = output_dir / DEFAULT_CHART_DIR_NAME
+    chart_dir.mkdir(parents=True, exist_ok=True)
+
+    chart_path = chart_dir / "classifier-leaderboard-review.png"
+    model_labels = [item["model"] for item in leaderboard]
+    f1_scores = [item["f1Score"] for item in leaderboard]
+    accuracies = [item["accuracy"] for item in leaderboard]
+    positions = list(range(len(model_labels)))
+
+    figure, axis = plt.subplots(figsize=(9.5, 5.5))
+    axis.barh([position + 0.18 for position in positions], f1_scores, height=0.32, color="#c76a2d", label="F1 score")
+    axis.barh([position - 0.18 for position in positions], accuracies, height=0.32, color="#305f8c", label="Accuracy")
+    axis.set_yticks(positions)
+    axis.set_yticklabels(model_labels)
+    axis.invert_yaxis()
+    axis.set_xlim(0, 1.05)
+    axis.set_xlabel("Metric value")
+    axis.set_title("Classifier leaderboard review")
+    axis.grid(axis="x", alpha=0.25)
+    axis.legend(loc="lower right")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(output_dir).as_posix()
+
+
 @dataclass(slots=True)
 class RiskClassificationLab(ReportWorkflow):
     data_path: Path = DEFAULT_DATA_PATH
@@ -361,7 +391,20 @@ class RiskClassificationLab(ReportWorkflow):
         }
 
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        return super().export_report(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        report["artifacts"] = {
+            "charts": [
+                {
+                    "name": "classifier_leaderboard_review",
+                    "chart": _plot_leaderboard_chart(output_dir, report["modelLeaderboard"]),
+                }
+            ]
+        }
+        output_path = output_dir / self.output_filename
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        self._update_run_registry(output_dir, self.build_registry_entry(report, output_path))
+        return output_path
 
 
 def build_risk_report(

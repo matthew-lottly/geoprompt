@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/dashboard-preview.svg`
+Reference artifact: a real application screenshot or short screen capture from the running dashboard.
 
 ## 1. Frame the use case
 

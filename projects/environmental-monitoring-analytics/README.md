@@ -2,8 +2,6 @@
 
 Analytics project for turning monitoring station observations into concise operational reporting and shareable HTML summaries.
 
-![Report preview](assets/report-preview.svg)
-
 ![HTML report screenshot](assets/report-live-screenshot.png)
 
 ## Snapshot

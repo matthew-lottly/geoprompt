@@ -24,7 +24,7 @@
 2. Copy the contents of this project folder into the new repository root.
 3. Preserve `.env.example`, Docker files, `sql/`, `src/`, and `tests/`.
 4. Set the repository About description and topics using the values above.
-5. Add one screenshot or GIF based on [assets/dashboard-preview.svg](assets/dashboard-preview.svg).
+5. Add one real screenshot or GIF from the running API UI, Swagger, or another actual result view. Do not base it on placeholder illustration art.
 
 For a local copy operation, use [docs/publishing/extract-environmental-monitoring-api.ps1](../../docs/publishing/extract-environmental-monitoring-api.ps1).
 

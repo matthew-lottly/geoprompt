@@ -23,7 +23,7 @@
 1. Create a new empty repository named `postgis-service-blueprint`.
 2. Copy this project folder into the new repository root.
 3. Preserve `data/`, `sql/`, `src/`, `tests/`, and `pyproject.toml`.
-4. Use [assets/service-preview.svg](assets/service-preview.svg) as the initial visual preview.
+4. Use a real API artifact, schema diagram, or service screenshot. Do not use placeholder illustration art.
 5. Reference [docs/architecture.md](docs/architecture.md) and [docs/demo-storyboard.md](docs/demo-storyboard.md) from the README when polishing the public pitch.
 
 ## First Public Polish Pass

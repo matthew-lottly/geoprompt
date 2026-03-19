@@ -23,7 +23,7 @@
 2. Copy this project folder into the new repository root.
 3. Preserve `data/`, `src/`, `tests/`, and `pyproject.toml`.
 4. Add the sample output from [docs/sample-operations-brief.md](docs/sample-operations-brief.md) to the README or docs.
-5. Use [assets/report-preview.svg](assets/report-preview.svg) as the initial visual preview.
+5. Use the real screenshot at [assets/report-live-screenshot.png](assets/report-live-screenshot.png), or replace it with a newer workflow-generated screenshot.
 
 For a local copy operation, use [../../docs/publishing/extract-environmental-monitoring-analytics.ps1](../../docs/publishing/extract-environmental-monitoring-analytics.ps1).
 

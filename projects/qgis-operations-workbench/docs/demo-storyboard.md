@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/workbench-preview.svg`
+Reference artifact: a real map export, layout screenshot, or other generated analyst output.
 
 ## 1. Frame the use case
 

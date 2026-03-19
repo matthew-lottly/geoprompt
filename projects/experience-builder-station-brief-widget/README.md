@@ -2,11 +2,7 @@
 
 Public-safe TypeScript and React prototype inspired by ArcGIS Experience Builder interaction patterns for station filtering, operational summaries, coverage-map interaction, and selection-driven detail panels.
 
-![Concept preview for the station brief widget prototype](assets/widget-preview.svg)
-
 ![Browser screenshot of the station brief widget prototype](assets/widget-live-screenshot.png)
-
-![Interaction storyboard for the station brief widget prototype](assets/widget-interaction-walkthrough.svg)
 
 ## Snapshot
 

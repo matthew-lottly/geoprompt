@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/anomaly-preview.svg`
+Reference artifact: a real ranking chart, alert table screenshot, or other workflow-generated output. If no real visual is available yet, do not lead with a placeholder image.
 
 ## 1. Frame the use case
 

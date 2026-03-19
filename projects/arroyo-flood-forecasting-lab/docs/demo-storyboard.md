@@ -7,7 +7,7 @@ Show a flood-forecasting workflow that moves from a real public stage series to 
 ## Suggested Walkthrough
 
 1. Start in the README to frame the project as a Python recreation of a flood-forecasting case study using a public South Texas analog gauge.
-2. Open the preview asset to show raw and denoised hydrograph behavior at a glance.
+2. Open the README hero image at `assets/hydrograph-overview-live.png` to show a real generated hydrograph before diving into the fuller chart pack.
 3. Open the generated `outputs/charts/hydrograph-overview.png` and `outputs/charts/pmse-by-order.png` charts to compare the raw and denoised branches quickly.
 4. Use `outputs/charts/lag-diagnostics.png` to discuss order selection with the ACF and PACF panels.
 5. Highlight the Monte Carlo percentile bands and review-threshold exceedance probabilities from the holdout and threshold charts.

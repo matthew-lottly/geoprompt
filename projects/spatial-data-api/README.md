@@ -2,8 +2,6 @@
 
 Production-style backend for monitoring stations, environmental observations, and spatial status reporting through a typed API.
 
-![Dashboard preview](assets/dashboard-preview.svg)
-
 ## Snapshot
 
 - Lane: Backend + GIS

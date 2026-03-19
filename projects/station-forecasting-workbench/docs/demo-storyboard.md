@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/forecast-preview.svg`
+Reference artifact: a real forecast chart or other generated review output.
 
 ## 1. Frame the use case
 
@@ -12,7 +12,7 @@ Show the JSON fixture and note the train-validation-test split plus the feature 
 
 ## 3. Run the workbench
 
-Generate `outputs/station_forecast_report.json` and review the experiment metadata, validation leaderboard, selected forecast per station, test error, and next-step projections.
+Generate `outputs/station_forecast_report.json`, open `assets/station-west-air-001-forecast-review-live.png` as the committed real visual, then review the fuller `outputs/charts/*.png` set alongside the experiment metadata, validation leaderboard, selected forecast per station, test error, and next-step projections.
 
 ## 4. Explain the extension path
 

@@ -2,8 +2,6 @@
 
 Open-stack GIS analysis project for comparing raster snapshots, flagging hotspots, and packaging change-detection output for downstream review.
 
-![Raster pipeline preview](assets/raster-preview.svg)
-
 ## Snapshot
 
 - Lane: Raster analysis and monitoring
@@ -36,8 +34,6 @@ raster-monitoring-pipeline/
 |   `-- pipeline.py
 |-- tests/
 |   `-- test_pipeline.py
-|-- assets/
-|   `-- raster-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md

@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/raster-preview.svg`
+Reference artifact: a real raster-difference image, hotspot map, or other generated output.
 
 ## 1. Frame the use case
 

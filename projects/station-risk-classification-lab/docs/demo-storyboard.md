@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/classification-preview.svg`
+Reference artifact: a real leaderboard screenshot, confusion summary, or other generated classification output.
 
 ## 1. Frame the use case
 
@@ -12,7 +12,7 @@ Show the JSON fixture and note that each station snapshot includes recent level,
 
 ## 3. Run the lab
 
-Generate `outputs/station_risk_report.json` and review the experiment metadata, classifier leaderboard, selected model metrics, and explainable holdout predictions.
+Generate `outputs/station_risk_report.json`, open `assets/classifier-leaderboard-review-live.png` as the committed real visual, then review the fuller `outputs/charts/*.png` set alongside the experiment metadata, classifier leaderboard, selected model metrics, and explainable holdout predictions.
 
 ## 4. Explain the extension path
 

@@ -2,8 +2,6 @@
 
 Remote sensing portfolio project recreating a Gulf Coast flood-inundation study with Google Earth Engine, Landsat classification, and gauge-validation summary workflows.
 
-![Gulf Coast inundation preview](assets/gulf-coast-inundation-preview.svg)
-
 ## Snapshot
 
 - Lane: Remote sensing and inundation mapping
@@ -27,8 +25,6 @@ This project recreates the structure of your Gulf Coast inundation article as a 
 
 ```text
 gulf-coast-inundation-lab/
-|-- assets/
-|   `-- gulf-coast-inundation-preview.svg
 |-- data/
 |   |-- gauge_validation_manifest.geojson
 |   |-- gauge_validation_sample.csv

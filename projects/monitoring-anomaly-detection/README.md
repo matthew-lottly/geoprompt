@@ -2,8 +2,6 @@
 
 Data science portfolio project for detector comparison, labeled-event evaluation, ranking suspicious sensor events, and packaging triage-ready anomaly reports.
 
-![Monitoring anomaly detection preview](assets/anomaly-preview.svg)
-
 ## Snapshot
 
 - Lane: Data science and anomaly detection
@@ -36,8 +34,6 @@ monitoring-anomaly-detection/
 |   `-- pipeline.py
 |-- tests/
 |   `-- test_pipeline.py
-|-- assets/
-|   `-- anomaly-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md

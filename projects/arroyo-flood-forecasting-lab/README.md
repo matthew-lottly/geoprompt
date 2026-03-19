@@ -2,7 +2,7 @@
 
 Data science portfolio project recreating the structure of an Arroyo Colorado flood-forecasting study with wavelet denoising, autoregressive model selection, and Monte Carlo scenario review.
 
-![Arroyo flood forecasting preview](assets/flood-forecast-preview.svg)
+![Generated hydrograph overview from the flood forecasting workflow](assets/hydrograph-overview-live.png)
 
 ## Snapshot
 

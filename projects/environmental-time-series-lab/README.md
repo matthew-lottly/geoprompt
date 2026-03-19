@@ -2,8 +2,6 @@
 
 Data science portfolio project for temporal diagnostics, baseline comparison, and reviewable time-series outputs across environmental monitoring stations.
 
-![Environmental time series lab preview](assets/time-series-preview.svg)
-
 ## Snapshot
 
 - Lane: Data science and time-series analysis

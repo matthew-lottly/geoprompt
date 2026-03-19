@@ -43,6 +43,10 @@ def test_export_forecast_report(tmp_path: Path) -> None:
     content = output_path.read_text(encoding="utf-8")
     assert "Forecast Review" in content
     assert "baseline-model-review" in content
+    assert "artifacts" in content
+    assert "charts" in content
+    chart_path = tmp_path / "charts" / "station-west-air-001-forecast-review.png"
+    assert chart_path.exists()
     registry_path = tmp_path / "run_registry.json"
     assert registry_path.exists()
     registry = registry_path.read_text(encoding="utf-8")

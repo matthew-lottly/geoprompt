@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/widget-interaction-walkthrough.svg`
+Reference artifact: the real browser screenshot in `assets/widget-live-screenshot.png`, plus a real GIF or screen capture if you add one later.
 
 ## 1. Frame the use case
 

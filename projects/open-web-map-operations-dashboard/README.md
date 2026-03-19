@@ -2,8 +2,6 @@
 
 Open-stack GIS frontend project for reviewing operational layers, regional filters, and map-driven status patterns without relying on vendor-specific UI framing.
 
-![Dashboard preview](assets/dashboard-preview.svg)
-
 ## Snapshot
 
 - Lane: Open web mapping
@@ -40,8 +38,6 @@ open-web-map-operations-dashboard/
 |       `-- types.ts
 |-- tests/
 |   `-- app.test.tsx
-|-- assets/
-|   `-- dashboard-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md

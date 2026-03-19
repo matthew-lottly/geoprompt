@@ -2,7 +2,7 @@
 
 Data science portfolio project for experiment-style model comparison, train-validation-test evaluation, feature profiling, and station-level projection artifacts.
 
-![Station forecasting workbench preview](assets/forecast-preview.svg)
+![Generated forecast review chart from the forecasting workflow](assets/station-west-air-001-forecast-review-live.png)
 
 ## Snapshot
 
@@ -25,7 +25,7 @@ This project frames data science as a forecasting workflow rather than just desc
 
 ## Current Output
 
-The default command writes `outputs/station_forecast_report.json` with:
+The default command writes `outputs/station_forecast_report.json` and a chart pack under `outputs/charts/` with:
 
 - experiment run metadata and split configuration
 - a persisted `outputs/run_registry.json` entry for each export
@@ -34,6 +34,7 @@ The default command writes `outputs/station_forecast_report.json` with:
 - selected forecast model per series
 - post-selection test MAE by station
 - future projections from the winning model
+- one forecast review chart per station showing the observed history, validation/test split, and projected path
 
 ## Next Upgrade Path
 

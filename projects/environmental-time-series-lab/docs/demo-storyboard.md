@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/time-series-preview.svg`
+Reference artifact: a real chart or screenshot generated from the workflow output. If no real visual is available yet, do not lead with a placeholder image.
 
 ## 1. Frame the use case
 

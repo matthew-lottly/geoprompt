@@ -1,6 +1,6 @@
 # Demo Storyboard
 
-Reference asset: `assets/service-preview.svg`
+Reference artifact: a real API response screenshot, schema diagram, or published service output.
 
 ## 1. Frame the use case
 

@@ -2,7 +2,7 @@
 
 Data science portfolio project for station risk scoring, candidate classifier comparison, and explainable review outputs that support alert prioritization.
 
-![Station risk classification lab preview](assets/classification-preview.svg)
+![Generated classifier leaderboard chart from the classification workflow](assets/classifier-leaderboard-review-live.png)
 
 ## Snapshot
 
@@ -37,8 +37,6 @@ station-risk-classification-lab/
 |   `-- lab.py
 |-- tests/
 |   `-- test_lab.py
-|-- assets/
-|   `-- classification-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md
@@ -63,7 +61,7 @@ pytest
 
 ## Current Output
 
-The default command writes `outputs/station_risk_report.json` with:
+The default command writes `outputs/station_risk_report.json` and a chart pack under `outputs/charts/` with:
 
 - experiment run metadata and class-balance summary
 - a persisted `outputs/run_registry.json` entry for each export
@@ -71,6 +69,7 @@ The default command writes `outputs/station_risk_report.json` with:
 - holdout predictions from the selected classifier
 - top risk drivers for each reviewed station
 - operational notes for triage and extension
+- a classifier leaderboard chart showing the exported F1 and accuracy comparison across candidate models
 
 See [docs/architecture.md](docs/architecture.md) for the design notes.
 See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.

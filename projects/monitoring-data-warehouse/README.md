@@ -2,8 +2,6 @@
 
 Database-engineering project for modeling, building, and validating a monitoring warehouse from operational station data.
 
-![Warehouse preview](assets/warehouse-preview.svg)
-
 ## Snapshot
 
 - Lane: Database engineering

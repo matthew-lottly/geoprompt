@@ -2,8 +2,6 @@
 
 Open-stack GIS portfolio project for shaping how PostGIS-backed layers become publishable spatial services.
 
-![Service blueprint preview](assets/service-preview.svg)
-
 ## Snapshot
 
 - Lane: Spatial services and data publishing
@@ -43,8 +41,6 @@ postgis-service-blueprint/
 |   `-- blueprint.py
 |-- tests/
 |   `-- test_blueprint.py
-|-- assets/
-|   `-- service-preview.svg
 |-- docs/
 |   |-- architecture.md
 |   `-- demo-storyboard.md

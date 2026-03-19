@@ -8,12 +8,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Sequence
 
+import matplotlib.pyplot as plt
+
 from station_forecasting_workbench.workflow_base import ReportWorkflow
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "forecast_histories.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
+DEFAULT_CHART_DIR_NAME = "charts"
 DEFAULT_REGISTRY_NAME = "run_registry.json"
 DEFAULT_VALIDATION_HORIZON = 1
 DEFAULT_TEST_HORIZON = 1
@@ -98,6 +101,67 @@ def _feature_set_for_model(model_name: str) -> str:
     if model_name in {"drift", "linear_regression"}:
         return "trend_profile"
     return "recent_level"
+
+
+def _sanitize_chart_slug(value: str) -> str:
+    return value.replace("_", "-")
+
+
+def _build_series_timeline(train: list[float], validation: list[float], test: list[float]) -> list[int]:
+    return list(range(1, len(train) + len(validation) + len(test) + 1))
+
+
+def _plot_forecast_series(output_dir: Path, forecast: dict[str, Any]) -> str:
+    chart_dir = output_dir / DEFAULT_CHART_DIR_NAME
+    chart_dir.mkdir(parents=True, exist_ok=True)
+
+    dataset_split = forecast["datasetSplit"]
+    train = dataset_split["train"]
+    validation = dataset_split["validation"]
+    test = dataset_split["test"]
+    projection = forecast["projection"]
+
+    history = train + validation + test
+    history_steps = _build_series_timeline(train, validation, test)
+    projection_steps = list(range(len(history) + 1, len(history) + len(projection) + 1))
+
+    chart_slug = _sanitize_chart_slug(forecast["stationId"])
+    chart_path = chart_dir / f"{chart_slug}-forecast-review.png"
+
+    figure, axis = plt.subplots(figsize=(10, 5.5))
+    axis.plot(history_steps, history, color="#244d7c", linewidth=2.5, marker="o", label="Observed history")
+    axis.plot(projection_steps, projection, color="#c76a2d", linewidth=2.5, marker="o", linestyle="--", label="Projected path")
+
+    if validation:
+        axis.axvspan(len(train) + 0.5, len(train) + len(validation) + 0.5, color="#f3e1a2", alpha=0.35, label="Validation window")
+    if test:
+        axis.axvspan(
+            len(train) + len(validation) + 0.5,
+            len(history) + 0.5,
+            color="#d5e7d4",
+            alpha=0.35,
+            label="Test window",
+        )
+
+    axis.set_title(f"{forecast['stationId']} forecast review", fontsize=14)
+    axis.set_xlabel("Time step")
+    axis.set_ylabel(forecast["metric"])
+    axis.grid(alpha=0.25)
+    axis.legend(loc="best")
+    figure.tight_layout()
+    figure.savefig(chart_path, dpi=160)
+    plt.close(figure)
+    return chart_path.relative_to(output_dir).as_posix()
+
+
+def _export_forecast_charts(output_dir: Path, forecasts: list[dict[str, Any]]) -> list[dict[str, str]]:
+    return [
+        {
+            "stationId": forecast["stationId"],
+            "chart": _plot_forecast_series(output_dir, forecast),
+        }
+        for forecast in forecasts
+    ]
 
 
 def _split_series(values: list[float], validation_horizon: int, test_horizon: int) -> tuple[list[float], list[float], list[float]]:
@@ -224,7 +288,15 @@ class ForecastWorkbench(ReportWorkflow):
         }
 
     def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
-        return super().export_report(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        report["artifacts"] = {
+            "charts": _export_forecast_charts(output_dir, report["forecasts"]),
+        }
+        output_path = output_dir / self.output_filename
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        self._update_run_registry(output_dir, self.build_registry_entry(report, output_path))
+        return output_path
 
 
 def build_forecast_report(

@@ -23,7 +23,7 @@
 1. Create a new empty repository named `experience-builder-station-brief-widget`.
 2. Copy this project folder into the new repository root.
 3. Preserve `src/`, `tests/`, `assets/`, `docs/`, and the frontend build files.
-4. Use `assets/widget-preview.svg` and `assets/widget-live-screenshot.png` as the initial public visuals.
+4. Use `assets/widget-live-screenshot.png` as the initial public visual, and add a real GIF or browser capture if you want a second visual.
 5. Reference `docs/architecture.md` and `docs/demo-storyboard.md` from the README when polishing the public pitch.
 
 ## First Public Polish Pass
