@@ -4,15 +4,15 @@ Reference asset: `assets/forecast-preview.svg`
 
 ## 1. Frame the use case
 
-Introduce the repo as the forecasting lane for station-level operational planning.
+Introduce the repo as the forecasting lane for station-level operational planning and model review.
 
 ## 2. Explain the historical series
 
-Show the JSON fixture and note the train-holdout split.
+Show the JSON fixture and note the train-holdout split plus the feature profile built from recent history.
 
 ## 3. Run the workbench
 
-Generate `outputs/station_forecast_report.json` and review MAE plus next-step forecasts.
+Generate `outputs/station_forecast_report.json` and review the model leaderboard, selected forecast per station, and next-step projections.
 
 ## 4. Explain the extension path
 

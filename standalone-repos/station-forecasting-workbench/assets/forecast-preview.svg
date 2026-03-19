@@ -18,9 +18,9 @@
   <rect x="48" y="356" width="1104" height="316" rx="28" fill="#fbfaf8" stroke="#d9cbb9"/>
   <polyline points="92,576 188,548 284,524 380,492 476,470 572,438 668,420" fill="none" stroke="#8d5b3e" stroke-width="8"/>
   <polyline points="572,438 668,434 764,430" fill="none" stroke="#284f74" stroke-width="8" stroke-dasharray="14 10"/>
-  <text x="812" y="420" fill="#7a6f63" font-family="Georgia, serif" font-size="14" letter-spacing="2">FORECAST NOTES</text>
-  <text x="812" y="454" fill="#221b15" font-family="Georgia, serif" font-size="28">Trailing Average Baseline</text>
-  <text x="812" y="508" fill="#221b15" font-family="Georgia, serif" font-size="20">West air projected to remain elevated</text>
-  <text x="812" y="544" fill="#221b15" font-family="Georgia, serif" font-size="20">Central flow stabilizes around recent average</text>
-  <text x="812" y="580" fill="#221b15" font-family="Georgia, serif" font-size="20">East temperature remains narrow-band</text>
+  <text x="812" y="420" fill="#7a6f63" font-family="Georgia, serif" font-size="14" letter-spacing="2">MODEL REVIEW</text>
+  <text x="812" y="454" fill="#221b15" font-family="Georgia, serif" font-size="28">Forecast Leaderboard</text>
+  <text x="812" y="508" fill="#221b15" font-family="Georgia, serif" font-size="20">West air favors a trend-aware forecast</text>
+  <text x="812" y="544" fill="#221b15" font-family="Georgia, serif" font-size="20">Central flow holds on a last-value baseline</text>
+  <text x="812" y="580" fill="#221b15" font-family="Georgia, serif" font-size="20">East temperature remains near-perfectly linear</text>
 </svg>

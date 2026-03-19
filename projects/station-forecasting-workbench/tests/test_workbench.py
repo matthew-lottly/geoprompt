@@ -18,8 +18,14 @@ def test_build_forecast_report() -> None:
 
     assert report["summary"]["seriesCount"] == 3
     assert report["summary"]["forecastHorizon"] == 2
+    assert report["summary"]["projectionHorizon"] == 3
+    assert report["summary"]["averageWinningMae"] < 0.2
     assert report["forecasts"][0]["trainingWindow"] == 6
-    assert report["forecasts"][0]["nextForecast"] == 13.03
+    assert report["forecasts"][0]["featureProfile"]["trailingMean3"] == 13.03
+    assert report["forecasts"][0]["selectedModel"] in {"drift", "linear_regression", "last_value", "trailing_average_3"}
+    assert len(report["forecasts"][0]["modelLeaderboard"]) == 4
+    assert report["forecasts"][0]["modelLeaderboard"][0]["holdoutMae"] <= report["forecasts"][0]["modelLeaderboard"][1]["holdoutMae"]
+    assert len(report["forecasts"][0]["projection"]) == 3
 
 
 def test_export_forecast_report(tmp_path: Path) -> None:
