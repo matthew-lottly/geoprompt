@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from collections import Counter, defaultdict
@@ -106,6 +107,145 @@ def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[s
     return registry_path
 
 
+@dataclass(slots=True)
+class AnomalyDetectionWorkflow:
+    data_path: Path = DEFAULT_DATA_PATH
+    report_name: str = "Monitoring Anomaly Detection"
+    run_label: str = "detector-comparison-pass"
+    warmup_window: int = DEFAULT_WARMUP_WINDOW
+    registry_name: str = DEFAULT_REGISTRY_NAME
+
+    def load_observations(self) -> list[dict[str, Any]]:
+        return load_observations(self.data_path)
+
+    def build_report(self) -> dict[str, Any]:
+        observations = self.load_observations()
+        grouped_values: dict[str, list[float]] = defaultdict(list)
+
+        for observation in observations:
+            grouped_values[observation["stationId"]].append(observation["value"])
+
+        baselines = {
+            station_id: {
+                "mean": round(mean(values), 2),
+                "stddev": round(_safe_stddev(values), 2),
+            }
+            for station_id, values in grouped_values.items()
+        }
+
+        scored_events: list[dict[str, Any]] = []
+        selected_alerts: list[dict[str, Any]] = []
+        station_alert_counts: dict[str, int] = defaultdict(int)
+        detector_wins: Counter[str] = Counter()
+
+        station_histories: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for observation in observations:
+            station_histories[observation["stationId"]].append(observation)
+
+        for station_id, station_observations in station_histories.items():
+            for index, observation in enumerate(station_observations):
+                if index < self.warmup_window:
+                    continue
+                history_values = [item["value"] for item in station_observations[:index]]
+                scores = {
+                    detector: round(score, 2)
+                    for detector, score in _detector_scores(history_values, observation["value"], self.warmup_window).items()
+                }
+                flags = {
+                    detector: score >= DETECTOR_THRESHOLDS[detector]
+                    for detector, score in scores.items()
+                }
+                scored_events.append(
+                    {
+                        "stationId": station_id,
+                        "metric": observation["metric"],
+                        "timestamp": observation["timestamp"],
+                        "value": observation["value"],
+                        "isKnownEvent": observation["isKnownEvent"],
+                        "scores": scores,
+                        "flags": flags,
+                    }
+                )
+
+        detector_leaderboard = [_evaluate_detector(scored_events, detector) for detector in DETECTOR_THRESHOLDS]
+        detector_leaderboard.sort(key=lambda detector: (-detector["f1Score"], -detector["precision"], detector["detector"]))
+        selected_detector = detector_leaderboard[0]["detector"]
+        detector_wins[selected_detector] += 1
+
+        for event in scored_events:
+            if event["flags"][selected_detector]:
+                baseline = baselines[event["stationId"]]
+                selected_alerts.append(
+                    {
+                        "stationId": event["stationId"],
+                        "metric": event["metric"],
+                        "timestamp": event["timestamp"],
+                        "value": event["value"],
+                        "isKnownEvent": event["isKnownEvent"],
+                        "baselineMean": baseline["mean"],
+                        "selectedScore": event["scores"][selected_detector],
+                        "selectedDetector": selected_detector,
+                    }
+                )
+                station_alert_counts[event["stationId"]] += 1
+
+        scored_events.sort(key=lambda event: event["scores"][selected_detector], reverse=True)
+        selected_alerts.sort(key=lambda alert: alert["selectedScore"], reverse=True)
+
+        return {
+            "reportName": self.report_name,
+            "experiment": {
+                "runLabel": self.run_label,
+                "generatedAt": datetime.now(UTC).isoformat(),
+                "registryFile": self.registry_name,
+                "warmupWindow": self.warmup_window,
+                "detectorCount": len(DETECTOR_THRESHOLDS),
+                "thresholds": DETECTOR_THRESHOLDS,
+            },
+            "summary": {
+                "observationCount": len(observations),
+                "stationCount": len(grouped_values),
+                "scoredEventCount": len(scored_events),
+                "knownEventCount": sum(observation["isKnownEvent"] for observation in observations),
+                "selectedAlertCount": len(selected_alerts),
+                "selectedDetector": selected_detector,
+                "selectedDetectorF1": detector_leaderboard[0]["f1Score"],
+                "detectorWins": dict(detector_wins),
+            },
+            "stationBaselines": baselines,
+            "detectorLeaderboard": detector_leaderboard,
+            "rankedEvents": scored_events,
+            "selectedAlerts": selected_alerts,
+            "stationAlertCounts": dict(sorted(station_alert_counts.items())),
+            "notes": [
+                "Designed as a public-safe anomaly-detection workflow with detector comparison and experiment-style metadata.",
+                "The selected detector is chosen by labeled-event F1 rather than a single hard-coded scoring rule.",
+                "The same structure can later support richer event labels, rolling retraining, and external experiment tracking.",
+            ],
+        }
+
+    def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        output_path = output_dir / "anomaly_report.json"
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _update_run_registry(
+            output_dir,
+            self.registry_name,
+            {
+                "runLabel": report["experiment"]["runLabel"],
+                "generatedAt": report["experiment"]["generatedAt"],
+                "reportName": report["reportName"],
+                "reportFile": output_path.name,
+                "stationCount": report["summary"]["stationCount"],
+                "selectedDetector": report["summary"]["selectedDetector"],
+                "selectedDetectorF1": report["summary"]["selectedDetectorF1"],
+                "selectedAlertCount": report["summary"]["selectedAlertCount"],
+            },
+        )
+        return output_path
+
+
 def build_anomaly_report(
     data_path: Path = DEFAULT_DATA_PATH,
     report_name: str = "Monitoring Anomaly Detection",
@@ -113,110 +253,14 @@ def build_anomaly_report(
     warmup_window: int = DEFAULT_WARMUP_WINDOW,
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> dict[str, Any]:
-    observations = load_observations(data_path)
-    grouped_values: dict[str, list[float]] = defaultdict(list)
-
-    for observation in observations:
-        grouped_values[observation["stationId"]].append(observation["value"])
-
-    baselines = {
-        station_id: {
-            "mean": round(mean(values), 2),
-            "stddev": round(_safe_stddev(values), 2),
-        }
-        for station_id, values in grouped_values.items()
-    }
-
-    scored_events: list[dict[str, Any]] = []
-    selected_alerts: list[dict[str, Any]] = []
-    station_alert_counts: dict[str, int] = defaultdict(int)
-    detector_wins: Counter[str] = Counter()
-
-    station_histories: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for observation in observations:
-        station_histories[observation["stationId"]].append(observation)
-
-    for station_id, station_observations in station_histories.items():
-        for index, observation in enumerate(station_observations):
-            if index < warmup_window:
-                continue
-            history_values = [item["value"] for item in station_observations[:index]]
-            scores = {
-                detector: round(score, 2)
-                for detector, score in _detector_scores(history_values, observation["value"], warmup_window).items()
-            }
-            flags = {
-                detector: score >= DETECTOR_THRESHOLDS[detector]
-                for detector, score in scores.items()
-            }
-            scored_events.append(
-                {
-                    "stationId": station_id,
-                    "metric": observation["metric"],
-                    "timestamp": observation["timestamp"],
-                    "value": observation["value"],
-                    "isKnownEvent": observation["isKnownEvent"],
-                    "scores": scores,
-                    "flags": flags,
-                }
-            )
-
-    detector_leaderboard = [_evaluate_detector(scored_events, detector) for detector in DETECTOR_THRESHOLDS]
-    detector_leaderboard.sort(key=lambda detector: (-detector["f1Score"], -detector["precision"], detector["detector"]))
-    selected_detector = detector_leaderboard[0]["detector"]
-    detector_wins[selected_detector] += 1
-
-    for event in scored_events:
-        if event["flags"][selected_detector]:
-            baseline = baselines[event["stationId"]]
-            selected_alerts.append(
-                {
-                    "stationId": event["stationId"],
-                    "metric": event["metric"],
-                    "timestamp": event["timestamp"],
-                    "value": event["value"],
-                    "isKnownEvent": event["isKnownEvent"],
-                    "baselineMean": baseline["mean"],
-                    "selectedScore": event["scores"][selected_detector],
-                    "selectedDetector": selected_detector,
-                }
-            )
-            station_alert_counts[event["stationId"]] += 1
-
-    scored_events.sort(key=lambda event: event["scores"][selected_detector], reverse=True)
-    selected_alerts.sort(key=lambda alert: alert["selectedScore"], reverse=True)
-
-    return {
-        "reportName": report_name,
-        "experiment": {
-            "runLabel": run_label,
-            "generatedAt": datetime.now(UTC).isoformat(),
-            "registryFile": registry_name,
-            "warmupWindow": warmup_window,
-            "detectorCount": len(DETECTOR_THRESHOLDS),
-            "thresholds": DETECTOR_THRESHOLDS,
-        },
-        "summary": {
-            "observationCount": len(observations),
-            "stationCount": len(grouped_values),
-            "scoredEventCount": len(scored_events),
-            "knownEventCount": sum(observation["isKnownEvent"] for observation in observations),
-            "selectedAlertCount": len(selected_alerts),
-            "selectedDetector": selected_detector,
-            "selectedDetectorF1": detector_leaderboard[0]["f1Score"],
-            "detectorWins": dict(detector_wins),
-        },
-        "stationBaselines": baselines,
-        "detectorLeaderboard": detector_leaderboard,
-        "rankedEvents": scored_events,
-        "selectedAlerts": selected_alerts,
-        "stationAlertCounts": dict(sorted(station_alert_counts.items())),
-        "notes": [
-            "Designed as a public-safe anomaly-detection workflow with detector comparison and experiment-style metadata.",
-            "The selected detector is chosen by labeled-event F1 rather than a single hard-coded scoring rule.",
-            "The same structure can later support richer event labels, rolling retraining, and external experiment tracking.",
-        ],
-    }
+    workflow = AnomalyDetectionWorkflow(
+        data_path=data_path,
+        report_name=report_name,
+        run_label=run_label,
+        warmup_window=warmup_window,
+        registry_name=registry_name,
+    )
+    return workflow.build_report()
 
 
 def export_anomaly_report(
@@ -226,30 +270,13 @@ def export_anomaly_report(
     warmup_window: int = DEFAULT_WARMUP_WINDOW,
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report = build_anomaly_report(
+    workflow = AnomalyDetectionWorkflow(
         report_name=report_name,
         run_label=run_label,
         warmup_window=warmup_window,
         registry_name=registry_name,
     )
-    output_path = output_dir / "anomaly_report.json"
-    output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    _update_run_registry(
-        output_dir,
-        registry_name,
-        {
-            "runLabel": report["experiment"]["runLabel"],
-            "generatedAt": report["experiment"]["generatedAt"],
-            "reportName": report["reportName"],
-            "reportFile": output_path.name,
-            "stationCount": report["summary"]["stationCount"],
-            "selectedDetector": report["summary"]["selectedDetector"],
-            "selectedDetectorF1": report["summary"]["selectedDetectorF1"],
-            "selectedAlertCount": report["summary"]["selectedAlertCount"],
-        },
-    )
-    return output_path
+    return workflow.export_report(output_dir)
 
 
 def parse_args() -> argparse.Namespace:

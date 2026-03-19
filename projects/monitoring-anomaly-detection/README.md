@@ -20,6 +20,7 @@ The current implementation stays public-safe and dependency-light. It uses check
 ## What It Demonstrates
 
 - Candidate-detector comparison across global, rolling, robust, and delta-based scoring
+- An object-oriented anomaly workflow that can be extended without changing the public export interface
 - Labeled-event evaluation with precision, recall, and F1
 - Station-level baselines and ranked event review
 - A clean handoff artifact for alerting, dashboards, or analyst queues

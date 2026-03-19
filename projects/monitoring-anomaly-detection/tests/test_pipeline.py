@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from monitoring_anomaly_detection.pipeline import build_anomaly_report, export_anomaly_report, load_observations
+from monitoring_anomaly_detection.pipeline import AnomalyDetectionWorkflow, build_anomaly_report, export_anomaly_report, load_observations
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -43,3 +43,13 @@ def test_export_anomaly_report(tmp_path: Path) -> None:
     registry = registry_path.read_text(encoding="utf-8")
     assert "Telemetry Watch" in registry
     assert "anomaly_report.json" in registry
+
+
+def test_anomaly_detection_workflow_class() -> None:
+    workflow = AnomalyDetectionWorkflow(data_path=PROJECT_ROOT / "data" / "station_observations.csv")
+
+    report = workflow.build_report()
+
+    assert report["reportName"] == "Monitoring Anomaly Detection"
+    assert report["summary"]["stationCount"] == 3
+    assert report["summary"]["selectedDetector"] in {"global_zscore", "rolling_zscore", "mad_score", "delta_zscore"}
