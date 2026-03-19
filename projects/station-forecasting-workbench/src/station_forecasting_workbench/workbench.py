@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from collections import Counter
@@ -116,6 +117,127 @@ def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[s
     return registry_path
 
 
+@dataclass(slots=True)
+class ForecastWorkbench:
+    data_path: Path = DEFAULT_DATA_PATH
+    validation_horizon: int = DEFAULT_VALIDATION_HORIZON
+    test_horizon: int = DEFAULT_TEST_HORIZON
+    projection_horizon: int = DEFAULT_PROJECTION_HORIZON
+    report_name: str = "Station Forecasting Workbench"
+    run_label: str = "baseline-model-review"
+    registry_name: str = DEFAULT_REGISTRY_NAME
+
+    def load_histories(self) -> list[dict[str, Any]]:
+        return load_histories(self.data_path)
+
+    def build_report(self) -> dict[str, Any]:
+        histories = self.load_histories()
+        forecasts = []
+        winning_models: Counter[str] = Counter()
+        feature_set_wins: Counter[str] = Counter()
+
+        for series in histories:
+            values = series["values"]
+            train, validation, test = _split_series(values, self.validation_horizon, self.test_horizon)
+            feature_profile = _build_feature_profile(train)
+            validation_predictions = _candidate_predictions(train, self.validation_horizon)
+            leaderboard = [
+                {
+                    "model": model_name,
+                    "featureSet": _feature_set_for_model(model_name),
+                    "validationMae": _mae(validation, predictions),
+                    "validationPredictions": predictions,
+                }
+                for model_name, predictions in validation_predictions.items()
+            ]
+            leaderboard.sort(key=lambda candidate: (candidate["validationMae"], candidate["model"]))
+            selected_model = leaderboard[0]["model"]
+            selected_feature_set = leaderboard[0]["featureSet"]
+            winning_models[selected_model] += 1
+            feature_set_wins[selected_feature_set] += 1
+
+            refit_history = train + validation
+            test_predictions = _candidate_predictions(refit_history, self.test_horizon)
+            selected_test_prediction = test_predictions[selected_model]
+            future_projections = _candidate_predictions(values, self.projection_horizon)[selected_model]
+
+            forecasts.append(
+                {
+                    "stationId": series["stationId"],
+                    "metric": series["metric"],
+                    "trainingWindow": len(train),
+                    "validationWindow": len(validation),
+                    "testWindow": len(test),
+                    "featureProfile": feature_profile,
+                    "datasetSplit": {
+                        "train": train,
+                        "validation": validation,
+                        "test": test,
+                    },
+                    "modelLeaderboard": leaderboard,
+                    "selectedModel": selected_model,
+                    "selectedFeatureSet": selected_feature_set,
+                    "selectedValidationMae": leaderboard[0]["validationMae"],
+                    "testActual": test,
+                    "testPrediction": selected_test_prediction,
+                    "selectedTestMae": _mae(test, selected_test_prediction),
+                    "projectionHorizon": self.projection_horizon,
+                    "projection": future_projections,
+                    "nextForecast": future_projections[0],
+                }
+            )
+
+        return {
+            "reportName": self.report_name,
+            "experiment": {
+                "runLabel": self.run_label,
+                "generatedAt": datetime.now(UTC).isoformat(),
+                "registryFile": self.registry_name,
+                "candidateModelCount": 4,
+                "validationHorizon": self.validation_horizon,
+                "testHorizon": self.test_horizon,
+                "projectionHorizon": self.projection_horizon,
+            },
+            "summary": {
+                "seriesCount": len(histories),
+                "validationHorizon": self.validation_horizon,
+                "testHorizon": self.test_horizon,
+                "projectionHorizon": self.projection_horizon,
+                "averageValidationMae": round(sum(item["selectedValidationMae"] for item in forecasts) / len(forecasts), 2),
+                "averageTestMae": round(sum(item["selectedTestMae"] for item in forecasts) / len(forecasts), 2),
+                "modelWins": dict(sorted(winning_models.items())),
+                "featureSetWins": dict(sorted(feature_set_wins.items())),
+            },
+            "forecasts": forecasts,
+            "notes": [
+                "Designed as a public-safe forecasting workflow with feature profiling, candidate-model comparison, and experiment-style evaluation.",
+                "The workbench selects models on validation performance and records separate test error for each station series.",
+                "The same structure can later support richer feature engineering, run registries, and external experiment tracking backends.",
+            ],
+        }
+
+    def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        output_path = output_dir / "station_forecast_report.json"
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _update_run_registry(
+            output_dir,
+            self.registry_name,
+            {
+                "runLabel": report["experiment"]["runLabel"],
+                "generatedAt": report["experiment"]["generatedAt"],
+                "reportName": report["reportName"],
+                "reportFile": output_path.name,
+                "seriesCount": report["summary"]["seriesCount"],
+                "averageValidationMae": report["summary"]["averageValidationMae"],
+                "averageTestMae": report["summary"]["averageTestMae"],
+                "modelWins": report["summary"]["modelWins"],
+            },
+        )
+        return output_path
+
+
 def build_forecast_report(
     data_path: Path = DEFAULT_DATA_PATH,
     validation_horizon: int = DEFAULT_VALIDATION_HORIZON,
@@ -125,90 +247,16 @@ def build_forecast_report(
     run_label: str = "baseline-model-review",
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> dict[str, Any]:
-    histories = load_histories(data_path)
-    forecasts = []
-    winning_models: Counter[str] = Counter()
-    feature_set_wins: Counter[str] = Counter()
-
-    for series in histories:
-        values = series["values"]
-        train, validation, test = _split_series(values, validation_horizon, test_horizon)
-        feature_profile = _build_feature_profile(train)
-        validation_predictions = _candidate_predictions(train, validation_horizon)
-        leaderboard = [
-            {
-                "model": model_name,
-                "featureSet": _feature_set_for_model(model_name),
-                "validationMae": _mae(validation, predictions),
-                "validationPredictions": predictions,
-            }
-            for model_name, predictions in validation_predictions.items()
-        ]
-        leaderboard.sort(key=lambda candidate: (candidate["validationMae"], candidate["model"]))
-        selected_model = leaderboard[0]["model"]
-        selected_feature_set = leaderboard[0]["featureSet"]
-        winning_models[selected_model] += 1
-        feature_set_wins[selected_feature_set] += 1
-
-        refit_history = train + validation
-        test_predictions = _candidate_predictions(refit_history, test_horizon)
-        selected_test_prediction = test_predictions[selected_model]
-        future_projections = _candidate_predictions(values, projection_horizon)[selected_model]
-
-        forecasts.append(
-            {
-                "stationId": series["stationId"],
-                "metric": series["metric"],
-                "trainingWindow": len(train),
-                "validationWindow": len(validation),
-                "testWindow": len(test),
-                "featureProfile": feature_profile,
-                "datasetSplit": {
-                    "train": train,
-                    "validation": validation,
-                    "test": test,
-                },
-                "modelLeaderboard": leaderboard,
-                "selectedModel": selected_model,
-                "selectedFeatureSet": selected_feature_set,
-                "selectedValidationMae": leaderboard[0]["validationMae"],
-                "testActual": test,
-                "testPrediction": selected_test_prediction,
-                "selectedTestMae": _mae(test, selected_test_prediction),
-                "projectionHorizon": projection_horizon,
-                "projection": future_projections,
-                "nextForecast": future_projections[0],
-            }
-        )
-
-    return {
-        "reportName": report_name,
-        "experiment": {
-            "runLabel": run_label,
-            "generatedAt": datetime.now(UTC).isoformat(),
-            "registryFile": registry_name,
-            "candidateModelCount": 4,
-            "validationHorizon": validation_horizon,
-            "testHorizon": test_horizon,
-            "projectionHorizon": projection_horizon,
-        },
-        "summary": {
-            "seriesCount": len(histories),
-            "validationHorizon": validation_horizon,
-            "testHorizon": test_horizon,
-            "projectionHorizon": projection_horizon,
-            "averageValidationMae": round(sum(item["selectedValidationMae"] for item in forecasts) / len(forecasts), 2),
-            "averageTestMae": round(sum(item["selectedTestMae"] for item in forecasts) / len(forecasts), 2),
-            "modelWins": dict(sorted(winning_models.items())),
-            "featureSetWins": dict(sorted(feature_set_wins.items())),
-        },
-        "forecasts": forecasts,
-        "notes": [
-            "Designed as a public-safe forecasting workflow with feature profiling, candidate-model comparison, and experiment-style evaluation.",
-            "The workbench selects models on validation performance and records separate test error for each station series.",
-            "The same structure can later support richer feature engineering, run registries, and external experiment tracking backends.",
-        ],
-    }
+    workbench = ForecastWorkbench(
+        data_path=data_path,
+        validation_horizon=validation_horizon,
+        test_horizon=test_horizon,
+        projection_horizon=projection_horizon,
+        report_name=report_name,
+        run_label=run_label,
+        registry_name=registry_name,
+    )
+    return workbench.build_report()
 
 
 def export_forecast_report(
@@ -220,32 +268,15 @@ def export_forecast_report(
     projection_horizon: int = DEFAULT_PROJECTION_HORIZON,
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report = build_forecast_report(
-        report_name=report_name,
-        run_label=run_label,
+    workbench = ForecastWorkbench(
         validation_horizon=validation_horizon,
         test_horizon=test_horizon,
         projection_horizon=projection_horizon,
+        report_name=report_name,
+        run_label=run_label,
         registry_name=registry_name,
     )
-    output_path = output_dir / "station_forecast_report.json"
-    output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    _update_run_registry(
-        output_dir,
-        registry_name,
-        {
-            "runLabel": report["experiment"]["runLabel"],
-            "generatedAt": report["experiment"]["generatedAt"],
-            "reportName": report["reportName"],
-            "reportFile": output_path.name,
-            "seriesCount": report["summary"]["seriesCount"],
-            "averageValidationMae": report["summary"]["averageValidationMae"],
-            "averageTestMae": report["summary"]["averageTestMae"],
-            "modelWins": report["summary"]["modelWins"],
-        },
-    )
-    return output_path
+    return workbench.export_report(output_dir)
 
 
 def parse_args() -> argparse.Namespace:

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from station_forecasting_workbench.workbench import build_forecast_report, export_forecast_report, load_histories
+from station_forecasting_workbench.workbench import ForecastWorkbench, build_forecast_report, export_forecast_report, load_histories
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -48,3 +48,13 @@ def test_export_forecast_report(tmp_path: Path) -> None:
     registry = registry_path.read_text(encoding="utf-8")
     assert "Forecast Review" in registry
     assert "station_forecast_report.json" in registry
+
+
+def test_forecast_workbench_class() -> None:
+    workbench = ForecastWorkbench(data_path=PROJECT_ROOT / "data" / "forecast_histories.json")
+
+    report = workbench.build_report()
+
+    assert report["reportName"] == "Station Forecasting Workbench"
+    assert report["summary"]["seriesCount"] == 3
+    assert report["forecasts"][0]["selectedModel"] in {"drift", "linear_regression", "last_value", "trailing_average_3"}

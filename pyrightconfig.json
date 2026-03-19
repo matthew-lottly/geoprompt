@@ -23,6 +23,12 @@
       ]
     },
     {
+      "root": "projects/environmental-time-series-lab/tests",
+      "extraPaths": [
+        "../src"
+      ]
+    },
+    {
       "root": "projects/environmental-time-series-lab",
       "extraPaths": [
         "src"

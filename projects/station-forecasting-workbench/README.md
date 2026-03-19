@@ -18,6 +18,7 @@ This project frames data science as a forecasting workflow rather than just desc
 ## What It Demonstrates
 
 - Candidate-model comparison across naive, trailing-average, drift, and linear-regression forecasts
+- An object-oriented workbench workflow that can be extended without changing the public export interface
 - Validation-first model selection with separate test evaluation
 - Lightweight feature profiling for recent level, volatility, momentum, and slope
 - A reviewable output artifact that looks more like an experiment workbench than a single hard-coded baseline

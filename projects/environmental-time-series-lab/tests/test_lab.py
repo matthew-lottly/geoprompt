@@ -1,9 +1,16 @@
+import importlib
 from pathlib import Path
-
-from environmental_time_series_lab.lab import build_time_series_report, export_time_series_report, load_histories
-
+import sys
+from typing import Any, cast
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT / "src"))
+
+lab_module = cast(Any, importlib.import_module("environmental_time_series_lab.lab"))
+TimeSeriesLab = lab_module.TimeSeriesLab
+build_time_series_report = lab_module.build_time_series_report
+export_time_series_report = lab_module.export_time_series_report
+load_histories = lab_module.load_histories
 
 
 def test_load_histories() -> None:
@@ -29,6 +36,16 @@ def test_build_time_series_report() -> None:
     assert len(report["seriesDiagnostics"][0]["rollingMeanShort"]) == 5
     assert len(report["seriesDiagnostics"][0]["rollingMeanLong"]) == 3
     assert len(report["seriesDiagnostics"][0]["baselineLeaderboard"]) == 4
+
+
+def test_time_series_lab_class() -> None:
+    lab = TimeSeriesLab(data_path=PROJECT_ROOT / "data" / "station_histories.json")
+
+    report = lab.build_report()
+
+    assert report["reportName"] == "Environmental Time Series Lab"
+    assert report["summary"]["seriesCount"] == 3
+    assert report["seriesDiagnostics"][0]["selectedBaseline"] == "drift"
 
 
 def test_export_time_series_report(tmp_path: Path) -> None:

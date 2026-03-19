@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
 from pathlib import Path
@@ -114,6 +115,120 @@ def _update_run_registry(output_dir: Path, registry_name: str, run_entry: dict[s
     return registry_path
 
 
+@dataclass(slots=True)
+class TimeSeriesLab:
+    data_path: Path = DEFAULT_DATA_PATH
+    review_window: int = DEFAULT_REVIEW_WINDOW
+    short_window: int = DEFAULT_SHORT_WINDOW
+    long_window: int = DEFAULT_LONG_WINDOW
+    report_name: str = "Environmental Time Series Lab"
+    run_label: str = "temporal-diagnostics-review"
+    registry_name: str = DEFAULT_REGISTRY_NAME
+
+    def load_histories(self) -> list[dict[str, Any]]:
+        return load_histories(self.data_path)
+
+    def build_report(self) -> dict[str, Any]:
+        histories = self.load_histories()
+        summaries = []
+        winning_baselines: Counter[str] = Counter()
+        trend_labels: Counter[str] = Counter()
+
+        for series in histories:
+            values = [float(value) for value in series["values"]]
+            if len(values) <= self.review_window:
+                raise ValueError("Each series must have more observations than the review window.")
+
+            calibration = values[:-self.review_window]
+            review = values[-self.review_window:]
+            feature_profile = _build_feature_profile(calibration, short_window=self.short_window, long_window=self.long_window)
+            baseline_predictions = _candidate_review_predictions(calibration, self.review_window)
+            leaderboard = [
+                {
+                    "baseline": baseline_name,
+                    "reviewMae": _mae(review, predictions),
+                    "reviewPrediction": predictions,
+                }
+                for baseline_name, predictions in baseline_predictions.items()
+            ]
+            leaderboard.sort(key=lambda candidate: (candidate["reviewMae"], candidate["baseline"]))
+            selected_baseline = leaderboard[0]["baseline"]
+            winning_baselines[selected_baseline] += 1
+
+            total_change = round(values[-1] - values[0], 2)
+            trend_label = _trend_label(total_change)
+            trend_labels[trend_label] += 1
+
+            summaries.append(
+                {
+                    "stationId": series["stationId"],
+                    "metric": series["metric"],
+                    "analysisWindow": len(calibration),
+                    "reviewWindow": len(review),
+                    "featureProfile": feature_profile,
+                    "rollingMeanShort": _rolling_mean(values, min(self.short_window, len(values))),
+                    "rollingMeanLong": _rolling_mean(values, min(self.long_window, len(values))),
+                    "firstDifferences": _first_differences(values),
+                    "trendValue": total_change,
+                    "trendLabel": trend_label,
+                    "baselineLeaderboard": leaderboard,
+                    "selectedBaseline": selected_baseline,
+                    "selectedReviewMae": leaderboard[0]["reviewMae"],
+                    "reviewActual": review,
+                    "reviewPrediction": leaderboard[0]["reviewPrediction"],
+                    "latestValue": values[-1],
+                }
+            )
+
+        return {
+            "reportName": self.report_name,
+            "experiment": {
+                "runLabel": self.run_label,
+                "generatedAt": datetime.now(UTC).isoformat(),
+                "registryFile": self.registry_name,
+                "reviewWindow": self.review_window,
+                "shortWindow": self.short_window,
+                "longWindow": self.long_window,
+                "candidateBaselineCount": 4,
+            },
+            "summary": {
+                "seriesCount": len(histories),
+                "reviewWindow": self.review_window,
+                "shortWindow": self.short_window,
+                "longWindow": self.long_window,
+                "averageSelectedReviewMae": round(sum(item["selectedReviewMae"] for item in summaries) / len(summaries), 2),
+                "trendLabels": dict(sorted(trend_labels.items())),
+                "baselineWins": dict(sorted(winning_baselines.items())),
+            },
+            "seriesDiagnostics": summaries,
+            "notes": [
+                "Designed as a public-safe temporal diagnostics workflow with split-based review windows and candidate baseline comparison.",
+                "The lab captures feature profiles, rolling summaries, and baseline leaderboard output before handing off to forecasting or anomaly pipelines.",
+                "The same structure can grow into decomposition, seasonal baselines, change-point detection, or external experiment tracking.",
+            ],
+        }
+
+    def export_report(self, output_dir: Path = DEFAULT_OUTPUT_DIR) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report = self.build_report()
+        output_path = output_dir / "time_series_report.json"
+        output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
+        _update_run_registry(
+            output_dir,
+            self.registry_name,
+            {
+                "runLabel": report["experiment"]["runLabel"],
+                "generatedAt": report["experiment"]["generatedAt"],
+                "reportName": report["reportName"],
+                "reportFile": output_path.name,
+                "seriesCount": report["summary"]["seriesCount"],
+                "averageSelectedReviewMae": report["summary"]["averageSelectedReviewMae"],
+                "baselineWins": report["summary"]["baselineWins"],
+            },
+        )
+        return output_path
+
+
 def build_time_series_report(
     data_path: Path = DEFAULT_DATA_PATH,
     review_window: int = DEFAULT_REVIEW_WINDOW,
@@ -123,84 +238,16 @@ def build_time_series_report(
     run_label: str = "temporal-diagnostics-review",
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> dict[str, Any]:
-    histories = load_histories(data_path)
-    summaries = []
-    winning_baselines: Counter[str] = Counter()
-    trend_labels: Counter[str] = Counter()
-
-    for series in histories:
-        values = [float(value) for value in series["values"]]
-        if len(values) <= review_window:
-            raise ValueError("Each series must have more observations than the review window.")
-
-        calibration = values[:-review_window]
-        review = values[-review_window:]
-        feature_profile = _build_feature_profile(calibration, short_window=short_window, long_window=long_window)
-        baseline_predictions = _candidate_review_predictions(calibration, review_window)
-        leaderboard = [
-            {
-                "baseline": baseline_name,
-                "reviewMae": _mae(review, predictions),
-                "reviewPrediction": predictions,
-            }
-            for baseline_name, predictions in baseline_predictions.items()
-        ]
-        leaderboard.sort(key=lambda candidate: (candidate["reviewMae"], candidate["baseline"]))
-        selected_baseline = leaderboard[0]["baseline"]
-        winning_baselines[selected_baseline] += 1
-
-        total_change = round(values[-1] - values[0], 2)
-        trend_label = _trend_label(total_change)
-        trend_labels[trend_label] += 1
-
-        summaries.append(
-            {
-                "stationId": series["stationId"],
-                "metric": series["metric"],
-                "analysisWindow": len(calibration),
-                "reviewWindow": len(review),
-                "featureProfile": feature_profile,
-                "rollingMeanShort": _rolling_mean(values, min(short_window, len(values))),
-                "rollingMeanLong": _rolling_mean(values, min(long_window, len(values))),
-                "firstDifferences": _first_differences(values),
-                "trendValue": total_change,
-                "trendLabel": trend_label,
-                "baselineLeaderboard": leaderboard,
-                "selectedBaseline": selected_baseline,
-                "selectedReviewMae": leaderboard[0]["reviewMae"],
-                "reviewActual": review,
-                "reviewPrediction": leaderboard[0]["reviewPrediction"],
-                "latestValue": values[-1],
-            }
-        )
-
-    return {
-        "reportName": report_name,
-        "experiment": {
-            "runLabel": run_label,
-            "generatedAt": datetime.now(UTC).isoformat(),
-            "registryFile": registry_name,
-            "reviewWindow": review_window,
-            "shortWindow": short_window,
-            "longWindow": long_window,
-            "candidateBaselineCount": 4,
-        },
-        "summary": {
-            "seriesCount": len(histories),
-            "reviewWindow": review_window,
-            "shortWindow": short_window,
-            "longWindow": long_window,
-            "averageSelectedReviewMae": round(sum(item["selectedReviewMae"] for item in summaries) / len(summaries), 2),
-            "trendLabels": dict(sorted(trend_labels.items())),
-            "baselineWins": dict(sorted(winning_baselines.items())),
-        },
-        "seriesDiagnostics": summaries,
-        "notes": [
-            "Designed as a public-safe temporal diagnostics workflow with split-based review windows and candidate baseline comparison.",
-            "The lab captures feature profiles, rolling summaries, and baseline leaderboard output before handing off to forecasting or anomaly pipelines.",
-            "The same structure can grow into decomposition, seasonal baselines, change-point detection, or external experiment tracking.",
-        ],
-    }
+    lab = TimeSeriesLab(
+        data_path=data_path,
+        review_window=review_window,
+        short_window=short_window,
+        long_window=long_window,
+        report_name=report_name,
+        run_label=run_label,
+        registry_name=registry_name,
+    )
+    return lab.build_report()
 
 
 def export_time_series_report(
@@ -212,31 +259,15 @@ def export_time_series_report(
     long_window: int = DEFAULT_LONG_WINDOW,
     registry_name: str = DEFAULT_REGISTRY_NAME,
 ) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report = build_time_series_report(
-        report_name=report_name,
-        run_label=run_label,
+    lab = TimeSeriesLab(
         review_window=review_window,
         short_window=short_window,
         long_window=long_window,
+        report_name=report_name,
+        run_label=run_label,
         registry_name=registry_name,
     )
-    output_path = output_dir / "time_series_report.json"
-    output_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    _update_run_registry(
-        output_dir,
-        registry_name,
-        {
-            "runLabel": report["experiment"]["runLabel"],
-            "generatedAt": report["experiment"]["generatedAt"],
-            "reportName": report["reportName"],
-            "reportFile": output_path.name,
-            "seriesCount": report["summary"]["seriesCount"],
-            "averageSelectedReviewMae": report["summary"]["averageSelectedReviewMae"],
-            "baselineWins": report["summary"]["baselineWins"],
-        },
-    )
-    return output_path
+    return lab.export_report(output_dir)
 
 
 def parse_args() -> argparse.Namespace:

@@ -18,6 +18,7 @@ This project focuses on time-series analysis rather than GIS surface area. It lo
 ## What It Demonstrates
 
 - Repeatable time-series summarization in a package structure
+- An object-oriented lab workflow that can be extended without changing the public export interface
 - Rolling averages for temporal smoothing at multiple windows
 - Feature profiling for level, slope, recent change, and variability
 - Baseline leaderboard output for a held-out review window
