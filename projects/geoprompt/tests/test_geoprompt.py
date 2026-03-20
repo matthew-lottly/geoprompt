@@ -100,6 +100,23 @@ def test_query_bounds_modes() -> None:
     ]
 
 
+def test_spatial_index_supports_geometry_and_centroid_queries() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    geometry_index = frame.spatial_index()
+    centroid_index = frame.spatial_index(mode="centroid")
+    bounds = (-111.97, 40.68, -111.84, 40.79)
+
+    geometry_candidate_ids = {frame.to_records()[index]["site_id"] for index in geometry_index.query(bounds)}
+    centroid_ids = {frame.to_records()[index]["site_id"] for index in centroid_index.query(bounds)}
+    exact_intersects = {record["site_id"] for record in frame.query_bounds(*bounds, mode="intersects")}
+    exact_centroids = {record["site_id"] for record in frame.query_bounds(*bounds, mode="centroid")}
+
+    assert exact_intersects.issubset(geometry_candidate_ids)
+    assert len(geometry_candidate_ids) < len(frame)
+    assert centroid_ids == exact_centroids
+
+
 def test_query_radius_returns_sorted_distance_matches() -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
 
@@ -136,6 +153,18 @@ def test_proximity_join_matches_nearby_features() -> None:
     assert all(row["distance_right"] <= 0.05 for row in joined)
     assert len(left_joined) >= len(frame)
     assert all("distance_method_right" in row for row in left_joined)
+
+
+def test_spatial_join_supports_runtime_diagnostics() -> None:
+    regions = read_features(PROJECT_ROOT / "data" / "benchmark_regions.json", crs="EPSG:4326")
+    features = read_features(PROJECT_ROOT / "data" / "benchmark_features.json", crs="EPSG:4326")
+
+    joined = regions.spatial_join(features, predicate="intersects", include_diagnostics=True)
+    record = joined.to_records()[0]
+
+    assert "candidate_count_right" in record
+    assert "pruning_ratio_right" in record
+    assert "match_count_right" in record
 
 
 def test_nearest_join_returns_ranked_matches() -> None:
@@ -433,6 +462,126 @@ def test_coverage_summary_counts_and_aggregates_matches() -> None:
     assert records[1]["zone_id"] == "south-zone"
     assert records[1]["count_covered"] == 1
     assert records[1]["demand_index_sum_covered"] == 5.0
+
+
+def test_fishnet_and_hexbin_generate_covering_cells() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.1, 0.1]}},
+            {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    fishnet = frame.fishnet(1.0)
+    hexes = frame.hexbin(0.8)
+
+    assert len(fishnet) >= 2
+    assert len(hexes) >= 2
+    assert all(record["geometry"]["type"] == "Polygon" for record in fishnet.to_records())
+    assert all(record["geometry"]["type"] == "Polygon" for record in hexes.to_records())
+    assert all("grid_id" in record for record in fishnet.to_records())
+
+
+def test_hotspot_grid_counts_and_sums_centroid_assignments() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "weight": 2.0, "geometry": {"type": "Point", "coordinates": [0.1, 0.1]}},
+            {"site_id": "b", "weight": 3.0, "geometry": {"type": "Point", "coordinates": [0.2, 0.2]}},
+            {"site_id": "c", "weight": 5.0, "geometry": {"type": "Point", "coordinates": [1.2, 0.2]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    counts = frame.hotspot_grid(cell_size=1.0, shape="fishnet")
+    weighted = frame.hotspot_grid(cell_size=1.0, shape="fishnet", value_column="weight", aggregation="sum")
+
+    count_values = sorted(record["count_hotspot"] for record in counts.to_records())
+    weighted_values = sorted(value for value in [record.get("weight_sum_hotspot") for record in weighted.to_records()] if value is not None)
+
+    assert max(count_values) == 2
+    assert weighted_values[-1] == 5.0
+    assert sum(record["count_hotspot"] for record in counts.to_records()) == len(frame)
+
+
+def test_hotspot_grid_supports_runtime_diagnostics() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.1, 0.1]}},
+            {"site_id": "b", "geometry": {"type": "Point", "coordinates": [0.2, 0.2]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    hotspots = frame.hotspot_grid(cell_size=1.0, include_diagnostics=True)
+    record = hotspots.to_records()[0]
+
+    assert "candidate_count_hotspot" in record
+    assert "pruning_ratio_hotspot" in record
+
+
+def test_network_build_splits_lines_at_intersections() -> None:
+    lines = GeoPromptFrame.from_records(
+        [
+            {"site_id": "horizontal", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]}},
+            {"site_id": "vertical", "geometry": {"type": "LineString", "coordinates": [[1.0, -1.0], [1.0, 1.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    network = lines.network_build()
+    records = network.to_records()
+    node_ids = {record["from_node_id"] for record in records} | {record["to_node_id"] for record in records}
+    intersection_nodes = [record for record in records if record["from_node"] == (1.0, 0.0) or record["to_node"] == (1.0, 0.0)]
+
+    assert len(records) == 4
+    assert len(node_ids) == 5
+    assert intersection_nodes
+    assert all(record["edge_length"] == 1.0 for record in records)
+
+
+def test_shortest_path_returns_ordered_edge_path() -> None:
+    network = GeoPromptFrame.from_records(
+        [
+            {
+                "edge_id": "edge-1",
+                "from_node_id": "node-a",
+                "to_node_id": "node-b",
+                "from_node": (0.0, 0.0),
+                "to_node": (1.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-2",
+                "from_node_id": "node-b",
+                "to_node_id": "node-c",
+                "from_node": (1.0, 0.0),
+                "to_node": (2.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (2.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-3",
+                "from_node_id": "node-a",
+                "to_node_id": "node-c",
+                "from_node": (0.0, 0.0),
+                "to_node": (2.0, 0.0),
+                "edge_length": 5.0,
+                "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (2.0, 0.0)]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    path = network.shortest_path("node-a", "node-c")
+    records = path.to_records()
+
+    assert [record["edge_id"] for record in records] == ["edge-1", "edge-2"]
+    assert records[0]["step_path"] == 1
+    assert records[1]["step_path"] == 2
+    assert records[0]["total_cost_path"] == 2.0
+    assert records[0]["node_sequence_path"] == ["node-a", "node-b", "node-c"]
 
 
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:
@@ -1325,6 +1474,9 @@ def test_comparison_report_benchmarks_new_methods() -> None:
         for dataset in report["datasets"]
         for benchmark in dataset["benchmarks"]
     }
+    assert all("performance" in dataset for dataset in report["datasets"])
+    assert all("query_bounds_pruning_ratio" in dataset["performance"] for dataset in report["datasets"])
+    assert "sample.geoprompt.spatial_index_query" in benchmark_ops
     assert "sample.geoprompt.centroid_cluster" in benchmark_ops
     assert "benchmark.geoprompt.zone_fit_score" in benchmark_ops
     assert "benchmark.geoprompt.corridor_reach" in benchmark_ops
@@ -1333,3 +1485,5 @@ def test_comparison_report_benchmarks_new_methods() -> None:
     assert "sample.geoprompt.summarize_clusters" in benchmark_ops
     assert "benchmark.geoprompt.overlay_group_comparison" in benchmark_ops
     assert "benchmark.geoprompt.corridor_diagnostics" in benchmark_ops
+    assert "benchmark.geoprompt.network_build" in benchmark_ops
+    assert "benchmark.geoprompt.shortest_path" in benchmark_ops

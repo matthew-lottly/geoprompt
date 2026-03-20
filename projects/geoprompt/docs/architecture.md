@@ -24,6 +24,17 @@ This project models Geoprompt as a reusable package rather than a single spatial
 - `compare.py` validates metric parity and runtime against external spatial libraries over multiple fixtures.
 - `overlay.py` isolates the Shapely-backed overlay adapters used for buffer, dissolve, clip, and intersection behavior, including cached Shapely loading and direct geometry conversion for the hot overlay path.
 
+## Next Architecture Direction
+
+The next major step should be shared internal engines rather than isolated feature methods.
+
+- A spatial index engine should handle candidate pruning for joins, nearest search, overlay preparation, snapping, and density workflows.
+- A topology engine should own segment noding, splitting, face reconstruction, and geometry repair logic needed for overlay and cleaning tools.
+- A network engine should support graph build, path search, service areas, allocation, and trajectory tools.
+- A neighborhood weights engine should support spatial lag, autocorrelation, hotspot statistics, and local summary workflows.
+
+That structure is the practical path to strong performance on both small and large datasets. It keeps low-overhead direct loops available for small workloads while giving larger workloads reusable acceleration structures.
+
 ## First Deliberate Constraints
 
 - GeoJSON-like point, line, and polygon support only

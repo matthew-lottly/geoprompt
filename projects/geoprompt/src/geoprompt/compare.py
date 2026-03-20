@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .frame import GeoPromptFrame
-from .geometry import geometry_centroid
+from .geometry import geometry_bounds, geometry_centroid
 from .overlay import geometry_from_shapely, geometry_to_shapely
 from .io import read_features, write_json
 
@@ -334,6 +334,8 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
 
     min_x, min_y, max_x, max_y = case.query_bounds
     geoprompt_query = [str(record.get("site_id", "unknown")) for record in frame.query_bounds(min_x=min_x, min_y=min_y, max_x=max_x, max_y=max_y)]
+    spatial_index = frame.spatial_index()
+    query_candidate_indexes = spatial_index.query((min_x, min_y, max_x, max_y))
     reference_query = [
         str(value)
         for value in geopandas_frame.loc[
@@ -350,6 +352,12 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
     join_report: dict[str, Any] | None = None
     clip_report: dict[str, Any] | None = None
     dissolve_report: dict[str, Any] | None = None
+    performance_report: dict[str, Any] = {
+        "spatial_index": spatial_index.stats().__dict__,
+        "query_bounds_candidates": len(query_candidate_indexes),
+        "query_bounds_total": len(records),
+        "query_bounds_pruning_ratio": 1.0 - (len(query_candidate_indexes) / len(records) if records else 0.0),
+    }
     regions = _join_frame_from_case(case)
     if regions is not None:
         geoprompt_join = regions.spatial_join(frame, predicate="intersects")
@@ -393,10 +401,18 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             "bands_match": sorted(str(record["region_band"]) for record in geoprompt_dissolved) == sorted(str(value) for value in geopandas_dissolved["region_band"].tolist()),
         }
 
+        region_index = regions.spatial_index(mode="geometry")
+        join_candidate_pairs = sum(len(region_index.query(geometry_bounds(record["geometry"]))) for record in records)
+        total_pairs = len(records) * len(regions)
+        performance_report["spatial_join_candidate_pairs"] = join_candidate_pairs
+        performance_report["spatial_join_total_pairs"] = total_pairs
+        performance_report["spatial_join_pruning_ratio"] = 1.0 - (join_candidate_pairs / total_pairs if total_pairs else 0.0)
+
     benchmarks: list[dict[str, Any]] = []
     for operation, func in [
         (f"{case.name}.geoprompt.geometry_metrics", lambda: (frame.geometry_lengths(), frame.geometry_areas(), frame.bounds())),
         (f"{case.name}.reference.geometry_metrics", lambda: ([geometry.length for geometry in shapely_geometries], [geometry.area for geometry in shapely_geometries], geopandas_frame.total_bounds)),
+        (f"{case.name}.geoprompt.spatial_index_query", lambda: frame.spatial_index().query((min_x, min_y, max_x, max_y))),
         (f"{case.name}.geoprompt.nearest_neighbors", lambda: frame.nearest_neighbors(k=1)),
         (f"{case.name}.reference.nearest_neighbors", lambda: _nearest_neighbors_reference(feature_ids, [geometry.centroid for geometry in shapely_geometries])),
         (f"{case.name}.geoprompt.query_bounds", lambda: frame.query_bounds(min_x=min_x, min_y=min_y, max_x=max_x, max_y=max_y)),
@@ -480,6 +496,12 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         corridor_rows = [row for row in frame.to_records() if row["geometry"]["type"] == "LineString"]
         if corridor_rows:
             corridor_frame = GeoPromptFrame.from_records(corridor_rows, crs=case.crs)
+            network_frame = corridor_frame.network_build()
+            benchmark, _ = _benchmark(
+                f"{case.name}.geoprompt.network_build",
+                lambda: corridor_frame.network_build(),
+            )
+            benchmarks.append(benchmark)
             benchmark, _ = _benchmark(
                 f"{case.name}.geoprompt.corridor_reach",
                 lambda: frame.corridor_reach(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
@@ -490,6 +512,13 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
                 lambda: frame.corridor_diagnostics(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
             )
             benchmarks.append(benchmark)
+            if len(network_frame) > 0:
+                first_row = network_frame.to_records()[0]
+                benchmark, _ = _benchmark(
+                    f"{case.name}.geoprompt.shortest_path",
+                    lambda: network_frame.shortest_path(first_row["from_node_id"], first_row["to_node_id"]),
+                )
+                benchmarks.append(benchmark)
 
     return {
         "dataset": case.name,
@@ -529,6 +558,7 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             "dissolve": dissolve_report,
             "spatial_join": join_report,
         },
+        "performance": performance_report,
         "benchmarks": benchmarks,
     }
 
