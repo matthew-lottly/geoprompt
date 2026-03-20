@@ -519,6 +519,11 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
                     lambda: network_frame.shortest_path(first_row["from_node_id"], first_row["to_node_id"]),
                 )
                 benchmarks.append(benchmark)
+                benchmark, _ = _benchmark(
+                    f"{case.name}.geoprompt.service_area",
+                    lambda: network_frame.service_area(first_row["from_node_id"], max_cost=float(first_row["edge_length"]) * 2.0),
+                )
+                benchmarks.append(benchmark)
 
     return {
         "dataset": case.name,

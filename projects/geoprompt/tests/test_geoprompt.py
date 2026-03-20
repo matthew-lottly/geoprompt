@@ -117,6 +117,15 @@ def test_spatial_index_supports_geometry_and_centroid_queries() -> None:
     assert centroid_ids == exact_centroids
 
 
+def test_spatial_index_reuses_cached_instance() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    first_index = frame.spatial_index()
+    second_index = frame.spatial_index()
+
+    assert first_index is second_index
+
+
 def test_query_radius_returns_sorted_distance_matches() -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
 
@@ -540,6 +549,20 @@ def test_network_build_splits_lines_at_intersections() -> None:
     assert all(record["edge_length"] == 1.0 for record in records)
 
 
+def test_network_build_reuses_cached_frame() -> None:
+    lines = GeoPromptFrame.from_records(
+        [
+            {"site_id": "horizontal", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    first_network = lines.network_build()
+    second_network = lines.network_build()
+
+    assert first_network is second_network
+
+
 def test_shortest_path_returns_ordered_edge_path() -> None:
     network = GeoPromptFrame.from_records(
         [
@@ -582,6 +605,48 @@ def test_shortest_path_returns_ordered_edge_path() -> None:
     assert records[1]["step_path"] == 2
     assert records[0]["total_cost_path"] == 2.0
     assert records[0]["node_sequence_path"] == ["node-a", "node-b", "node-c"]
+
+
+def test_service_area_returns_reachable_edges() -> None:
+    network = GeoPromptFrame.from_records(
+        [
+            {
+                "edge_id": "edge-1",
+                "from_node_id": "node-a",
+                "to_node_id": "node-b",
+                "from_node": (0.0, 0.0),
+                "to_node": (1.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-2",
+                "from_node_id": "node-b",
+                "to_node_id": "node-c",
+                "from_node": (1.0, 0.0),
+                "to_node": (2.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (2.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-3",
+                "from_node_id": "node-c",
+                "to_node_id": "node-d",
+                "from_node": (2.0, 0.0),
+                "to_node": (3.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(2.0, 0.0), (3.0, 0.0)]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    service = network.service_area("node-a", max_cost=2.0)
+    records = service.to_records()
+
+    assert [record["edge_id"] for record in records] == ["edge-1", "edge-2"]
+    assert all(record["max_cost_service"] == 2.0 for record in records)
+    assert all(record["origin_nodes_service"] == ["node-a"] for record in records)
 
 
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:
@@ -1487,3 +1552,4 @@ def test_comparison_report_benchmarks_new_methods() -> None:
     assert "benchmark.geoprompt.corridor_diagnostics" in benchmark_ops
     assert "benchmark.geoprompt.network_build" in benchmark_ops
     assert "benchmark.geoprompt.shortest_path" in benchmark_ops
+    assert "benchmark.geoprompt.service_area" in benchmark_ops

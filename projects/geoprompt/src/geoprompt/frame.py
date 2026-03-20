@@ -64,6 +64,7 @@ class GeoPromptFrame:
         self.geometry_column = geometry_column
         self.crs = crs
         self._rows = [dict(row) for row in rows]
+        self._cache: dict[tuple[Any, ...], Any] = {}
         for row in self._rows:
             row[self.geometry_column] = normalize_geometry(row[self.geometry_column])
 
@@ -82,6 +83,7 @@ class GeoPromptFrame:
         frame.geometry_column = geometry_column
         frame.crs = crs
         frame._rows = [dict(row) for row in rows]
+        frame._cache = {}
         return frame
 
     def __len__(self) -> int:
@@ -131,10 +133,17 @@ class GeoPromptFrame:
         return [geometry_centroid(row[active_geometry_column]) for row in active_rows]
 
     def spatial_index(self, mode: Literal["geometry", "centroid"] = "geometry", cell_size: float | None = None) -> SpatialIndex:
+        cache_key = ("spatial_index", mode, None if cell_size is None else float(cell_size))
+        if cache_key in self._cache:
+            return self._cache[cache_key]
         if mode == "geometry":
-            return SpatialIndex([geometry_bounds(row[self.geometry_column]) for row in self._rows], cell_size=cell_size)
+            index = SpatialIndex([geometry_bounds(row[self.geometry_column]) for row in self._rows], cell_size=cell_size)
+            self._cache[cache_key] = index
+            return index
         if mode == "centroid":
-            return SpatialIndex.from_points(self._centroids(), cell_size=cell_size)
+            index = SpatialIndex.from_points(self._centroids(), cell_size=cell_size)
+            self._cache[cache_key] = index
+            return index
         raise ValueError("mode must be 'geometry' or 'centroid'")
 
     def _resolve_anchor_geometry(self, anchor: str | Geometry | Coordinate, id_column: str) -> tuple[Geometry, str | None]:
@@ -1543,6 +1552,10 @@ class GeoPromptFrame:
         node_id_prefix: str = "node",
         distance_method: str = "euclidean",
     ) -> "GeoPromptFrame":
+        cache_key = ("network_build", id_column, edge_id_prefix, node_id_prefix, distance_method)
+        cached_network = self._cache.get(cache_key)
+        if cached_network is not None:
+            return cached_network
         if distance_method not in {"euclidean", "haversine"}:
             raise ValueError("distance_method must be 'euclidean' or 'haversine'")
         if not self._rows:
@@ -1633,6 +1646,65 @@ class GeoPromptFrame:
             )
 
         rows.sort(key=lambda row: (str(row["source_id"]), int(row["source_segment_index"]), str(row["from_node_id"]), str(row["to_node_id"])))
+        network_frame = GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        self._cache[cache_key] = network_frame
+        return network_frame
+
+    def service_area(
+        self,
+        origins: str | Coordinate | Sequence[str | Coordinate],
+        max_cost: float,
+        from_node_id_column: str = "from_node_id",
+        to_node_id_column: str = "to_node_id",
+        from_node_column: str = "from_node",
+        to_node_column: str = "to_node",
+        cost_column: str = "edge_length",
+        directed: bool = False,
+        service_suffix: str = "service",
+    ) -> "GeoPromptFrame":
+        if max_cost < 0:
+            raise ValueError("max_cost must be zero or greater")
+        for column in (from_node_id_column, to_node_id_column, from_node_column, to_node_column, cost_column):
+            self._require_column(column)
+        if not self._rows:
+            return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
+
+        if isinstance(origins, (str, tuple, list)) and not (isinstance(origins, Sequence) and not isinstance(origins, (str, tuple))):
+            origin_values = [origins]  # type: ignore[list-item]
+        else:
+            origin_values = list(origins)  # type: ignore[arg-type]
+
+        origin_node_ids = [
+            self._resolve_network_node(origin, from_node_id_column, to_node_id_column, from_node_column, to_node_column)
+            for origin in origin_values
+        ]
+        adjacency = self._network_graph(from_node_id_column, to_node_id_column, cost_column, directed=directed)
+        distances = _dijkstra_distances(adjacency, origin_node_ids)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            from_node_id = str(row[from_node_id_column])
+            to_node_id = str(row[to_node_id_column])
+            from_cost = distances.get(from_node_id)
+            to_cost = distances.get(to_node_id)
+            edge_cost = float(row[cost_column])
+
+            reachable = False
+            if from_cost is not None and from_cost + edge_cost <= max_cost:
+                reachable = True
+            if to_cost is not None and to_cost + edge_cost <= max_cost:
+                reachable = True
+            if not reachable:
+                continue
+
+            resolved = dict(row)
+            resolved[f"origin_nodes_{service_suffix}"] = list(origin_node_ids)
+            resolved[f"max_cost_{service_suffix}"] = max_cost
+            resolved[f"cost_from_node_{service_suffix}"] = from_cost
+            resolved[f"cost_to_node_{service_suffix}"] = to_cost
+            resolved[f"cost_min_{service_suffix}"] = min(value for value in (from_cost, to_cost) if value is not None)
+            rows.append(resolved)
+
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def shortest_path(
@@ -1656,15 +1728,7 @@ class GeoPromptFrame:
         origin_node_id = self._resolve_network_node(origin, from_node_id_column, to_node_id_column, from_node_column, to_node_column)
         destination_node_id = self._resolve_network_node(destination, from_node_id_column, to_node_id_column, from_node_column, to_node_column)
 
-        adjacency: dict[str, list[tuple[str, float, int]]] = {}
-        for index, row in enumerate(self._rows):
-            from_node_id = str(row[from_node_id_column])
-            to_node_id = str(row[to_node_id_column])
-            edge_cost = float(row[cost_column])
-            adjacency.setdefault(from_node_id, []).append((to_node_id, edge_cost, index))
-            if not directed:
-                adjacency.setdefault(to_node_id, []).append((from_node_id, edge_cost, index))
-
+        adjacency = self._network_graph(from_node_id_column, to_node_id_column, cost_column, directed=directed)
         distances: dict[str, float] = {origin_node_id: 0.0}
         previous: dict[str, tuple[str, int]] = {}
         queue: list[tuple[float, str]] = [(0.0, origin_node_id)]
@@ -1738,6 +1802,29 @@ class GeoPromptFrame:
                 node_id,
             ),
         )
+
+    def _network_graph(
+        self,
+        from_node_id_column: str,
+        to_node_id_column: str,
+        cost_column: str,
+        directed: bool,
+    ) -> dict[str, list[tuple[str, float, int]]]:
+        cache_key = ("network_graph", from_node_id_column, to_node_id_column, cost_column, directed)
+        cached_graph = self._cache.get(cache_key)
+        if cached_graph is not None:
+            return cached_graph
+
+        adjacency: dict[str, list[tuple[str, float, int]]] = {}
+        for index, row in enumerate(self._rows):
+            from_node_id = str(row[from_node_id_column])
+            to_node_id = str(row[to_node_id_column])
+            edge_cost = float(row[cost_column])
+            adjacency.setdefault(from_node_id, []).append((to_node_id, edge_cost, index))
+            if not directed:
+                adjacency.setdefault(to_node_id, []).append((from_node_id, edge_cost, index))
+        self._cache[cache_key] = adjacency
+        return adjacency
 
     def corridor_reach(
         self,
@@ -2544,6 +2631,30 @@ def _point_on_segment(point: Coordinate, start: Coordinate, end: Coordinate, tol
         min(start[0], end[0]) - tolerance <= point[0] <= max(start[0], end[0]) + tolerance
         and min(start[1], end[1]) - tolerance <= point[1] <= max(start[1], end[1]) + tolerance
     )
+
+
+def _dijkstra_distances(
+    adjacency: dict[str, list[tuple[str, float, int]]],
+    origin_node_ids: Sequence[str],
+    stop_node: str | None = None,
+) -> dict[str, float]:
+    distances: dict[str, float] = {node_id: 0.0 for node_id in origin_node_ids}
+    queue: list[tuple[float, str]] = [(0.0, node_id) for node_id in origin_node_ids]
+    visited: set[str] = set()
+
+    while queue:
+        current_cost, current_node = heappop(queue)
+        if current_node in visited:
+            continue
+        visited.add(current_node)
+        if stop_node is not None and current_node == stop_node:
+            break
+        for next_node, edge_cost, _edge_index in adjacency.get(current_node, []):
+            path_cost = current_cost + edge_cost
+            if path_cost < distances.get(next_node, float("inf")):
+                distances[next_node] = path_cost
+                heappush(queue, (path_cost, next_node))
+    return distances
 
 
 def _point_to_segment_distance(point: Coordinate, seg_start: Any, seg_end: Any, method: str = "euclidean") -> float:
