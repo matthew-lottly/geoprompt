@@ -337,14 +337,14 @@ Current validated snapshot from the built-in corpora:
 
 - correctness parity flags are all `true` for bounds, nearest neighbors, bounds queries, geometry metrics, reprojection, clip, dissolve, and spatial join
 - Geoprompt is consistently faster on geometry metrics, nearest-neighbor lookup, bounds queries, and dissolve
-- the generated stress corpus currently shows Geoprompt ahead on spatial join and still behind the reference stack on clip
-- the smaller benchmark corpus still shows clip and spatial join as the main optimization targets even after the latest bounds-prefilter pass
+- the generated stress corpus now shows Geoprompt ahead on both spatial join and clip
+- the smaller benchmark corpus now shows clip ahead of the reference path, while spatial join is roughly at parity and still worth another focused pass
 
 Representative relative speed ratios from the latest comparison report:
 
-- `sample` corpus: geometry metrics `6.66x`, nearest neighbors `5.28x`, bounds query `30.28x`, reprojection `1.47x`
-- `benchmark` corpus: geometry metrics `5.10x`, nearest neighbors `5.57x`, bounds query `14.58x`, reprojection `1.38x`, clip `0.68x`, spatial join `0.60x`, dissolve `17.40x`
-- `stress` corpus: geometry metrics `3.44x`, nearest neighbors `6.50x`, bounds query `1.29x`, reprojection `1.19x`, clip `0.89x`, spatial join `2.50x`, dissolve `5.97x`
+- `sample` corpus: geometry metrics `4.87x`, nearest neighbors `2.57x`, bounds query `35.71x`, reprojection `2.09x`
+- `benchmark` corpus: geometry metrics `2.04x`, nearest neighbors `2.50x`, bounds query `14.63x`, reprojection `1.34x`, clip `1.83x`, spatial join `0.98x`, dissolve `13.38x`
+- `stress` corpus: geometry metrics `3.34x`, nearest neighbors `2.48x`, bounds query `3.30x`, reprojection `0.94x`, clip `1.05x`, spatial join `2.62x`, dissolve `7.29x`
 
 ## Release Readiness
 
@@ -360,7 +360,7 @@ The project now includes:
 - License: [LICENSE](LICENSE)
 - Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Release notes: [docs/release-notes-0.1.4.md](docs/release-notes-0.1.4.md)
+- Release notes: [docs/release-notes-0.1.5.md](docs/release-notes-0.1.5.md)
 
 ## Repository Notes
 

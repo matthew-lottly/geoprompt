@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from functools import lru_cache
 from typing import Any
 
 from .geometry import Geometry, geometry_bounds, geometry_type
@@ -15,6 +16,7 @@ def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[floa
     )
 
 
+@lru_cache(maxsize=1)
 def _load_shapely() -> tuple[Any, Any, Any, Any]:
     try:
         shapely_geometry = importlib.import_module("shapely.geometry")
@@ -39,8 +41,16 @@ def geometry_to_geojson(geometry: Geometry) -> dict[str, Any]:
 
 
 def geometry_to_shapely(geometry: Geometry) -> Any:
-    _, shape, _, _ = _load_shapely()
-    return shape(geometry_to_geojson(geometry))
+    shapely_geometry, _, _, _ = _load_shapely()
+    geometry_kind = geometry_type(geometry)
+    coordinates = geometry["coordinates"]
+    if geometry_kind == "Point":
+        return shapely_geometry.Point(coordinates)
+    if geometry_kind == "LineString":
+        return shapely_geometry.LineString(coordinates)
+    if geometry_kind == "Polygon":
+        return shapely_geometry.Polygon(coordinates)
+    raise TypeError(f"unsupported geometry type: {geometry_kind}")
 
 
 def geometry_from_shapely(value: Any) -> list[Geometry]:

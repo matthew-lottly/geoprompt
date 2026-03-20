@@ -22,7 +22,7 @@ This project models Geoprompt as a reusable package rather than a single spatial
 - `io.py` provides lightweight package entry points for reading raw JSON records, GeoJSON FeatureCollections, and writing GeoJSON output with CRS metadata.
 - `demo.py` proves the package can drive a real output artifact, not just library internals.
 - `compare.py` validates metric parity and runtime against external spatial libraries over multiple fixtures.
-- `overlay.py` isolates the Shapely-backed overlay adapters used for buffer, dissolve, clip, and intersection behavior.
+- `overlay.py` isolates the Shapely-backed overlay adapters used for buffer, dissolve, clip, and intersection behavior, including cached Shapely loading and direct geometry conversion for the hot overlay path.
 
 ## First Deliberate Constraints
 

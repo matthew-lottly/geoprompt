@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.5
+
+- Optimized the Shapely-backed overlay path by caching Shapely module loading inside `overlay.py`.
+- Replaced the GeoJSON reshaping step in `geometry_to_shapely(...)` with direct Point, LineString, and Polygon construction.
+- Improved `clip(...)` runtime enough to move ahead of the reference path in the current benchmark and stress corpora while keeping all comparison parity flags green.
+
 ## 0.1.4
 
 - Added `GeoPromptFrame.buffer_join(...)` for service-area style joins driven by buffered geometries.
