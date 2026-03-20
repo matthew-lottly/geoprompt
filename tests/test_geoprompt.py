@@ -218,6 +218,73 @@ def test_assign_nearest_returns_target_focused_output() -> None:
     assert records[1]["distance_origin"] == 1.0
 
 
+def test_summarize_assignments_rolls_targets_to_origins() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "demand": 2.0, "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "demand": 3.0, "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+            {"target_id": "target-3", "demand": 5.0, "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = origins.summarize_assignments(
+        targets,
+        origin_id_column="site_id",
+        target_id_column="target_id",
+        aggregations={"demand": "sum"},
+    )
+    records = sorted(summary.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["site_id"] == "origin-a"
+    assert records[0]["target_ids_assigned"] == ["target-1", "target-2"]
+    assert records[0]["count_assigned"] == 2
+    assert records[0]["demand_sum_assigned"] == 5.0
+    assert records[0]["distance_min_assigned"] == 1.0
+    assert records[0]["distance_max_assigned"] == 2.0
+    assert records[0]["distance_mean_assigned"] == 1.5
+    assert records[1]["site_id"] == "origin-b"
+    assert records[1]["target_ids_assigned"] == ["target-3"]
+    assert records[1]["count_assigned"] == 1
+
+
+def test_summarize_assignments_supports_left_mode_and_distance_filter() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = origins.summarize_assignments(
+        targets,
+        origin_id_column="site_id",
+        target_id_column="target_id",
+        how="left",
+        max_distance=2.0,
+    )
+    records = sorted(summary.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["count_assigned"] == 1
+    assert records[1]["count_assigned"] == 0
+    assert records[1]["target_ids_assigned"] == []
+    assert records[1]["distance_mean_assigned"] is None
+
+
 def test_buffer_converts_points_to_polygons() -> None:
     frame = read_points(PROJECT_ROOT / "data" / "sample_points.json", crs="EPSG:4326")
 

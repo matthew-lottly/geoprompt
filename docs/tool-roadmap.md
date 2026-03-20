@@ -13,9 +13,9 @@ Geoprompt is strongest when a tool does one of these well:
 
 ### 1. Assignment Summaries
 
-- Build on `assign_nearest(...)`
-- Add per-origin rollups such as assigned target counts, assigned ids, and aggregated demand
-- Useful for workload balancing, facility service counts, and first-pass territory design
+- Implemented through `summarize_assignments(...)`
+- Current scope covers per-origin assigned ids, counts, distance summaries, and target aggregation rollups
+- Next extension should add contested and unassigned-target summaries
 
 ### 2. Catchment Competition
 
@@ -56,8 +56,8 @@ Geoprompt is strongest when a tool does one of these well:
 
 ## Recommended Next Implementation Order
 
-1. Assignment summaries
-2. Catchment competition
-3. Overlay summaries
-4. Corridor reach
-5. Zone fit scoring
+1. Catchment competition
+2. Overlay summaries
+3. Corridor reach
+4. Zone fit scoring
+5. Multi-scale clustering

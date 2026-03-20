@@ -306,6 +306,70 @@ class GeoPromptFrame:
             distance_method=distance_method,
         )
 
+    def summarize_assignments(
+        self,
+        targets: "GeoPromptFrame",
+        origin_id_column: str = "site_id",
+        target_id_column: str = "site_id",
+        aggregations: dict[str, AggregationName] | None = None,
+        how: SpatialJoinMode = "left",
+        max_distance: float | None = None,
+        distance_method: str = "euclidean",
+        assignment_suffix: str = "assigned",
+    ) -> "GeoPromptFrame":
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if max_distance is not None and max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+        if self.crs and targets.crs and self.crs != targets.crs:
+            raise ValueError("frames must share the same CRS before assignment summaries")
+
+        self._require_column(origin_id_column)
+        targets._require_column(target_id_column)
+
+        origin_centroids = self._centroids()
+        target_rows = list(targets._rows)
+        target_centroids = targets._centroids()
+        assignments: dict[str, list[tuple[Record, float]]] = {}
+
+        for target_row, target_centroid in zip(target_rows, target_centroids, strict=True):
+            row_matches = self._nearest_row_matches(
+                origin_centroid=target_centroid,
+                right_rows=self._rows,
+                right_centroids=origin_centroids,
+                k=1,
+                distance_method=distance_method,
+                max_distance=max_distance,
+            )
+            if not row_matches:
+                continue
+            origin_row, distance_value = row_matches[0]
+            origin_key = str(origin_row[origin_id_column])
+            assignments.setdefault(origin_key, []).append((target_row, distance_value))
+
+        rows: list[Record] = []
+        for origin_row in self._rows:
+            origin_key = str(origin_row[origin_id_column])
+            assigned_matches = assignments.get(origin_key, [])
+            if not assigned_matches and how == "inner":
+                continue
+
+            assigned_rows = [row for row, _ in assigned_matches]
+            assigned_distances = [distance for _, distance in assigned_matches]
+            resolved_row = dict(origin_row)
+            resolved_row[f"{target_id_column}s_{assignment_suffix}"] = [str(row[target_id_column]) for row in assigned_rows]
+            resolved_row[f"count_{assignment_suffix}"] = len(assigned_rows)
+            resolved_row[f"distance_method_{assignment_suffix}"] = distance_method
+            resolved_row[f"distance_min_{assignment_suffix}"] = min(assigned_distances) if assigned_distances else None
+            resolved_row[f"distance_max_{assignment_suffix}"] = max(assigned_distances) if assigned_distances else None
+            resolved_row[f"distance_mean_{assignment_suffix}"] = (
+                sum(assigned_distances) / len(assigned_distances) if assigned_distances else None
+            )
+            resolved_row.update(self._aggregate_rows(assigned_rows, aggregations=aggregations, suffix=assignment_suffix))
+            rows.append(resolved_row)
+
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs or targets.crs)
+
     def query_radius(
         self,
         anchor: str | Geometry | Coordinate,
