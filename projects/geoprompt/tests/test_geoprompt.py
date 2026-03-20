@@ -662,22 +662,22 @@ def test_corridor_reach_supports_inner_mode() -> None:
     assert result.to_records()[0]["site_id"] == "near"
 
 
-def test_corridor_reach_rejects_unsupported_distance_method() -> None:
+def test_corridor_reach_supports_haversine_distance() -> None:
     features = GeoPromptFrame.from_records(
-        [{"site_id": "near", "geometry": {"type": "Point", "coordinates": [1.0, 0.05]}}],
+        [{"site_id": "near", "geometry": {"type": "Point", "coordinates": [-111.95, 40.75]}}],
         crs="EPSG:4326",
     )
     corridors = GeoPromptFrame.from_records(
-        [{"site_id": "route", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]}}],
+        [{"site_id": "route", "geometry": {"type": "LineString", "coordinates": [[-111.96, 40.75], [-111.94, 40.75]]}}],
         crs="EPSG:4326",
     )
 
-    try:
-        features.corridor_reach(corridors, max_distance=1.0, distance_method="haversine")
-    except ValueError as exc:
-        assert "euclidean" in str(exc)
-    else:
-        raise AssertionError("corridor_reach should reject unsupported distance methods")
+    result = features.corridor_reach(corridors, max_distance=1.0, distance_method="haversine")
+    record = result.to_records()[0]
+    assert record["count_reach"] == 1
+    assert record["distance_method_reach"] == "haversine"
+    assert record["distance_min_reach"] is not None
+    assert record["distance_min_reach"] < 1.0
 
 
 def test_zone_fit_score_ranks_zones_for_features() -> None:
@@ -706,6 +706,37 @@ def test_zone_fit_score_ranks_zones_for_features() -> None:
     assert records["inside"]["zone_count_fit"] == 1
     assert records["outside"]["best_zone_fit"] == "zone-a"
     assert records["inside"]["best_score_fit"] > records["outside"]["best_score_fit"]
+
+
+def test_zone_fit_score_supports_custom_weights_and_alignment() -> None:
+    features = GeoPromptFrame.from_records(
+        [{"site_id": "inside", "geometry": {"type": "Point", "coordinates": [0.5, 0.5]}}],
+        crs="EPSG:4326",
+    )
+    zones = GeoPromptFrame.from_records(
+        [
+            {
+                "region_id": "east-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[1.0, 0.0], [2.0, 0.0], [2.0, 1.0], [1.0, 1.0]]]},
+            },
+            {
+                "region_id": "north-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[0.0, 1.0], [1.0, 1.0], [1.0, 2.0], [0.0, 2.0]]]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    scored = features.zone_fit_score(
+        zones,
+        zone_id_column="region_id",
+        score_weights={"containment": 0.0, "overlap": 0.0, "size": 0.0, "access": 0.1, "alignment": 0.9},
+        preferred_bearing=0.0,
+    )
+    record = scored.to_records()[0]
+    assert record["best_zone_fit"] == "north-zone"
+    assert record["score_weights_fit"]["alignment"] == 0.9
+    assert any(zone_score["alignment_score"] is not None for zone_score in record["zone_scores_fit"])
 
 
 def test_zone_fit_score_respects_max_distance() -> None:
@@ -748,6 +779,39 @@ def test_centroid_cluster_assigns_cluster_ids() -> None:
     assert records[0]["cluster_id"] == records[1]["cluster_id"]
     assert records[2]["cluster_id"] == records[3]["cluster_id"]
     assert records[0]["cluster_id"] != records[2]["cluster_id"]
+    assert all("cluster_size" in r for r in records)
+    assert all("cluster_sse" in r for r in records)
+    assert all("cluster_silhouette" in r for r in records)
+    assert all("cluster_silhouette_mean" in r for r in records)
+
+
+def test_centroid_cluster_uses_id_column_for_deterministic_seeding() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "zeta", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+            {"site_id": "alpha", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "beta", "geometry": {"type": "Point", "coordinates": [0.2, 0.0]}},
+            {"site_id": "omega", "geometry": {"type": "Point", "coordinates": [10.2, 0.0]}},
+        ],
+    )
+
+    clustered = frame.centroid_cluster(k=2, id_column="site_id")
+    records = {row["site_id"]: row for row in clustered.to_records()}
+    assert records["alpha"]["cluster_id"] == records["beta"]["cluster_id"]
+    assert records["omega"]["cluster_id"] == records["zeta"]["cluster_id"]
+
+
+def test_centroid_cluster_single_cluster_reports_zero_silhouette() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        ],
+    )
+
+    clustered = frame.centroid_cluster(k=1)
+    assert all(row["cluster_silhouette"] == 0.0 for row in clustered)
+    assert all(row["cluster_silhouette_mean"] == 0.0 for row in clustered)
 
 
 def test_geometry_envelope_creates_bounding_box() -> None:
@@ -1034,3 +1098,23 @@ def test_frame_to_records_flat() -> None:
     assert flat[0]["geometry_centroid_x"] == 1.0
     assert flat[0]["geometry_centroid_y"] == 2.0
     assert "geometry" not in flat[0]
+
+
+def test_comparison_report_benchmarks_new_methods() -> None:
+    import geoprompt.compare as compare
+
+    original_benchmark = compare._benchmark
+    compare._benchmark = lambda operation, func, repeats=20: ({"operation": operation, "repeats": 1}, func())
+    try:
+        report = compare.build_comparison_report()
+    finally:
+        compare._benchmark = original_benchmark
+
+    benchmark_ops = {
+        benchmark["operation"]
+        for dataset in report["datasets"]
+        for benchmark in dataset["benchmarks"]
+    }
+    assert "sample.geoprompt.centroid_cluster" in benchmark_ops
+    assert "benchmark.geoprompt.zone_fit_score" in benchmark_ops
+    assert "benchmark.geoprompt.corridor_reach" in benchmark_ops

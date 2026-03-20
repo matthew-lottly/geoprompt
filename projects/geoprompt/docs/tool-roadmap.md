@@ -26,7 +26,7 @@ Geoprompt is strongest when a tool does one of these well:
 ### 3. Corridor Reach
 
 - Implemented through `corridor_reach(...)`
-- Current scope covers per-feature corridor matching within a distance limit, corridor distance summaries, and total corridor length aggregation
+- Current scope covers per-feature corridor matching within a distance limit, corridor distance summaries, total corridor length aggregation, and Euclidean or haversine distance support
 - Next extension should add direction-aware corridor scoring and weighted corridor priority ranking
 
 ## Mid-Term Tools
@@ -40,14 +40,14 @@ Geoprompt is strongest when a tool does one of these well:
 ### 5. Zone Fit Scoring
 
 - Implemented through `zone_fit_score(...)`
-- Current scope covers containment, overlap, area similarity, and distance-weighted zone scoring with best-zone assignment
-- Next extension should allow custom scoring weight control and multi-factor zone ranking
+- Current scope covers containment, overlap, area similarity, access scoring, optional directional alignment, and custom scoring weight control with best-zone assignment
+- Next extension should add grouped zone rankings and user-defined scoring callbacks
 
 ### 6. Multi-Scale Clustering
 
 - Implemented through `centroid_cluster(...)`
-- Current scope covers deterministic k-means centroid-distance clustering with cluster ids, centers, and distances
-- Next extension should add silhouette-style quality metrics and support for cluster count selection heuristics
+- Current scope covers deterministic k-means centroid-distance clustering with cluster ids, centers, distances, cluster SSE, and silhouette-style quality metrics
+- Next extension should add cluster count selection heuristics and grouped cluster summaries
 
 ## Design Rules For New Tools
 
@@ -60,7 +60,7 @@ Geoprompt is strongest when a tool does one of these well:
 ## Recommended Next Implementation Order
 
 1. Direction-aware corridor scoring
-2. Custom zone fit weight controls
-3. Cluster quality metrics
+2. Grouped zone-fit rankings
+3. Cluster count selection heuristics
 4. Grouped overlay summaries
 5. Network-distance corridor analysis

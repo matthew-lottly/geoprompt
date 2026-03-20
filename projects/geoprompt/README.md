@@ -40,9 +40,9 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Overlay summaries for overlap metrics when you need counts and shares instead of derived geometry outputs
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
-- Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening
-- Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for multi-factor zone matching
-- Centroid clustering with `GeoPromptFrame.centroid_cluster(...)` for deterministic spatial grouping
+- Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening in Euclidean or haversine mode
+- Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for configurable multi-factor zone matching
+- Centroid clustering with `GeoPromptFrame.centroid_cluster(...)` for deterministic spatial grouping plus cluster quality metrics
 - Gravity model and accessibility index equations for interaction and access scoring
 - Geometry helpers: `geometry_convex_hull(...)`, `geometry_envelope(...)`, `GeoPromptFrame.envelopes()`, `GeoPromptFrame.convex_hulls()`
 - Frame utilities: `select(...)`, `rename_columns(...)`, `filter(...)`, `sort(...)`, `describe()`, `__repr__`, `__getitem__`
@@ -260,12 +260,11 @@ reach = assets.corridor_reach(
     corridors,
     max_distance=0.05,
     aggregations={"capacity_index": "sum"},
+    distance_method="euclidean",
 )
 
 print(reach.head(3))
 ```
-
-`corridor_reach(...)` currently supports Euclidean distance only.
 
 Zone-fit-score example:
 
@@ -276,6 +275,30 @@ features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
 zones = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
 
 scored = features.zone_fit_score(zones, zone_id_column="region_id")
+
+print(scored.head(3))
+```
+
+Weighted zone-fit example:
+
+```python
+import geoprompt as gp
+
+features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+zones = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
+
+scored = features.zone_fit_score(
+    zones,
+    zone_id_column="region_id",
+    score_weights={
+        "containment": 0.3,
+        "overlap": 0.2,
+        "size": 0.2,
+        "access": 0.2,
+        "alignment": 0.1,
+    },
+    preferred_bearing=90.0,
+)
 
 print(scored.head(3))
 ```
@@ -291,6 +314,8 @@ clustered = features.centroid_cluster(k=3)
 
 print(clustered.head(5))
 ```
+
+Clustered output now includes `cluster_size`, `cluster_sse`, `cluster_silhouette`, and `cluster_silhouette_mean`.
 
 Frame utilities example:
 

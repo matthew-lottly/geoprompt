@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.11
+
+- Added haversine support to `GeoPromptFrame.corridor_reach(...)` using local tangent-plane segment distance so lon/lat corridor screening can run in geographic mode.
+- Added configurable `score_weights` and optional `preferred_bearing` support to `GeoPromptFrame.zone_fit_score(...)` so containment, overlap, size, access, and directional alignment can be weighted per workflow.
+- Improved `GeoPromptFrame.centroid_cluster(...)` with deterministic id-based seed selection, stable tie handling, per-row cluster quality metrics, cluster SSE, cluster size, and silhouette summaries.
+- Added benchmark coverage in `compare.py` for `centroid_cluster(...)`, `zone_fit_score(...)`, and `corridor_reach(...)` so the newer tools appear in the comparison report.
+- Expanded regression coverage for haversine corridor reach, custom zone-fit weighting, alignment-aware scoring, deterministic clustering, and benchmark registration.
+
 ## 0.1.10
 
 - Fixed `geometry_convex_hull(...)` so fully collinear inputs return a `LineString` hull instead of an invalid polygon shell.

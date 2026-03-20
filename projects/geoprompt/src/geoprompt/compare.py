@@ -403,6 +403,7 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         (f"{case.name}.reference.query_bounds", lambda: geopandas_frame.loc[geopandas_frame.geometry.intersects(box(min_x, min_y, max_x, max_y))]),
         (f"{case.name}.geoprompt.to_crs", lambda: frame.to_crs("EPSG:3857")),
         (f"{case.name}.reference.to_crs", lambda: geopandas_frame.to_crs("EPSG:3857")),
+        (f"{case.name}.geoprompt.centroid_cluster", lambda: frame.centroid_cluster(k=min(3, len(frame)))),
     ]:
         benchmark, _ = _benchmark(operation, func)
         benchmarks.append(benchmark)
@@ -455,6 +456,21 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             ).dissolve(by="region_band", aggfunc={"region_name": "count"}).reset_index(),
         )
         benchmarks.append(benchmark)
+
+        benchmark, _ = _benchmark(
+            f"{case.name}.geoprompt.zone_fit_score",
+            lambda: frame.zone_fit_score(regions, zone_id_column="region_id"),
+        )
+        benchmarks.append(benchmark)
+
+        corridor_rows = [row for row in frame.to_records() if row["geometry"]["type"] == "LineString"]
+        if corridor_rows:
+            corridor_frame = GeoPromptFrame.from_records(corridor_rows, crs=case.crs)
+            benchmark, _ = _benchmark(
+                f"{case.name}.geoprompt.corridor_reach",
+                lambda: frame.corridor_reach(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
+            )
+            benchmarks.append(benchmark)
 
     return {
         "dataset": case.name,

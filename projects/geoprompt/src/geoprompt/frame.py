@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib
+import math
 from dataclasses import dataclass
 from heapq import nsmallest
 from typing import Any, Iterable, Literal, Sequence
 
-from .equations import accessibility_index, area_similarity, coordinate_distance, corridor_strength, directional_alignment, gravity_model, prompt_influence, prompt_interaction
+from .equations import accessibility_index, area_similarity, coordinate_distance, corridor_strength, directional_alignment, gravity_model, prompt_decay, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_convex_hull, geometry_distance, geometry_envelope, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
 from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
 
@@ -1202,8 +1203,8 @@ class GeoPromptFrame:
             raise ValueError("max_distance must be zero or greater")
         if how not in {"inner", "left"}:
             raise ValueError("how must be 'inner' or 'left'")
-        if distance_method != "euclidean":
-            raise ValueError("corridor_reach currently supports only the 'euclidean' distance method")
+        if distance_method not in {"euclidean", "haversine"}:
+            raise ValueError("distance_method must be 'euclidean' or 'haversine'")
         if self.crs and corridors.crs and self.crs != corridors.crs:
             raise ValueError("frames must share the same CRS before corridor reach analysis")
 
@@ -1224,7 +1225,7 @@ class GeoPromptFrame:
                 for i in range(len(corridor_vertices) - 1):
                     seg_start = corridor_vertices[i]
                     seg_end = corridor_vertices[i + 1]
-                    dist = _point_to_segment_distance(left_centroid, seg_start, seg_end)
+                    dist = _point_to_segment_distance(left_centroid, seg_start, seg_end, method=distance_method)
                     if dist < min_dist:
                         min_dist = dist
                 if len(corridor_vertices) == 1:
@@ -1268,6 +1269,8 @@ class GeoPromptFrame:
         weight_column: str | None = None,
         max_distance: float | None = None,
         distance_method: str = "euclidean",
+        score_weights: dict[str, float] | None = None,
+        preferred_bearing: float | None = None,
         score_suffix: str = "fit",
     ) -> "GeoPromptFrame":
         if max_distance is not None and max_distance < 0:
@@ -1276,6 +1279,7 @@ class GeoPromptFrame:
             raise ValueError("frames must share the same CRS before zone fit scoring")
 
         zones._require_column(zone_id_column)
+        component_weights = _resolve_zone_fit_weights(score_weights)
         zone_rows = list(zones._rows)
         zone_centroids = zones._centroids()
         zone_areas = [geometry_area(row[zones.geometry_column]) for row in zone_rows]
@@ -1303,8 +1307,23 @@ class GeoPromptFrame:
                     scale=1.0,
                     power=1.0,
                 )
+                access_score = prompt_decay(distance_value=dist, scale=max_distance or 1.0, power=1.0)
+                alignment_score = None
+                if preferred_bearing is not None:
+                    alignment_score = (directional_alignment(left_centroid, zone_centroid, preferred_bearing) + 1.0) / 2.0
+
+                component_scores = {
+                    "containment": containment,
+                    "overlap": overlap,
+                    "size": size_ratio,
+                    "access": access_score,
+                    "alignment": alignment_score if alignment_score is not None else 0.0,
+                }
+
                 weight = float(left_row.get(weight_column, 1.0)) if weight_column else 1.0
-                score = weight * (containment * 0.4 + overlap * 0.3 + size_ratio * 0.3)
+                weighted_total = sum(component_scores[name] * component_weights[name] for name in component_weights)
+                total_weight = sum(component_weights.values())
+                score = weight * (weighted_total / total_weight)
 
                 zone_scores.append({
                     "zone_id": str(zone_row[zone_id_column]),
@@ -1313,6 +1332,8 @@ class GeoPromptFrame:
                     "containment": containment,
                     "overlap": overlap,
                     "size_ratio": size_ratio,
+                    "access_score": access_score,
+                    "alignment_score": alignment_score,
                 })
                 if score > best_score:
                     best_score = score
@@ -1322,6 +1343,7 @@ class GeoPromptFrame:
             resolved_row[f"best_zone_{score_suffix}"] = best_zone_id
             resolved_row[f"best_score_{score_suffix}"] = best_score if best_zone_id is not None else None
             resolved_row[f"zone_count_{score_suffix}"] = len(zone_scores)
+            resolved_row[f"score_weights_{score_suffix}"] = dict(component_weights)
             resolved_row[f"zone_scores_{score_suffix}"] = zone_scores
             rows.append(resolved_row)
 
@@ -1338,22 +1360,25 @@ class GeoPromptFrame:
             raise ValueError("k must be greater than zero")
         if k > len(self._rows):
             raise ValueError("k must not exceed frame length")
+        if max_iterations <= 0:
+            raise ValueError("max_iterations must be greater than zero")
 
         centroids_list = self._centroids()
-
-        seeds = list(range(0, len(centroids_list), max(1, len(centroids_list) // k)))[:k]
-        cluster_centers = [centroids_list[i] for i in seeds]
+        sorted_indices = sorted(range(len(self._rows)), key=lambda index: _cluster_sort_key(self._rows[index], index, id_column))
+        seed_positions = [int(step * len(sorted_indices) / k) for step in range(k)]
+        seed_indices = [sorted_indices[min(position, len(sorted_indices) - 1)] for position in seed_positions]
+        cluster_centers = [centroids_list[i] for i in seed_indices]
 
         assignments = [0] * len(centroids_list)
 
         for _ in range(max_iterations):
             changed = False
             for point_index, point in enumerate(centroids_list):
-                best_cluster = 0
+                best_cluster = assignments[point_index]
                 best_dist = float("inf")
                 for cluster_index, center in enumerate(cluster_centers):
                     dist = coordinate_distance(point, center, method=distance_method)
-                    if dist < best_dist:
+                    if dist < best_dist - 1e-12 or (abs(dist - best_dist) <= 1e-12 and cluster_index < best_cluster):
                         best_dist = dist
                         best_cluster = cluster_index
                 if assignments[point_index] != best_cluster:
@@ -1374,12 +1399,38 @@ class GeoPromptFrame:
                     new_centers.append(cluster_centers[cluster_index])
             cluster_centers = new_centers
 
+        cluster_member_indices = {
+            cluster_index: [index for index, assignment in enumerate(assignments) if assignment == cluster_index]
+            for cluster_index in range(k)
+        }
+        point_distances = [
+            coordinate_distance(centroid_point, cluster_centers[assignments[index]], method=distance_method)
+            for index, centroid_point in enumerate(centroids_list)
+        ]
+        cluster_sse = {
+            cluster_index: sum(point_distances[index] ** 2 for index in members)
+            for cluster_index, members in cluster_member_indices.items()
+        }
+        cluster_mean_distance = {
+            cluster_index: (sum(point_distances[index] for index in members) / len(members)) if members else 0.0
+            for cluster_index, members in cluster_member_indices.items()
+        }
+        silhouette_scores = _cluster_silhouette_scores(centroids_list, assignments, distance_method=distance_method)
+        overall_sse = sum(cluster_sse.values())
+        overall_silhouette = sum(silhouette_scores) / len(silhouette_scores) if silhouette_scores else 0.0
+
         rows: list[Record] = []
-        for row, cluster_id, centroid_point in zip(self._rows, assignments, centroids_list, strict=True):
+        for index, (row, cluster_id, centroid_point) in enumerate(zip(self._rows, assignments, centroids_list, strict=True)):
             resolved = dict(row)
             resolved["cluster_id"] = cluster_id
             resolved["cluster_center"] = cluster_centers[cluster_id]
-            resolved["cluster_distance"] = coordinate_distance(centroid_point, cluster_centers[cluster_id], method=distance_method)
+            resolved["cluster_distance"] = point_distances[index]
+            resolved["cluster_size"] = len(cluster_member_indices[cluster_id])
+            resolved["cluster_mean_distance"] = cluster_mean_distance[cluster_id]
+            resolved["cluster_sse"] = cluster_sse[cluster_id]
+            resolved["cluster_silhouette"] = silhouette_scores[index]
+            resolved["cluster_sse_total"] = overall_sse
+            resolved["cluster_silhouette_mean"] = overall_silhouette
             rows.append(resolved)
 
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
@@ -1459,18 +1510,102 @@ class GeoPromptFrame:
         return scores
 
 
-def _point_to_segment_distance(point: Coordinate, seg_start: Any, seg_end: Any) -> float:
+def _resolve_zone_fit_weights(score_weights: dict[str, float] | None) -> dict[str, float]:
+    default_weights = {
+        "containment": 0.4,
+        "overlap": 0.3,
+        "size": 0.3,
+        "access": 0.0,
+        "alignment": 0.0,
+    }
+    if score_weights is None:
+        return default_weights
+
+    resolved = dict(default_weights)
+    for name, value in score_weights.items():
+        if name not in resolved:
+            raise ValueError(f"unsupported zone fit weight: {name}")
+        if value < 0:
+            raise ValueError("zone fit weights must be zero or greater")
+        resolved[name] = float(value)
+
+    if sum(resolved.values()) <= 0:
+        raise ValueError("at least one zone fit weight must be greater than zero")
+    return resolved
+
+
+def _cluster_sort_key(row: Record, index: int, id_column: str) -> tuple[str, int]:
+    if id_column in row:
+        return (str(row[id_column]), index)
+    return (str(index), index)
+
+
+def _cluster_silhouette_scores(
+    centroids: Sequence[Coordinate],
+    assignments: Sequence[int],
+    distance_method: str,
+) -> list[float]:
+    unique_clusters = sorted(set(assignments))
+    if len(unique_clusters) <= 1:
+        return [0.0 for _ in centroids]
+
+    members_by_cluster = {
+        cluster_id: [index for index, assignment in enumerate(assignments) if assignment == cluster_id]
+        for cluster_id in unique_clusters
+    }
+    scores: list[float] = []
+    for index, point in enumerate(centroids):
+        own_cluster = assignments[index]
+        own_members = [member for member in members_by_cluster[own_cluster] if member != index]
+        if own_members:
+            intra_distance = sum(
+                coordinate_distance(point, centroids[member], method=distance_method)
+                for member in own_members
+            ) / len(own_members)
+        else:
+            intra_distance = 0.0
+
+        nearest_other_distance = min(
+            sum(coordinate_distance(point, centroids[member], method=distance_method) for member in members_by_cluster[cluster_id]) / len(members_by_cluster[cluster_id])
+            for cluster_id in unique_clusters
+            if cluster_id != own_cluster and members_by_cluster[cluster_id]
+        )
+        denominator = max(intra_distance, nearest_other_distance)
+        if denominator == 0.0:
+            scores.append(0.0)
+        else:
+            scores.append((nearest_other_distance - intra_distance) / denominator)
+    return scores
+
+
+def _point_to_segment_distance(point: Coordinate, seg_start: Any, seg_end: Any, method: str = "euclidean") -> float:
     sx, sy = float(seg_start[0]), float(seg_start[1])
     ex, ey = float(seg_end[0]), float(seg_end[1])
     px, py = point
+    if method == "haversine":
+        return _point_to_segment_distance_haversine((px, py), (sx, sy), (ex, ey))
+
     dx, dy = ex - sx, ey - sy
     length_sq = dx * dx + dy * dy
     if length_sq == 0:
-        return coordinate_distance(point, (sx, sy))
+        return coordinate_distance(point, (sx, sy), method=method)
     t = max(0.0, min(1.0, ((px - sx) * dx + (py - sy) * dy) / length_sq))
     proj_x = sx + t * dx
     proj_y = sy + t * dy
-    return coordinate_distance(point, (proj_x, proj_y))
+    return coordinate_distance(point, (proj_x, proj_y), method=method)
+
+
+def _point_to_segment_distance_haversine(point: Coordinate, seg_start: Coordinate, seg_end: Coordinate) -> float:
+    reference_lat = math.radians((point[1] + seg_start[1] + seg_end[1]) / 3.0)
+
+    def project(coordinate: Coordinate) -> Coordinate:
+        lon_radians = math.radians(coordinate[0])
+        lat_radians = math.radians(coordinate[1])
+        x_value = 6371.0088 * lon_radians * math.cos(reference_lat)
+        y_value = 6371.0088 * lat_radians
+        return (x_value, y_value)
+
+    return _point_to_segment_distance(project(point), project(seg_start), project(seg_end), method="euclidean")
 
 
 __all__ = ["Bounds", "GeoPromptFrame"]
