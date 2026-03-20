@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, spatial joins, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -25,8 +25,17 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Custom equations for spatial decay, influence, interaction, corridor strength, and area similarity scoring
 - Basic nearest-neighbor analysis for point, line, and polygon centroids
 - Bounding-box queries for quick map-window style filtering
+- Radius queries for fast proximity filtering around a feature or coordinate anchor
+- Within-distance predicates for scoring or filtering without materializing a join
 - CRS assignment and reprojection through `GeoPromptFrame.to_crs(...)`
 - Spatial joins with `intersects`, `within`, and `contains` predicates
+- Proximity joins for distance-based matching without needing an overlay engine
+- Nearest joins for `k` closest matches when you want ranked association instead of a fixed distance cutoff
+- Nearest assignment for allocating each target feature to a single closest origin
+- Assignment summaries for rolling nearest assignments into per-origin counts, ids, and aggregate metrics
+- Buffer generation for point, line, and polygon geometries through the overlay engine
+- Buffer joins for service-area style matching against surrounding features
+- Coverage summaries for fast count and aggregate rollups per service geometry
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
 - Geographic distance support for longitude/latitude point workflows through haversine distance
@@ -78,6 +87,96 @@ assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
 joined = regions.spatial_join(assets, predicate="contains")
 
 print(joined.head(3))
+```
+
+Proximity query and join example:
+
+```python
+import geoprompt as gp
+
+assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
+
+nearby = assets.query_radius(anchor="alpha-point", max_distance=0.06)
+proximity = regions.proximity_join(assets, max_distance=0.08)
+
+print(nearby.head(3))
+print(proximity.head(3))
+```
+
+Nearest-join example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+nearest = origins.nearest_join(targets, k=2, max_distance=0.08, how="left")
+
+print(nearest.head(4))
+```
+
+Nearest-assignment example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+assigned = origins.assign_nearest(targets, max_distance=0.08, how="left")
+
+print(assigned.head(4))
+```
+
+Assignment-summary example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+summary = origins.summarize_assignments(
+    targets,
+    aggregations={"demand_index": "sum"},
+    max_distance=0.08,
+)
+
+print(summary.head(4))
+```
+
+Buffer and within-distance example:
+
+```python
+import geoprompt as gp
+
+assets = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+
+mask = assets.within_distance(anchor="north-hub-point", max_distance=0.08)
+buffers = assets.buffer(distance=0.01)
+
+print(mask)
+print(buffers.head(2))
+```
+
+Service-area example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+service_matches = origins.buffer_join(targets, distance=0.03)
+coverage = origins.buffer(distance=0.03).coverage_summary(
+    targets,
+    aggregations={"demand_index": "sum"},
+)
+
+print(service_matches.head(3))
+print(coverage.head(3))
 ```
 
 Overlay example:
@@ -182,7 +281,7 @@ Install only overlay support if you want clip and intersection operations withou
 pip install -e .[overlay]
 ```
 
-After the package is published to a package index, the intended install command is:
+Install the published package from PyPI with:
 
 ```bash
 pip install geoprompt
@@ -245,7 +344,16 @@ The main package entry points are:
 - `GeoPromptFrame.to_crs(...)`
 - `GeoPromptFrame.nearest_neighbors(...)`
 - `GeoPromptFrame.query_bounds(...)`
+- `GeoPromptFrame.query_radius(...)`
+- `GeoPromptFrame.within_distance(...)`
 - `GeoPromptFrame.spatial_join(...)`
+- `GeoPromptFrame.proximity_join(...)`
+- `GeoPromptFrame.nearest_join(...)`
+- `GeoPromptFrame.assign_nearest(...)`
+- `GeoPromptFrame.summarize_assignments(...)`
+- `GeoPromptFrame.buffer(...)`
+- `GeoPromptFrame.buffer_join(...)`
+- `GeoPromptFrame.coverage_summary(...)`
 - `GeoPromptFrame.dissolve(...)`
 - `GeoPromptFrame.clip(...)`
 - `GeoPromptFrame.overlay_intersections(...)`
@@ -266,12 +374,26 @@ geoprompt-compare
 This writes `outputs/geoprompt_comparison_report.json` with:
 
 - core metric agreement across the built-in sample and benchmark corpora
+- core metric agreement across a generated stress corpus with 93 features and 16 join regions
 - reprojection agreement against GeoPandas in EPSG:3857
 - dissolve agreement against GeoPandas on the benchmark region corpus
 - spatial-join agreement against Shapely and GeoPandas-style predicate behavior
 - nearest-neighbor agreement against a Shapely centroid-distance reference
 - bounding-box query agreement against GeoPandas
 - timing summaries for geometry metrics, reprojection, bounds queries, nearest neighbors, dissolve, clip, and joins
+
+Current validated snapshot from the built-in corpora:
+
+- correctness parity flags are all `true` for bounds, nearest neighbors, bounds queries, geometry metrics, reprojection, clip, dissolve, and spatial join
+- Geoprompt is consistently faster on geometry metrics, nearest-neighbor lookup, bounds queries, and dissolve
+- the generated stress corpus now shows Geoprompt ahead on both spatial join and clip
+- the smaller benchmark corpus still shows `clip` and `spatial_join` trailing the reference path, which is the clearest target for the next optimization pass
+
+Representative relative speed ratios from the latest comparison report:
+
+- `sample` corpus: geometry metrics `6.65x`, nearest neighbors `5.12x`, bounds query `44.60x`, reprojection `1.33x`
+- `benchmark` corpus: geometry metrics `3.90x`, nearest neighbors `6.77x`, bounds query `14.83x`, reprojection `1.36x`, clip `0.40x`, spatial join `0.51x`, dissolve `28.27x`
+- `stress` corpus: geometry metrics `4.33x`, nearest neighbors `7.64x`, bounds query `3.23x`, reprojection `1.32x`, clip `1.02x`, spatial join `2.48x`, dissolve `6.48x`
 
 ## Release Readiness
 
@@ -286,6 +408,9 @@ The project now includes:
 
 - License: [LICENSE](LICENSE)
 - Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Release notes: [docs/release-notes-0.1.6.md](docs/release-notes-0.1.6.md)
+- Tool roadmap: [docs/tool-roadmap.md](docs/tool-roadmap.md)
 
 ## Repository Notes
 

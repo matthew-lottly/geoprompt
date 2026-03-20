@@ -2,7 +2,7 @@
   "package": "geoprompt",
   "comparison": {
     "output_dir": "D:\\GitHub\\projects\\geoprompt\\outputs",
-    "tolerance": 1e-08,
+    "tolerance": 1e-07,
     "engines": [
       "geoprompt",
       "shapely",
@@ -10,7 +10,8 @@
     ],
     "corpus": [
       "sample",
-      "benchmark"
+      "benchmark",
+      "stress"
     ],
     "notes": [
       "Planar metric comparisons use raw coordinate space so Geoprompt matches Shapely and GeoPandas defaults.",
@@ -34,6 +35,8 @@
       "input_path": "D:\\GitHub\\projects\\geoprompt\\data\\sample_features.json",
       "join_path": null,
       "crs": "EPSG:4326",
+      "feature_count": 6,
+      "join_feature_count": 0,
       "correctness": {
         "bounds_match": true,
         "nearest_neighbor_match": true,
@@ -97,58 +100,58 @@
       "benchmarks": [
         {
           "operation": "sample.geoprompt.geometry_metrics",
-          "median_seconds": 7.314997492358088e-05,
-          "min_seconds": 6.559997564181685e-05,
-          "max_seconds": 0.003251400019507855,
+          "median_seconds": 2.3900065571069717e-05,
+          "min_seconds": 2.3499946109950542e-05,
+          "max_seconds": 0.00014020001981407404,
           "repeats": 20
         },
         {
           "operation": "sample.reference.geometry_metrics",
-          "median_seconds": 0.00041140001849271357,
-          "min_seconds": 0.0003626999678090215,
-          "max_seconds": 0.006970799993723631,
+          "median_seconds": 0.00015884998720139265,
+          "min_seconds": 0.00015350000467151403,
+          "max_seconds": 0.00024589989334344864,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.nearest_neighbors",
-          "median_seconds": 0.0004254000086802989,
-          "min_seconds": 0.0003894000547006726,
-          "max_seconds": 0.00655609997920692,
+          "median_seconds": 4.4249987695366144e-05,
+          "min_seconds": 4.39999857917428e-05,
+          "max_seconds": 8.040003012865782e-05,
           "repeats": 20
         },
         {
           "operation": "sample.reference.nearest_neighbors",
-          "median_seconds": 0.0005921499978285283,
-          "min_seconds": 0.000534999999217689,
-          "max_seconds": 0.00593669997761026,
+          "median_seconds": 0.00022639997769147158,
+          "min_seconds": 0.00020929996389895678,
+          "max_seconds": 0.0005032999906688929,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.query_bounds",
-          "median_seconds": 5.1000009989365935e-05,
-          "min_seconds": 4.7900015488266945e-05,
-          "max_seconds": 0.00019859999883919954,
+          "median_seconds": 1.6000005416572094e-05,
+          "min_seconds": 1.5399884432554245e-05,
+          "max_seconds": 4.4199987314641476e-05,
           "repeats": 20
         },
         {
           "operation": "sample.reference.query_bounds",
-          "median_seconds": 0.0014649000077042729,
-          "min_seconds": 0.0011626000050455332,
-          "max_seconds": 0.01650789997074753,
+          "median_seconds": 0.0007135499618016183,
+          "min_seconds": 0.0005746999522671103,
+          "max_seconds": 0.0019129000138491392,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.to_crs",
-          "median_seconds": 0.001285900012589991,
-          "min_seconds": 0.0008454000344499946,
-          "max_seconds": 0.04823479999322444,
+          "median_seconds": 0.0010348999057896435,
+          "min_seconds": 0.0009093000553548336,
+          "max_seconds": 0.001601999974809587,
           "repeats": 20
         },
         {
           "operation": "sample.reference.to_crs",
-          "median_seconds": 0.0014900999958626926,
-          "min_seconds": 0.0009857999975793064,
-          "max_seconds": 0.006115600001066923,
+          "median_seconds": 0.0013734999811276793,
+          "min_seconds": 0.0007713999366387725,
+          "max_seconds": 0.0041856999741867185,
           "repeats": 20
         }
       ]
@@ -158,6 +161,8 @@
       "input_path": "D:\\GitHub\\projects\\geoprompt\\data\\benchmark_features.json",
       "join_path": "D:\\GitHub\\projects\\geoprompt\\data\\benchmark_regions.json",
       "crs": "EPSG:4326",
+      "feature_count": 11,
+      "join_feature_count": 4,
       "correctness": {
         "bounds_match": true,
         "nearest_neighbor_match": true,
@@ -308,100 +313,1307 @@
       "benchmarks": [
         {
           "operation": "benchmark.geoprompt.geometry_metrics",
-          "median_seconds": 4.9400026910007e-05,
-          "min_seconds": 4.8799964133650064e-05,
-          "max_seconds": 8.069997420534492e-05,
+          "median_seconds": 0.0001041499781422317,
+          "min_seconds": 0.00010299996938556433,
+          "max_seconds": 0.00013340008445084095,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.geometry_metrics",
-          "median_seconds": 0.00048095002421177924,
-          "min_seconds": 0.0002674999996088445,
-          "max_seconds": 0.0016013000276871026,
+          "median_seconds": 0.00040585006354376674,
+          "min_seconds": 0.00035720004234462976,
+          "max_seconds": 0.0004885999951511621,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.nearest_neighbors",
-          "median_seconds": 0.0014454000047408044,
-          "min_seconds": 0.0012814999790862203,
-          "max_seconds": 0.004326599999330938,
+          "median_seconds": 0.00012139999307692051,
+          "min_seconds": 0.00011410005390644073,
+          "max_seconds": 0.0001973999897018075,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.nearest_neighbors",
-          "median_seconds": 0.0019372999959159642,
-          "min_seconds": 0.0009747000294737518,
-          "max_seconds": 0.005169500014744699,
+          "median_seconds": 0.0008219000301323831,
+          "min_seconds": 0.0006527999648824334,
+          "max_seconds": 0.0017148000188171864,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.query_bounds",
-          "median_seconds": 4.874999285675585e-05,
-          "min_seconds": 4.630000330507755e-05,
-          "max_seconds": 0.00011519994586706161,
+          "median_seconds": 3.890000516548753e-05,
+          "min_seconds": 3.769993782043457e-05,
+          "max_seconds": 9.430001955479383e-05,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.query_bounds",
-          "median_seconds": 0.000694699992891401,
-          "min_seconds": 0.0006354999495670199,
-          "max_seconds": 0.002278400002978742,
+          "median_seconds": 0.0005769999697804451,
+          "min_seconds": 0.0005357000045478344,
+          "max_seconds": 0.0011999999405816197,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.to_crs",
-          "median_seconds": 0.0005975000094622374,
-          "min_seconds": 0.0005531000206246972,
-          "max_seconds": 0.001561200013384223,
+          "median_seconds": 0.000561900029424578,
+          "min_seconds": 0.0004955000476911664,
+          "max_seconds": 0.001130899996496737,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.to_crs",
-          "median_seconds": 0.0008308499818667769,
-          "min_seconds": 0.0007606000290252268,
-          "max_seconds": 0.0021557000000029802,
+          "median_seconds": 0.0007662500138394535,
+          "min_seconds": 0.0007162999827414751,
+          "max_seconds": 0.0010941000655293465,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.spatial_join",
-          "median_seconds": 0.0010970000294037163,
-          "min_seconds": 0.001076500047929585,
-          "max_seconds": 0.00292459997581318,
+          "median_seconds": 0.0010412500123493373,
+          "min_seconds": 0.00036619999445974827,
+          "max_seconds": 0.0011441000970080495,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.spatial_join",
-          "median_seconds": 0.0002728999825194478,
-          "min_seconds": 0.0002703999634832144,
-          "max_seconds": 0.0003512999974191189,
+          "median_seconds": 0.0005277499440126121,
+          "min_seconds": 0.0003342999843880534,
+          "max_seconds": 0.0009257999481633306,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.clip",
-          "median_seconds": 0.0014553999644704163,
-          "min_seconds": 0.0014001000090502203,
-          "max_seconds": 0.0034980999771505594,
+          "median_seconds": 0.0012945500202476978,
+          "min_seconds": 0.0006367000751197338,
+          "max_seconds": 0.002010099939070642,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.clip",
-          "median_seconds": 0.0007322000165004283,
-          "min_seconds": 0.0005818000063300133,
-          "max_seconds": 0.0015793999773450196,
+          "median_seconds": 0.0005185499903745949,
+          "min_seconds": 0.0004920000210404396,
+          "max_seconds": 0.0011746999807655811,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.dissolve",
-          "median_seconds": 0.0005385999684222043,
-          "min_seconds": 0.0004634999786503613,
-          "max_seconds": 0.0023335000150837004,
+          "median_seconds": 0.0003548999666236341,
+          "min_seconds": 0.0003442999441176653,
+          "max_seconds": 0.0005707000382244587,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.dissolve",
-          "median_seconds": 0.012136699981056154,
-          "min_seconds": 0.008127200009766966,
-          "max_seconds": 0.01992729998892173,
+          "median_seconds": 0.010034300037659705,
+          "min_seconds": 0.006517900037579238,
+          "max_seconds": 0.016838899930007756,
+          "repeats": 20
+        }
+      ]
+    },
+    {
+      "dataset": "stress",
+      "input_path": "generated:stress",
+      "join_path": "generated:stress-regions",
+      "crs": "EPSG:4326",
+      "feature_count": 93,
+      "join_feature_count": 16,
+      "correctness": {
+        "bounds_match": true,
+        "nearest_neighbor_match": true,
+        "bounds_query_match": true,
+        "geometry_metrics_within_tolerance": true,
+        "projected_bounds_match": true,
+        "geometry_comparison": [
+          {
+            "site_id": "stress-point-00-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-00-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-01-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-02-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-03-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-04-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-05-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-06-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-00",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-01",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-02",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-03",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-04",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-05",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-06",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-point-07-07",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-00",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-01",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-02",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-03",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-04",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-horizontal-line-05",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-00",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-01",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-02",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-03",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-04",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-vertical-line-05",
+            "geometry_type": "LineString",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          },
+          {
+            "site_id": "stress-polygon-00-00",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.635989618393069e-09,
+            "centroid_y_delta": 2.7717845796360052e-09
+          },
+          {
+            "site_id": "stress-polygon-00-01",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.629196829839202e-09,
+            "centroid_y_delta": 2.765752071809402e-09
+          },
+          {
+            "site_id": "stress-polygon-00-02",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.670763579881168e-09,
+            "centroid_y_delta": 2.7717845796360052e-09
+          },
+          {
+            "site_id": "stress-polygon-00-03",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.615682307005045e-09,
+            "centroid_y_delta": 2.771791685063363e-09
+          },
+          {
+            "site_id": "stress-polygon-01-00",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.635989618393069e-09,
+            "centroid_y_delta": 2.7785631573351566e-09
+          },
+          {
+            "site_id": "stress-polygon-01-01",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.629196829839202e-09,
+            "centroid_y_delta": 2.7664768253998773e-09
+          },
+          {
+            "site_id": "stress-polygon-01-02",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.64659091601061e-09,
+            "centroid_y_delta": 2.7846027705891174e-09
+          },
+          {
+            "site_id": "stress-polygon-01-03",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.615682307005045e-09,
+            "centroid_y_delta": 2.7785631573351566e-09
+          },
+          {
+            "site_id": "stress-polygon-02-00",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 7.489486461564887e-13,
+            "centroid_x_delta": 3.568121087482723e-08,
+            "centroid_y_delta": 1.2971611340617528e-08
+          },
+          {
+            "site_id": "stress-polygon-02-01",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.629196829839202e-09,
+            "centroid_y_delta": 2.7792808054982743e-09
+          },
+          {
+            "site_id": "stress-polygon-02-02",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.64659091601061e-09,
+            "centroid_y_delta": 2.7792808054982743e-09
+          },
+          {
+            "site_id": "stress-polygon-02-03",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.615682307005045e-09,
+            "centroid_y_delta": 2.7792808054982743e-09
+          },
+          {
+            "site_id": "stress-polygon-03-00",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.0700407573893678e-12,
+            "centroid_x_delta": 5.097734856462921e-08,
+            "centroid_y_delta": 1.855918441151516e-08
+          },
+          {
+            "site_id": "stress-polygon-03-01",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.629196829839202e-09,
+            "centroid_y_delta": 2.7739659458347887e-09
+          },
+          {
+            "site_id": "stress-polygon-03-02",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6054605561643953e-13,
+            "centroid_x_delta": 7.64659091601061e-09,
+            "centroid_y_delta": 2.7920989964513865e-09
+          },
+          {
+            "site_id": "stress-polygon-03-03",
+            "geometry_type": "Polygon",
+            "length_delta": 0.0,
+            "area_delta": 1.6014815341913735e-13,
+            "centroid_x_delta": 7.615682307005045e-09,
+            "centroid_y_delta": 2.792091891024029e-09
+          },
+          {
+            "site_id": "stress-remote-point",
+            "geometry_type": "Point",
+            "length_delta": 0.0,
+            "area_delta": 0.0,
+            "centroid_x_delta": 0.0,
+            "centroid_y_delta": 0.0
+          }
+        ],
+        "clip": {
+          "feature_count_match": true,
+          "geoprompt_feature_count": 92,
+          "reference_feature_count": 92
+        },
+        "dissolve": {
+          "feature_count_match": true,
+          "bands_match": true
+        },
+        "spatial_join": {
+          "pair_match": true,
+          "geoprompt_pairs": [
+            "stress-sector-00-00->stress-horizontal-line-00",
+            "stress-sector-00-00->stress-point-00-00",
+            "stress-sector-00-00->stress-point-00-01",
+            "stress-sector-00-00->stress-point-01-00",
+            "stress-sector-00-00->stress-point-01-01",
+            "stress-sector-00-00->stress-polygon-00-00",
+            "stress-sector-00-00->stress-vertical-line-00",
+            "stress-sector-00-01->stress-horizontal-line-00",
+            "stress-sector-00-01->stress-point-00-02",
+            "stress-sector-00-01->stress-point-00-03",
+            "stress-sector-00-01->stress-point-00-04",
+            "stress-sector-00-01->stress-point-01-02",
+            "stress-sector-00-01->stress-point-01-03",
+            "stress-sector-00-01->stress-point-01-04",
+            "stress-sector-00-01->stress-polygon-00-01",
+            "stress-sector-00-01->stress-polygon-00-02",
+            "stress-sector-00-01->stress-vertical-line-01",
+            "stress-sector-00-01->stress-vertical-line-02",
+            "stress-sector-00-02->stress-horizontal-line-00",
+            "stress-sector-00-02->stress-point-00-04",
+            "stress-sector-00-02->stress-point-00-05",
+            "stress-sector-00-02->stress-point-00-06",
+            "stress-sector-00-02->stress-point-01-04",
+            "stress-sector-00-02->stress-point-01-05",
+            "stress-sector-00-02->stress-point-01-06",
+            "stress-sector-00-02->stress-polygon-00-02",
+            "stress-sector-00-02->stress-polygon-00-03",
+            "stress-sector-00-02->stress-vertical-line-03",
+            "stress-sector-00-02->stress-vertical-line-04",
+            "stress-sector-00-03->stress-horizontal-line-00",
+            "stress-sector-00-03->stress-point-00-07",
+            "stress-sector-00-03->stress-point-01-07",
+            "stress-sector-00-03->stress-polygon-00-03",
+            "stress-sector-00-03->stress-vertical-line-05",
+            "stress-sector-01-00->stress-horizontal-line-01",
+            "stress-sector-01-00->stress-horizontal-line-02",
+            "stress-sector-01-00->stress-point-02-00",
+            "stress-sector-01-00->stress-point-02-01",
+            "stress-sector-01-00->stress-point-03-00",
+            "stress-sector-01-00->stress-point-03-01",
+            "stress-sector-01-00->stress-point-04-00",
+            "stress-sector-01-00->stress-point-04-01",
+            "stress-sector-01-00->stress-polygon-00-00",
+            "stress-sector-01-00->stress-polygon-01-00",
+            "stress-sector-01-00->stress-vertical-line-00",
+            "stress-sector-01-01->stress-horizontal-line-01",
+            "stress-sector-01-01->stress-horizontal-line-02",
+            "stress-sector-01-01->stress-point-02-02",
+            "stress-sector-01-01->stress-point-02-03",
+            "stress-sector-01-01->stress-point-02-04",
+            "stress-sector-01-01->stress-point-03-02",
+            "stress-sector-01-01->stress-point-03-03",
+            "stress-sector-01-01->stress-point-03-04",
+            "stress-sector-01-01->stress-point-04-02",
+            "stress-sector-01-01->stress-point-04-03",
+            "stress-sector-01-01->stress-point-04-04",
+            "stress-sector-01-01->stress-polygon-00-01",
+            "stress-sector-01-01->stress-polygon-00-02",
+            "stress-sector-01-01->stress-polygon-01-01",
+            "stress-sector-01-01->stress-polygon-01-02",
+            "stress-sector-01-01->stress-vertical-line-01",
+            "stress-sector-01-01->stress-vertical-line-02",
+            "stress-sector-01-02->stress-horizontal-line-01",
+            "stress-sector-01-02->stress-horizontal-line-02",
+            "stress-sector-01-02->stress-point-02-04",
+            "stress-sector-01-02->stress-point-02-05",
+            "stress-sector-01-02->stress-point-02-06",
+            "stress-sector-01-02->stress-point-03-04",
+            "stress-sector-01-02->stress-point-03-05",
+            "stress-sector-01-02->stress-point-03-06",
+            "stress-sector-01-02->stress-point-04-04",
+            "stress-sector-01-02->stress-point-04-05",
+            "stress-sector-01-02->stress-point-04-06",
+            "stress-sector-01-02->stress-polygon-00-02",
+            "stress-sector-01-02->stress-polygon-00-03",
+            "stress-sector-01-02->stress-polygon-01-02",
+            "stress-sector-01-02->stress-polygon-01-03",
+            "stress-sector-01-02->stress-vertical-line-03",
+            "stress-sector-01-02->stress-vertical-line-04",
+            "stress-sector-01-03->stress-horizontal-line-01",
+            "stress-sector-01-03->stress-horizontal-line-02",
+            "stress-sector-01-03->stress-point-02-07",
+            "stress-sector-01-03->stress-point-03-07",
+            "stress-sector-01-03->stress-point-04-07",
+            "stress-sector-01-03->stress-polygon-00-03",
+            "stress-sector-01-03->stress-polygon-01-03",
+            "stress-sector-01-03->stress-vertical-line-05",
+            "stress-sector-02-00->stress-horizontal-line-03",
+            "stress-sector-02-00->stress-horizontal-line-04",
+            "stress-sector-02-00->stress-point-04-00",
+            "stress-sector-02-00->stress-point-04-01",
+            "stress-sector-02-00->stress-point-05-00",
+            "stress-sector-02-00->stress-point-05-01",
+            "stress-sector-02-00->stress-point-06-00",
+            "stress-sector-02-00->stress-point-06-01",
+            "stress-sector-02-00->stress-polygon-02-00",
+            "stress-sector-02-00->stress-polygon-03-00",
+            "stress-sector-02-00->stress-vertical-line-00",
+            "stress-sector-02-01->stress-horizontal-line-03",
+            "stress-sector-02-01->stress-horizontal-line-04",
+            "stress-sector-02-01->stress-point-04-02",
+            "stress-sector-02-01->stress-point-04-03",
+            "stress-sector-02-01->stress-point-04-04",
+            "stress-sector-02-01->stress-point-05-02",
+            "stress-sector-02-01->stress-point-05-03",
+            "stress-sector-02-01->stress-point-05-04",
+            "stress-sector-02-01->stress-point-06-02",
+            "stress-sector-02-01->stress-point-06-03",
+            "stress-sector-02-01->stress-point-06-04",
+            "stress-sector-02-01->stress-polygon-02-01",
+            "stress-sector-02-01->stress-polygon-02-02",
+            "stress-sector-02-01->stress-polygon-03-01",
+            "stress-sector-02-01->stress-polygon-03-02",
+            "stress-sector-02-01->stress-vertical-line-01",
+            "stress-sector-02-01->stress-vertical-line-02",
+            "stress-sector-02-02->stress-horizontal-line-03",
+            "stress-sector-02-02->stress-horizontal-line-04",
+            "stress-sector-02-02->stress-point-04-04",
+            "stress-sector-02-02->stress-point-04-05",
+            "stress-sector-02-02->stress-point-04-06",
+            "stress-sector-02-02->stress-point-05-04",
+            "stress-sector-02-02->stress-point-05-05",
+            "stress-sector-02-02->stress-point-05-06",
+            "stress-sector-02-02->stress-point-06-04",
+            "stress-sector-02-02->stress-point-06-05",
+            "stress-sector-02-02->stress-point-06-06",
+            "stress-sector-02-02->stress-polygon-02-02",
+            "stress-sector-02-02->stress-polygon-02-03",
+            "stress-sector-02-02->stress-polygon-03-02",
+            "stress-sector-02-02->stress-polygon-03-03",
+            "stress-sector-02-02->stress-vertical-line-03",
+            "stress-sector-02-02->stress-vertical-line-04",
+            "stress-sector-02-03->stress-horizontal-line-03",
+            "stress-sector-02-03->stress-horizontal-line-04",
+            "stress-sector-02-03->stress-point-04-07",
+            "stress-sector-02-03->stress-point-05-07",
+            "stress-sector-02-03->stress-point-06-07",
+            "stress-sector-02-03->stress-polygon-02-03",
+            "stress-sector-02-03->stress-polygon-03-03",
+            "stress-sector-02-03->stress-vertical-line-05",
+            "stress-sector-03-00->stress-horizontal-line-05",
+            "stress-sector-03-00->stress-point-07-00",
+            "stress-sector-03-00->stress-point-07-01",
+            "stress-sector-03-00->stress-polygon-03-00",
+            "stress-sector-03-00->stress-vertical-line-00",
+            "stress-sector-03-01->stress-horizontal-line-05",
+            "stress-sector-03-01->stress-point-07-02",
+            "stress-sector-03-01->stress-point-07-03",
+            "stress-sector-03-01->stress-point-07-04",
+            "stress-sector-03-01->stress-polygon-03-01",
+            "stress-sector-03-01->stress-polygon-03-02",
+            "stress-sector-03-01->stress-vertical-line-01",
+            "stress-sector-03-01->stress-vertical-line-02",
+            "stress-sector-03-02->stress-horizontal-line-05",
+            "stress-sector-03-02->stress-point-07-04",
+            "stress-sector-03-02->stress-point-07-05",
+            "stress-sector-03-02->stress-point-07-06",
+            "stress-sector-03-02->stress-polygon-03-02",
+            "stress-sector-03-02->stress-polygon-03-03",
+            "stress-sector-03-02->stress-vertical-line-03",
+            "stress-sector-03-02->stress-vertical-line-04",
+            "stress-sector-03-03->stress-horizontal-line-05",
+            "stress-sector-03-03->stress-point-07-07",
+            "stress-sector-03-03->stress-polygon-03-03",
+            "stress-sector-03-03->stress-vertical-line-05"
+          ],
+          "reference_pairs": [
+            "stress-sector-00-00->stress-horizontal-line-00",
+            "stress-sector-00-00->stress-point-00-00",
+            "stress-sector-00-00->stress-point-00-01",
+            "stress-sector-00-00->stress-point-01-00",
+            "stress-sector-00-00->stress-point-01-01",
+            "stress-sector-00-00->stress-polygon-00-00",
+            "stress-sector-00-00->stress-vertical-line-00",
+            "stress-sector-00-01->stress-horizontal-line-00",
+            "stress-sector-00-01->stress-point-00-02",
+            "stress-sector-00-01->stress-point-00-03",
+            "stress-sector-00-01->stress-point-00-04",
+            "stress-sector-00-01->stress-point-01-02",
+            "stress-sector-00-01->stress-point-01-03",
+            "stress-sector-00-01->stress-point-01-04",
+            "stress-sector-00-01->stress-polygon-00-01",
+            "stress-sector-00-01->stress-polygon-00-02",
+            "stress-sector-00-01->stress-vertical-line-01",
+            "stress-sector-00-01->stress-vertical-line-02",
+            "stress-sector-00-02->stress-horizontal-line-00",
+            "stress-sector-00-02->stress-point-00-04",
+            "stress-sector-00-02->stress-point-00-05",
+            "stress-sector-00-02->stress-point-00-06",
+            "stress-sector-00-02->stress-point-01-04",
+            "stress-sector-00-02->stress-point-01-05",
+            "stress-sector-00-02->stress-point-01-06",
+            "stress-sector-00-02->stress-polygon-00-02",
+            "stress-sector-00-02->stress-polygon-00-03",
+            "stress-sector-00-02->stress-vertical-line-03",
+            "stress-sector-00-02->stress-vertical-line-04",
+            "stress-sector-00-03->stress-horizontal-line-00",
+            "stress-sector-00-03->stress-point-00-07",
+            "stress-sector-00-03->stress-point-01-07",
+            "stress-sector-00-03->stress-polygon-00-03",
+            "stress-sector-00-03->stress-vertical-line-05",
+            "stress-sector-01-00->stress-horizontal-line-01",
+            "stress-sector-01-00->stress-horizontal-line-02",
+            "stress-sector-01-00->stress-point-02-00",
+            "stress-sector-01-00->stress-point-02-01",
+            "stress-sector-01-00->stress-point-03-00",
+            "stress-sector-01-00->stress-point-03-01",
+            "stress-sector-01-00->stress-point-04-00",
+            "stress-sector-01-00->stress-point-04-01",
+            "stress-sector-01-00->stress-polygon-00-00",
+            "stress-sector-01-00->stress-polygon-01-00",
+            "stress-sector-01-00->stress-vertical-line-00",
+            "stress-sector-01-01->stress-horizontal-line-01",
+            "stress-sector-01-01->stress-horizontal-line-02",
+            "stress-sector-01-01->stress-point-02-02",
+            "stress-sector-01-01->stress-point-02-03",
+            "stress-sector-01-01->stress-point-02-04",
+            "stress-sector-01-01->stress-point-03-02",
+            "stress-sector-01-01->stress-point-03-03",
+            "stress-sector-01-01->stress-point-03-04",
+            "stress-sector-01-01->stress-point-04-02",
+            "stress-sector-01-01->stress-point-04-03",
+            "stress-sector-01-01->stress-point-04-04",
+            "stress-sector-01-01->stress-polygon-00-01",
+            "stress-sector-01-01->stress-polygon-00-02",
+            "stress-sector-01-01->stress-polygon-01-01",
+            "stress-sector-01-01->stress-polygon-01-02",
+            "stress-sector-01-01->stress-vertical-line-01",
+            "stress-sector-01-01->stress-vertical-line-02",
+            "stress-sector-01-02->stress-horizontal-line-01",
+            "stress-sector-01-02->stress-horizontal-line-02",
+            "stress-sector-01-02->stress-point-02-04",
+            "stress-sector-01-02->stress-point-02-05",
+            "stress-sector-01-02->stress-point-02-06",
+            "stress-sector-01-02->stress-point-03-04",
+            "stress-sector-01-02->stress-point-03-05",
+            "stress-sector-01-02->stress-point-03-06",
+            "stress-sector-01-02->stress-point-04-04",
+            "stress-sector-01-02->stress-point-04-05",
+            "stress-sector-01-02->stress-point-04-06",
+            "stress-sector-01-02->stress-polygon-00-02",
+            "stress-sector-01-02->stress-polygon-00-03",
+            "stress-sector-01-02->stress-polygon-01-02",
+            "stress-sector-01-02->stress-polygon-01-03",
+            "stress-sector-01-02->stress-vertical-line-03",
+            "stress-sector-01-02->stress-vertical-line-04",
+            "stress-sector-01-03->stress-horizontal-line-01",
+            "stress-sector-01-03->stress-horizontal-line-02",
+            "stress-sector-01-03->stress-point-02-07",
+            "stress-sector-01-03->stress-point-03-07",
+            "stress-sector-01-03->stress-point-04-07",
+            "stress-sector-01-03->stress-polygon-00-03",
+            "stress-sector-01-03->stress-polygon-01-03",
+            "stress-sector-01-03->stress-vertical-line-05",
+            "stress-sector-02-00->stress-horizontal-line-03",
+            "stress-sector-02-00->stress-horizontal-line-04",
+            "stress-sector-02-00->stress-point-04-00",
+            "stress-sector-02-00->stress-point-04-01",
+            "stress-sector-02-00->stress-point-05-00",
+            "stress-sector-02-00->stress-point-05-01",
+            "stress-sector-02-00->stress-point-06-00",
+            "stress-sector-02-00->stress-point-06-01",
+            "stress-sector-02-00->stress-polygon-02-00",
+            "stress-sector-02-00->stress-polygon-03-00",
+            "stress-sector-02-00->stress-vertical-line-00",
+            "stress-sector-02-01->stress-horizontal-line-03",
+            "stress-sector-02-01->stress-horizontal-line-04",
+            "stress-sector-02-01->stress-point-04-02",
+            "stress-sector-02-01->stress-point-04-03",
+            "stress-sector-02-01->stress-point-04-04",
+            "stress-sector-02-01->stress-point-05-02",
+            "stress-sector-02-01->stress-point-05-03",
+            "stress-sector-02-01->stress-point-05-04",
+            "stress-sector-02-01->stress-point-06-02",
+            "stress-sector-02-01->stress-point-06-03",
+            "stress-sector-02-01->stress-point-06-04",
+            "stress-sector-02-01->stress-polygon-02-01",
+            "stress-sector-02-01->stress-polygon-02-02",
+            "stress-sector-02-01->stress-polygon-03-01",
+            "stress-sector-02-01->stress-polygon-03-02",
+            "stress-sector-02-01->stress-vertical-line-01",
+            "stress-sector-02-01->stress-vertical-line-02",
+            "stress-sector-02-02->stress-horizontal-line-03",
+            "stress-sector-02-02->stress-horizontal-line-04",
+            "stress-sector-02-02->stress-point-04-04",
+            "stress-sector-02-02->stress-point-04-05",
+            "stress-sector-02-02->stress-point-04-06",
+            "stress-sector-02-02->stress-point-05-04",
+            "stress-sector-02-02->stress-point-05-05",
+            "stress-sector-02-02->stress-point-05-06",
+            "stress-sector-02-02->stress-point-06-04",
+            "stress-sector-02-02->stress-point-06-05",
+            "stress-sector-02-02->stress-point-06-06",
+            "stress-sector-02-02->stress-polygon-02-02",
+            "stress-sector-02-02->stress-polygon-02-03",
+            "stress-sector-02-02->stress-polygon-03-02",
+            "stress-sector-02-02->stress-polygon-03-03",
+            "stress-sector-02-02->stress-vertical-line-03",
+            "stress-sector-02-02->stress-vertical-line-04",
+            "stress-sector-02-03->stress-horizontal-line-03",
+            "stress-sector-02-03->stress-horizontal-line-04",
+            "stress-sector-02-03->stress-point-04-07",
+            "stress-sector-02-03->stress-point-05-07",
+            "stress-sector-02-03->stress-point-06-07",
+            "stress-sector-02-03->stress-polygon-02-03",
+            "stress-sector-02-03->stress-polygon-03-03",
+            "stress-sector-02-03->stress-vertical-line-05",
+            "stress-sector-03-00->stress-horizontal-line-05",
+            "stress-sector-03-00->stress-point-07-00",
+            "stress-sector-03-00->stress-point-07-01",
+            "stress-sector-03-00->stress-polygon-03-00",
+            "stress-sector-03-00->stress-vertical-line-00",
+            "stress-sector-03-01->stress-horizontal-line-05",
+            "stress-sector-03-01->stress-point-07-02",
+            "stress-sector-03-01->stress-point-07-03",
+            "stress-sector-03-01->stress-point-07-04",
+            "stress-sector-03-01->stress-polygon-03-01",
+            "stress-sector-03-01->stress-polygon-03-02",
+            "stress-sector-03-01->stress-vertical-line-01",
+            "stress-sector-03-01->stress-vertical-line-02",
+            "stress-sector-03-02->stress-horizontal-line-05",
+            "stress-sector-03-02->stress-point-07-04",
+            "stress-sector-03-02->stress-point-07-05",
+            "stress-sector-03-02->stress-point-07-06",
+            "stress-sector-03-02->stress-polygon-03-02",
+            "stress-sector-03-02->stress-polygon-03-03",
+            "stress-sector-03-02->stress-vertical-line-03",
+            "stress-sector-03-02->stress-vertical-line-04",
+            "stress-sector-03-03->stress-horizontal-line-05",
+            "stress-sector-03-03->stress-point-07-07",
+            "stress-sector-03-03->stress-polygon-03-03",
+            "stress-sector-03-03->stress-vertical-line-05"
+          ]
+        }
+      },
+      "benchmarks": [
+        {
+          "operation": "stress.geoprompt.geometry_metrics",
+          "median_seconds": 0.0002586499904282391,
+          "min_seconds": 0.0002487000310793519,
+          "max_seconds": 0.0003834000090137124,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.geometry_metrics",
+          "median_seconds": 0.0011209999793209136,
+          "min_seconds": 0.0008227999787777662,
+          "max_seconds": 0.002473299973644316,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.nearest_neighbors",
+          "median_seconds": 0.008283999981358647,
+          "min_seconds": 0.006749700056388974,
+          "max_seconds": 0.01647130004130304,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.nearest_neighbors",
+          "median_seconds": 0.06330390006769449,
+          "min_seconds": 0.0534296000842005,
+          "max_seconds": 0.07186170003842562,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.query_bounds",
+          "median_seconds": 0.0001776500721462071,
+          "min_seconds": 0.00017339992336928844,
+          "max_seconds": 0.00026490003801882267,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.query_bounds",
+          "median_seconds": 0.0005744500085711479,
+          "min_seconds": 0.0005304000806063414,
+          "max_seconds": 0.0008679999737069011,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.to_crs",
+          "median_seconds": 0.000908349989913404,
+          "min_seconds": 0.0008704999927431345,
+          "max_seconds": 0.002172500011511147,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.to_crs",
+          "median_seconds": 0.0012000499991700053,
+          "min_seconds": 0.0008658000733703375,
+          "max_seconds": 0.0021389999892562628,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.spatial_join",
+          "median_seconds": 0.0032460500369779766,
+          "min_seconds": 0.003031600033864379,
+          "max_seconds": 0.006321599939838052,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.spatial_join",
+          "median_seconds": 0.008047649927902967,
+          "min_seconds": 0.007383599993772805,
+          "max_seconds": 0.00949689990375191,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.clip",
+          "median_seconds": 0.0037091999547556043,
+          "min_seconds": 0.003472800017334521,
+          "max_seconds": 0.005716599989682436,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.clip",
+          "median_seconds": 0.0037871500244364142,
+          "min_seconds": 0.0035397999454289675,
+          "max_seconds": 0.0069067999720573425,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.geoprompt.dissolve",
+          "median_seconds": 0.0011516499216668308,
+          "min_seconds": 0.0010993999894708395,
+          "max_seconds": 0.0023308999370783567,
+          "repeats": 20
+        },
+        {
+          "operation": "stress.reference.dissolve",
+          "median_seconds": 0.00746215000981465,
+          "min_seconds": 0.00642730004619807,
+          "max_seconds": 0.011994299944490194,
           "repeats": 20
         }
       ]

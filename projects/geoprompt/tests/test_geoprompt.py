@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 
-from geoprompt import geometry_centroid
+from geoprompt.compare import _stress_feature_records, _stress_region_records
+from geoprompt import GeoPromptFrame, geometry_centroid
 from geoprompt.demo import build_demo_report
 from geoprompt.equations import area_similarity, corridor_strength, directional_alignment, euclidean_distance, haversine_distance, prompt_decay, prompt_interaction
 from geoprompt.io import frame_to_geojson, read_features, read_geojson, read_points, write_geojson
@@ -97,6 +98,259 @@ def test_query_bounds_modes() -> None:
         "central-yard-point",
         "north-hub-point",
     ]
+
+
+def test_query_radius_returns_sorted_distance_matches() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    nearby = frame.query_radius(anchor="north-hub-point", max_distance=0.09, include_anchor=True)
+    records = nearby.to_records()
+
+    assert records[0]["site_id"] == "north-hub-point"
+    assert records[0]["distance"] == 0.0
+    assert all(record["distance"] <= 0.09 for record in records)
+    assert records == sorted(records, key=lambda item: (float(item["distance"]), str(item["site_id"])))
+
+
+def test_within_distance_returns_boolean_mask() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    mask = frame.within_distance(anchor="north-hub-point", max_distance=0.09, include_anchor=False)
+    matched_ids = [row["site_id"] for row, include_row in zip(frame, mask, strict=True) if include_row]
+
+    assert "north-hub-point" not in matched_ids
+    assert "central-yard-point" in matched_ids
+    assert all(isinstance(value, bool) for value in mask)
+
+
+def test_proximity_join_matches_nearby_features() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json", crs="EPSG:4326")
+
+    joined = frame.proximity_join(frame, max_distance=0.05, distance_method="euclidean")
+    left_joined = frame.proximity_join(frame, max_distance=0.01, how="left", distance_method="euclidean")
+
+    pairs = {f"{row['site_id']}->{row['site_id_right']}" for row in joined if row.get("site_id_right") is not None}
+
+    assert "north-hub-point->north-hub-point" in pairs
+    assert "central-yard-point->central-yard-point" in pairs
+    assert all(row["distance_right"] <= 0.05 for row in joined)
+    assert len(left_joined) >= len(frame)
+    assert all("distance_method_right" in row for row in left_joined)
+
+
+def test_nearest_join_returns_ranked_matches() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+            {"target_id": "target-3", "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    joined = origins.nearest_join(targets, k=2)
+    records = joined.to_records()
+
+    assert len(records) == 4
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["nearest_rank_right"] == 1
+    assert records[1]["target_id"] == "target-2"
+    assert records[1]["nearest_rank_right"] == 2
+    assert any(record["site_id"] == "origin-b" and record["target_id"] == "target-3" and record["nearest_rank_right"] == 1 for record in records)
+
+
+def test_nearest_join_supports_max_distance_and_left_mode() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    joined = origins.nearest_join(targets, k=1, max_distance=2.0, how="left")
+    records = sorted(joined.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["distance_right"] == 1.0
+    assert records[1]["target_id"] is None
+    assert records[1]["distance_right"] is None
+    assert records[1]["nearest_rank_right"] is None
+
+
+def test_assign_nearest_returns_target_focused_output() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    assigned = origins.assign_nearest(targets, origin_suffix="origin")
+    records = sorted(assigned.to_records(), key=lambda item: item["target_id"])
+
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["site_id"] == "origin-a"
+    assert records[0]["nearest_rank_origin"] == 1
+    assert records[1]["target_id"] == "target-2"
+    assert records[1]["site_id"] == "origin-b"
+    assert records[1]["distance_origin"] == 1.0
+
+
+def test_summarize_assignments_rolls_targets_to_origins() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "demand": 2.0, "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "demand": 3.0, "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+            {"target_id": "target-3", "demand": 5.0, "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = origins.summarize_assignments(
+        targets,
+        origin_id_column="site_id",
+        target_id_column="target_id",
+        aggregations={"demand": "sum"},
+    )
+    records = sorted(summary.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["site_id"] == "origin-a"
+    assert records[0]["target_ids_assigned"] == ["target-1", "target-2"]
+    assert records[0]["count_assigned"] == 2
+    assert records[0]["demand_sum_assigned"] == 5.0
+    assert records[0]["distance_min_assigned"] == 1.0
+    assert records[0]["distance_max_assigned"] == 2.0
+    assert records[0]["distance_mean_assigned"] == 1.5
+    assert records[1]["site_id"] == "origin-b"
+    assert records[1]["target_ids_assigned"] == ["target-3"]
+    assert records[1]["count_assigned"] == 1
+
+
+def test_summarize_assignments_supports_left_mode_and_distance_filter() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = origins.summarize_assignments(
+        targets,
+        origin_id_column="site_id",
+        target_id_column="target_id",
+        how="left",
+        max_distance=2.0,
+    )
+    records = sorted(summary.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["count_assigned"] == 1
+    assert records[1]["count_assigned"] == 0
+    assert records[1]["target_ids_assigned"] == []
+    assert records[1]["distance_mean_assigned"] is None
+
+
+def test_buffer_converts_points_to_polygons() -> None:
+    frame = read_points(PROJECT_ROOT / "data" / "sample_points.json", crs="EPSG:4326")
+
+    buffered = frame.buffer(distance=0.01)
+
+    assert len(buffered) == len(frame)
+    assert all(record["geometry"]["type"] == "Polygon" for record in buffered)
+    assert all(record["site_id"] for record in buffered)
+
+
+def test_buffer_join_extends_point_reach_to_polygon() -> None:
+    service_points = GeoPromptFrame.from_records(
+        [{"site_id": "anchor", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}}],
+        crs="EPSG:4326",
+    )
+    polygons = GeoPromptFrame.from_records(
+        [{
+            "region_id": "near-zone",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0.04, -0.01], [0.06, -0.01], [0.06, 0.01], [0.04, 0.01]]],
+            },
+        }],
+        crs="EPSG:4326",
+    )
+
+    joined = service_points.buffer_join(polygons, distance=0.05)
+
+    assert len(joined) == 1
+    assert joined.head(1)[0]["region_id"] == "near-zone"
+    assert joined.head(1)[0]["buffer_distance_left"] == 0.05
+
+
+def test_coverage_summary_counts_and_aggregates_matches() -> None:
+    service_areas = GeoPromptFrame.from_records(
+        [
+            {
+                "zone_id": "north-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]},
+            },
+            {
+                "zone_id": "south-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[0.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0]]]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    assets = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "demand_index": 2.0, "geometry": {"type": "Point", "coordinates": [0.25, 0.25]}},
+            {"site_id": "b", "demand_index": 3.0, "geometry": {"type": "Point", "coordinates": [0.75, 0.25]}},
+            {"site_id": "c", "demand_index": 5.0, "geometry": {"type": "Point", "coordinates": [0.75, -0.25]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = service_areas.coverage_summary(assets, aggregations={"demand_index": "sum"})
+    records = sorted(summary.to_records(), key=lambda item: item["zone_id"])
+
+    assert records[0]["zone_id"] == "north-zone"
+    assert records[0]["count_covered"] == 2
+    assert records[0]["demand_index_sum_covered"] == 5.0
+    assert records[0]["site_ids_covered"] == ["a", "b"]
+    assert records[1]["zone_id"] == "south-zone"
+    assert records[1]["count_covered"] == 1
+    assert records[1]["demand_index_sum_covered"] == 5.0
 
 
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:
@@ -213,3 +467,16 @@ def test_build_demo_report(tmp_path: Path) -> None:
     assert report["summary"]["projected_bounds_3857"]["min_x"] < -12000000
     assert report["summary"]["valley_window_feature_count"] == 3
     assert (tmp_path / "charts" / "neighborhood-pressure-review.png").exists()
+
+
+def test_stress_corpus_generators_create_mixed_geometries() -> None:
+    feature_records = _stress_feature_records()
+    region_records = _stress_region_records()
+
+    geometry_types = {record["geometry"]["type"] for record in feature_records}
+
+    assert len(feature_records) == 93
+    assert geometry_types == {"Point", "LineString", "Polygon"}
+    assert any(record["site_id"] == "stress-remote-point" for record in feature_records)
+    assert len(region_records) == 16
+    assert {record["region_band"] for record in region_records} == {"north", "south"}
