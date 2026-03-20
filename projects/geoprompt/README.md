@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition summaries, corridor reach with scoring, anchor-aware network distance, and diagnostics, zone fit scoring with grouped rankings and callbacks, centroid clustering with diagnostics and rollups, buffer, buffer joins, coverage summaries, overlay summaries with grouping and comparison helpers, dissolve, clip and overlay intersections, nearest-neighbor analysis, gravity model, accessibility index, convex hull, envelope, frame utilities, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition summaries, fishnet and hexbin grids, hotspot summaries, network build, shortest path, service areas with optional partial-edge output, network location allocation, corridor reach with scoring, anchor-aware network distance, and diagnostics, zone fit scoring with grouped rankings and callbacks, centroid clustering with diagnostics and rollups, buffer, buffer joins, coverage summaries, overlay summaries with grouping and comparison helpers, dissolve, clip and overlay intersections, nearest-neighbor analysis, gravity model, accessibility index, convex hull, envelope, frame utilities, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -40,6 +40,10 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Overlay summaries for overlap metrics when you need counts and shares instead of derived geometry outputs
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
+- Network build with `GeoPromptFrame.network_build(...)` for splitting corridors into reusable graph edges and nodes
+- Shortest-path routing with `GeoPromptFrame.shortest_path(...)` plus optional route diagnostics
+- Service-area analysis with `GeoPromptFrame.service_area(...)` for reachable-edge extraction and optional partial-edge coverage output
+- Location allocation with `GeoPromptFrame.location_allocate(...)` for network-cost demand assignment with optional capacity limits
 - Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening, scoring, direct or network-style corridor distance, and path-anchor-aware ranking
 - Corridor diagnostics with `GeoPromptFrame.corridor_diagnostics(...)` for per-corridor served-feature, score, and anchor-distance rollups
 - Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for configurable multi-factor zone matching, grouped zone rankings, and workflow-specific score callbacks

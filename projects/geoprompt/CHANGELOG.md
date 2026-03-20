@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.14
+
+- Extended `GeoPromptFrame.service_area(...)` with optional partial-edge output so reachable networks can return clipped edge segments instead of only whole-edge inclusion.
+- Added optional runtime diagnostics to `GeoPromptFrame.service_area(...)` and `GeoPromptFrame.shortest_path(...)` for node counts, path relaxations, and reachable segment reporting.
+- Added `GeoPromptFrame.location_allocate(...)` for network-cost-based facility allocation with demand weights, optional capacity limits, max-cost filtering, and aggregate rollups.
+- Added benchmark coverage for `location_allocate(...)` and regenerated the comparison report with the new network benchmark.
+- Expanded regression coverage for partial service areas, capacity-aware location allocation, and the routing diagnostics surface.
+
 ## 0.1.13
 
 - Extended `GeoPromptFrame.corridor_reach(...)` with `path_anchor` controls so network-style corridor distance can be ranked from the start, end, or nearest point along a corridor.

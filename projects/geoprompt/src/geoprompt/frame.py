@@ -1660,6 +1660,8 @@ class GeoPromptFrame:
         to_node_column: str = "to_node",
         cost_column: str = "edge_length",
         directed: bool = False,
+        include_partial_edges: bool = False,
+        include_diagnostics: bool = False,
         service_suffix: str = "service",
     ) -> "GeoPromptFrame":
         if max_cost < 0:
@@ -1669,8 +1671,8 @@ class GeoPromptFrame:
         if not self._rows:
             return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
 
-        if isinstance(origins, (str, tuple, list)) and not (isinstance(origins, Sequence) and not isinstance(origins, (str, tuple))):
-            origin_values = [origins]  # type: ignore[list-item]
+        if isinstance(origins, str) or _is_coordinate_value(origins):
+            origin_values = [origins]
         else:
             origin_values = list(origins)  # type: ignore[arg-type]
 
@@ -1682,6 +1684,7 @@ class GeoPromptFrame:
         distances = _dijkstra_distances(adjacency, origin_node_ids)
 
         rows: list[Record] = []
+        partial_edge_count = 0
         for row in self._rows:
             from_node_id = str(row[from_node_id_column])
             to_node_id = str(row[to_node_id_column])
@@ -1689,21 +1692,51 @@ class GeoPromptFrame:
             to_cost = distances.get(to_node_id)
             edge_cost = float(row[cost_column])
 
-            reachable = False
-            if from_cost is not None and from_cost + edge_cost <= max_cost:
-                reachable = True
-            if to_cost is not None and to_cost + edge_cost <= max_cost:
-                reachable = True
-            if not reachable:
+            intervals = _reachable_edge_intervals(
+                from_cost=from_cost,
+                to_cost=to_cost,
+                edge_cost=edge_cost,
+                max_cost=max_cost,
+                directed=directed,
+            )
+            if not intervals:
                 continue
 
-            resolved = dict(row)
-            resolved[f"origin_nodes_{service_suffix}"] = list(origin_node_ids)
-            resolved[f"max_cost_{service_suffix}"] = max_cost
-            resolved[f"cost_from_node_{service_suffix}"] = from_cost
-            resolved[f"cost_to_node_{service_suffix}"] = to_cost
-            resolved[f"cost_min_{service_suffix}"] = min(value for value in (from_cost, to_cost) if value is not None)
-            rows.append(resolved)
+            interval_rows = intervals if include_partial_edges else [intervals[0]]
+            for interval_index, (coverage_start, coverage_end) in enumerate(interval_rows, start=1):
+                if not include_partial_edges and (coverage_start > 1e-9 or coverage_end < 1.0 - 1e-9):
+                    continue
+                clipped_geometry = row[self.geometry_column]
+                if coverage_start > 1e-9 or coverage_end < 1.0 - 1e-9:
+                    clipped_geometry = _linestring_subgeometry(row[self.geometry_column], coverage_start, coverage_end)
+                    if clipped_geometry is None:
+                        continue
+                    partial_edge_count += 1
+
+                resolved = dict(row)
+                resolved[self.geometry_column] = clipped_geometry
+                resolved[f"origin_nodes_{service_suffix}"] = list(origin_node_ids)
+                resolved[f"max_cost_{service_suffix}"] = max_cost
+                resolved[f"cost_from_node_{service_suffix}"] = from_cost
+                resolved[f"cost_to_node_{service_suffix}"] = to_cost
+                resolved[f"cost_min_{service_suffix}"] = min(value for value in (from_cost, to_cost) if value is not None)
+                resolved[f"segment_index_{service_suffix}"] = interval_index
+                resolved[f"segment_count_{service_suffix}"] = len(interval_rows)
+                resolved[f"coverage_start_{service_suffix}"] = coverage_start
+                resolved[f"coverage_end_{service_suffix}"] = coverage_end
+                resolved[f"coverage_ratio_{service_suffix}"] = coverage_end - coverage_start
+                resolved[f"partial_{service_suffix}"] = coverage_start > 1e-9 or coverage_end < 1.0 - 1e-9
+                if include_diagnostics:
+                    resolved[f"origin_count_{service_suffix}"] = len(origin_node_ids)
+                    resolved[f"reached_node_count_{service_suffix}"] = len(distances)
+                    resolved[f"network_node_count_{service_suffix}"] = len(adjacency)
+                    resolved[f"input_edge_count_{service_suffix}"] = len(self._rows)
+                rows.append(resolved)
+
+        if include_diagnostics:
+            for row in rows:
+                row[f"reachable_segment_count_{service_suffix}"] = len(rows)
+                row[f"partial_edge_count_{service_suffix}"] = partial_edge_count
 
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
@@ -1718,6 +1751,7 @@ class GeoPromptFrame:
         to_node_column: str = "to_node",
         cost_column: str = "edge_length",
         directed: bool = False,
+        include_diagnostics: bool = False,
         path_suffix: str = "path",
     ) -> "GeoPromptFrame":
         for column in (edge_id_column, from_node_id_column, to_node_id_column, from_node_column, to_node_column, cost_column):
@@ -1733,6 +1767,7 @@ class GeoPromptFrame:
         previous: dict[str, tuple[str, int]] = {}
         queue: list[tuple[float, str]] = [(0.0, origin_node_id)]
         visited: set[str] = set()
+        relaxation_count = 0
 
         while queue:
             current_cost, current_node = heappop(queue)
@@ -1747,6 +1782,7 @@ class GeoPromptFrame:
                     distances[next_node] = path_cost
                     previous[next_node] = (current_node, edge_index)
                     heappush(queue, (path_cost, next_node))
+                    relaxation_count += 1
 
         if destination_node_id not in distances:
             return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
@@ -1772,9 +1808,232 @@ class GeoPromptFrame:
             resolved[f"total_cost_{path_suffix}"] = total_cost
             resolved[f"edge_count_{path_suffix}"] = len(path_edge_indexes)
             resolved[f"node_sequence_{path_suffix}"] = list(node_sequence)
+            if include_diagnostics:
+                resolved[f"visited_node_count_{path_suffix}"] = len(visited)
+                resolved[f"relaxation_count_{path_suffix}"] = relaxation_count
+                resolved[f"network_node_count_{path_suffix}"] = len(adjacency)
             rows.append(resolved)
 
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def location_allocate(
+        self,
+        facilities: "GeoPromptFrame",
+        demands: "GeoPromptFrame",
+        facility_id_column: str = "site_id",
+        demand_id_column: str = "site_id",
+        demand_weight_column: str | None = None,
+        facility_capacity_column: str | None = None,
+        aggregations: dict[str, AggregationName] | None = None,
+        how: SpatialJoinMode = "left",
+        max_cost: float | None = None,
+        facility_node_column: str | None = None,
+        demand_node_column: str | None = None,
+        from_node_id_column: str = "from_node_id",
+        to_node_id_column: str = "to_node_id",
+        from_node_column: str = "from_node",
+        to_node_column: str = "to_node",
+        cost_column: str = "edge_length",
+        directed: bool = False,
+        include_diagnostics: bool = False,
+        allocation_suffix: str = "allocate",
+    ) -> "GeoPromptFrame":
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if max_cost is not None and max_cost < 0:
+            raise ValueError("max_cost must be zero or greater")
+        for column in (from_node_id_column, to_node_id_column, from_node_column, to_node_column, cost_column):
+            self._require_column(column)
+        if self.crs and facilities.crs and self.crs != facilities.crs:
+            raise ValueError("frames must share the same CRS before location allocation")
+        if self.crs and demands.crs and self.crs != demands.crs:
+            raise ValueError("frames must share the same CRS before location allocation")
+
+        facilities._require_column(facility_id_column)
+        demands._require_column(demand_id_column)
+        if demand_weight_column is not None:
+            demands._require_column(demand_weight_column)
+        if facility_capacity_column is not None:
+            facilities._require_column(facility_capacity_column)
+        if facility_node_column is not None:
+            facilities._require_column(facility_node_column)
+        if demand_node_column is not None:
+            demands._require_column(demand_node_column)
+        if not facilities._rows:
+            return GeoPromptFrame._from_internal_rows([], geometry_column=facilities.geometry_column, crs=facilities.crs or demands.crs)
+
+        adjacency = self._network_graph(from_node_id_column, to_node_id_column, cost_column, directed=directed)
+
+        def resolve_row_node(row: Record, geometry_column: str, node_column: str | None) -> str:
+            if node_column is None:
+                return self._resolve_network_node(
+                    geometry_centroid(row[geometry_column]),
+                    from_node_id_column,
+                    to_node_id_column,
+                    from_node_column,
+                    to_node_column,
+                )
+            node_value = row[node_column]
+            if isinstance(node_value, str):
+                return self._resolve_network_node(
+                    node_value,
+                    from_node_id_column,
+                    to_node_id_column,
+                    from_node_column,
+                    to_node_column,
+                )
+            if isinstance(node_value, dict):
+                geometry = normalize_geometry(node_value)
+                if geometry_type(geometry) == "Point":
+                    return self._resolve_network_node(
+                        _as_coordinate(geometry["coordinates"]),
+                        from_node_id_column,
+                        to_node_id_column,
+                        from_node_column,
+                        to_node_column,
+                    )
+                return self._resolve_network_node(
+                    geometry_centroid(geometry),
+                    from_node_id_column,
+                    to_node_id_column,
+                    from_node_column,
+                    to_node_column,
+                )
+            if _is_coordinate_value(node_value):
+                return self._resolve_network_node(
+                    _as_coordinate(node_value),
+                    from_node_id_column,
+                    to_node_id_column,
+                    from_node_column,
+                    to_node_column,
+                )
+            raise TypeError("network node references must be node ids, point geometries, or coordinate pairs")
+
+        facility_rows = list(facilities._rows)
+        demand_rows = list(demands._rows)
+        facility_node_ids = [
+            resolve_row_node(row, facilities.geometry_column, facility_node_column)
+            for row in facility_rows
+        ]
+        demand_node_ids = [
+            resolve_row_node(row, demands.geometry_column, demand_node_column)
+            for row in demand_rows
+        ]
+        demand_weights = [
+            float(row[demand_weight_column]) if demand_weight_column is not None else 1.0
+            for row in demand_rows
+        ]
+        for weight in demand_weights:
+            if weight < 0:
+                raise ValueError("demand weights must be zero or greater")
+
+        facility_capacities = [
+            float(row[facility_capacity_column]) if facility_capacity_column is not None else float("inf")
+            for row in facility_rows
+        ]
+        for capacity in facility_capacities:
+            if capacity < 0:
+                raise ValueError("facility capacities must be zero or greater")
+        remaining_capacities = list(facility_capacities)
+
+        unique_demand_nodes = {node_id for node_id in demand_node_ids}
+        demand_candidates: dict[int, list[tuple[float, int]]] = {index: [] for index in range(len(demand_rows))}
+        candidate_route_count = 0
+
+        for facility_index, facility_node_id in enumerate(facility_node_ids):
+            distances = _dijkstra_distances(adjacency, [facility_node_id], stop_nodes=unique_demand_nodes)
+            for demand_index, demand_node_id in enumerate(demand_node_ids):
+                distance_value = distances.get(demand_node_id)
+                if distance_value is None:
+                    continue
+                if max_cost is not None and distance_value > max_cost:
+                    continue
+                demand_candidates[demand_index].append((distance_value, facility_index))
+                candidate_route_count += 1
+
+        for demand_index, candidates in demand_candidates.items():
+            candidates.sort(
+                key=lambda item: (
+                    item[0],
+                    str(facility_rows[item[1]][facility_id_column]),
+                    item[1],
+                )
+            )
+
+        demand_order = sorted(
+            range(len(demand_rows)),
+            key=lambda index: (
+                demand_candidates[index][0][0] if demand_candidates[index] else float("inf"),
+                str(demand_rows[index][demand_id_column]),
+            ),
+        )
+
+        assigned_matches: dict[int, list[tuple[Record, float, float, str]]] = {
+            index: [] for index in range(len(facility_rows))
+        }
+        unallocated_rows: list[Record] = []
+        for demand_index in demand_order:
+            demand_row = demand_rows[demand_index]
+            demand_weight = demand_weights[demand_index]
+            demand_id = str(demand_row[demand_id_column])
+            selected_facility_index: int | None = None
+            selected_cost: float | None = None
+            for distance_value, facility_index in demand_candidates[demand_index]:
+                if remaining_capacities[facility_index] + 1e-9 < demand_weight:
+                    continue
+                selected_facility_index = facility_index
+                selected_cost = distance_value
+                break
+
+            if selected_facility_index is None or selected_cost is None:
+                unallocated_rows.append(demand_row)
+                continue
+
+            if facility_capacity_column is not None:
+                remaining_capacities[selected_facility_index] -= demand_weight
+            assigned_matches[selected_facility_index].append(
+                (demand_row, selected_cost, demand_weight, demand_id)
+            )
+
+        rows: list[Record] = []
+        unallocated_demand_ids = [str(row[demand_id_column]) for row in unallocated_rows]
+        total_allocated = sum(len(matches) for matches in assigned_matches.values())
+        for facility_index, facility_row in enumerate(facility_rows):
+            matches = assigned_matches[facility_index]
+            if not matches and how == "inner":
+                continue
+
+            costs = [cost for _row, cost, _weight, _id in matches]
+            weights = [weight for _row, _cost, weight, _id in matches]
+            allocated_rows = [row for row, _cost, _weight, _id in matches]
+            resolved = dict(facility_row)
+            resolved[f"{demand_id_column}s_{allocation_suffix}"] = [demand_id for _row, _cost, _weight, demand_id in matches]
+            resolved[f"count_{allocation_suffix}"] = len(matches)
+            resolved[f"cost_min_{allocation_suffix}"] = min(costs) if costs else None
+            resolved[f"cost_max_{allocation_suffix}"] = max(costs) if costs else None
+            resolved[f"cost_mean_{allocation_suffix}"] = sum(costs) / len(costs) if costs else None
+            resolved[f"allocated_weight_{allocation_suffix}"] = sum(weights)
+            resolved[f"facility_node_{allocation_suffix}"] = facility_node_ids[facility_index]
+            resolved[f"{demand_id_column}s_unallocated_{allocation_suffix}"] = list(unallocated_demand_ids)
+            resolved[f"count_unallocated_{allocation_suffix}"] = len(unallocated_demand_ids)
+            if facility_capacity_column is not None:
+                resolved[f"capacity_used_{allocation_suffix}"] = facility_capacities[facility_index] - remaining_capacities[facility_index]
+                resolved[f"capacity_remaining_{allocation_suffix}"] = remaining_capacities[facility_index]
+            else:
+                resolved[f"capacity_used_{allocation_suffix}"] = None
+                resolved[f"capacity_remaining_{allocation_suffix}"] = None
+            resolved.update(self._aggregate_rows(allocated_rows, aggregations=aggregations, suffix=allocation_suffix))
+            if include_diagnostics:
+                resolved[f"facility_count_{allocation_suffix}"] = len(facility_rows)
+                resolved[f"demand_count_{allocation_suffix}"] = len(demand_rows)
+                resolved[f"allocated_count_{allocation_suffix}"] = total_allocated
+                resolved[f"candidate_route_count_{allocation_suffix}"] = candidate_route_count
+                resolved[f"facility_node_count_{allocation_suffix}"] = len(set(facility_node_ids))
+                resolved[f"demand_node_count_{allocation_suffix}"] = len(unique_demand_nodes)
+                resolved[f"network_node_count_{allocation_suffix}"] = len(adjacency)
+            rows.append(resolved)
+
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=facilities.geometry_column, crs=facilities.crs or demands.crs or self.crs)
 
     def _resolve_network_node(
         self,
@@ -2595,6 +2854,15 @@ def _same_coordinate(left: Coordinate, right: Coordinate, tolerance: float = 1e-
     return abs(left[0] - right[0]) <= tolerance and abs(left[1] - right[1]) <= tolerance
 
 
+def _is_coordinate_value(value: Any) -> bool:
+    return (
+        isinstance(value, Sequence)
+        and not isinstance(value, (str, bytes, dict))
+        and len(value) == 2
+        and all(isinstance(item, (int, float)) for item in value)
+    )
+
+
 def _point_parameter(point: Coordinate, start: Coordinate, end: Coordinate) -> float:
     dx = end[0] - start[0]
     dy = end[1] - start[1]
@@ -2637,10 +2905,12 @@ def _dijkstra_distances(
     adjacency: dict[str, list[tuple[str, float, int]]],
     origin_node_ids: Sequence[str],
     stop_node: str | None = None,
+    stop_nodes: set[str] | None = None,
 ) -> dict[str, float]:
     distances: dict[str, float] = {node_id: 0.0 for node_id in origin_node_ids}
     queue: list[tuple[float, str]] = [(0.0, node_id) for node_id in origin_node_ids]
     visited: set[str] = set()
+    remaining_stop_nodes = set(stop_nodes) if stop_nodes is not None else None
 
     while queue:
         current_cost, current_node = heappop(queue)
@@ -2649,12 +2919,115 @@ def _dijkstra_distances(
         visited.add(current_node)
         if stop_node is not None and current_node == stop_node:
             break
+        if remaining_stop_nodes is not None and current_node in remaining_stop_nodes:
+            remaining_stop_nodes.remove(current_node)
+            if not remaining_stop_nodes:
+                break
         for next_node, edge_cost, _edge_index in adjacency.get(current_node, []):
             path_cost = current_cost + edge_cost
             if path_cost < distances.get(next_node, float("inf")):
                 distances[next_node] = path_cost
                 heappush(queue, (path_cost, next_node))
     return distances
+
+
+def _reachable_edge_intervals(
+    from_cost: float | None,
+    to_cost: float | None,
+    edge_cost: float,
+    max_cost: float,
+    directed: bool,
+) -> list[tuple[float, float]]:
+    intervals: list[tuple[float, float]] = []
+    if edge_cost <= 0.0:
+        if from_cost is not None and from_cost <= max_cost:
+            return [(0.0, 1.0)]
+        if not directed and to_cost is not None and to_cost <= max_cost:
+            return [(0.0, 1.0)]
+        return []
+
+    if from_cost is not None and from_cost <= max_cost:
+        intervals.append((0.0, min(1.0, (max_cost - from_cost) / edge_cost)))
+    if not directed and to_cost is not None and to_cost <= max_cost:
+        intervals.append((max(0.0, 1.0 - ((max_cost - to_cost) / edge_cost)), 1.0))
+    if not intervals:
+        return []
+
+    merged: list[tuple[float, float]] = []
+    for start_value, end_value in sorted(intervals):
+        if end_value <= start_value + 1e-9:
+            continue
+        if not merged or start_value > merged[-1][1] + 1e-9:
+            merged.append((start_value, end_value))
+            continue
+        merged[-1] = (merged[-1][0], max(merged[-1][1], end_value))
+    return merged
+
+
+def _linestring_subgeometry(geometry: Geometry, start_fraction: float, end_fraction: float) -> Geometry | None:
+    coordinates = [_as_coordinate(value) for value in geometry["coordinates"]]
+    if len(coordinates) < 2:
+        return None
+
+    clamped_start = max(0.0, min(1.0, float(start_fraction)))
+    clamped_end = max(0.0, min(1.0, float(end_fraction)))
+    if clamped_end <= clamped_start + 1e-9:
+        return None
+
+    cumulative_lengths = [0.0]
+    for start_point, end_point in zip(coordinates, coordinates[1:]):
+        cumulative_lengths.append(
+            cumulative_lengths[-1] + coordinate_distance(start_point, end_point, method="euclidean")
+        )
+    total_length = cumulative_lengths[-1]
+    if total_length <= 0.0:
+        return None
+
+    start_distance = total_length * clamped_start
+    end_distance = total_length * clamped_end
+    clipped_coordinates = [_interpolate_linestring_coordinate(coordinates, cumulative_lengths, start_distance)]
+    for vertex_index in range(1, len(coordinates) - 1):
+        vertex_distance = cumulative_lengths[vertex_index]
+        if start_distance < vertex_distance < end_distance:
+            clipped_coordinates.append(coordinates[vertex_index])
+    clipped_coordinates.append(_interpolate_linestring_coordinate(coordinates, cumulative_lengths, end_distance))
+
+    deduped_coordinates: list[Coordinate] = []
+    for coordinate in clipped_coordinates:
+        if deduped_coordinates and _same_coordinate(deduped_coordinates[-1], coordinate):
+            continue
+        deduped_coordinates.append(coordinate)
+    if len(deduped_coordinates) < 2:
+        return None
+    return {"type": "LineString", "coordinates": tuple(deduped_coordinates)}
+
+
+def _interpolate_linestring_coordinate(
+    coordinates: Sequence[Coordinate],
+    cumulative_lengths: Sequence[float],
+    target_distance: float,
+) -> Coordinate:
+    if target_distance <= 0.0:
+        return coordinates[0]
+    if target_distance >= cumulative_lengths[-1]:
+        return coordinates[-1]
+
+    for index in range(1, len(coordinates)):
+        segment_start_distance = cumulative_lengths[index - 1]
+        segment_end_distance = cumulative_lengths[index]
+        if target_distance > segment_end_distance + 1e-9:
+            continue
+        segment_length = segment_end_distance - segment_start_distance
+        if segment_length <= 0.0:
+            return coordinates[index]
+        ratio = (target_distance - segment_start_distance) / segment_length
+        start_point = coordinates[index - 1]
+        end_point = coordinates[index]
+        return (
+            start_point[0] + ((end_point[0] - start_point[0]) * ratio),
+            start_point[1] + ((end_point[1] - start_point[1]) * ratio),
+        )
+    return coordinates[-1]
 
 
 def _point_to_segment_distance(point: Coordinate, seg_start: Any, seg_end: Any, method: str = "euclidean") -> float:

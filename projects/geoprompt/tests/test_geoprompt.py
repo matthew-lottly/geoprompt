@@ -649,6 +649,127 @@ def test_service_area_returns_reachable_edges() -> None:
     assert all(record["origin_nodes_service"] == ["node-a"] for record in records)
 
 
+def test_service_area_supports_partial_edges_and_diagnostics() -> None:
+    network = GeoPromptFrame.from_records(
+        [
+            {
+                "edge_id": "edge-1",
+                "from_node_id": "node-a",
+                "to_node_id": "node-b",
+                "from_node": (0.0, 0.0),
+                "to_node": (1.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-2",
+                "from_node_id": "node-b",
+                "to_node_id": "node-c",
+                "from_node": (1.0, 0.0),
+                "to_node": (2.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (2.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-3",
+                "from_node_id": "node-c",
+                "to_node_id": "node-d",
+                "from_node": (2.0, 0.0),
+                "to_node": (3.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(2.0, 0.0), (3.0, 0.0)]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    service = network.service_area("node-a", max_cost=2.5, include_partial_edges=True, include_diagnostics=True)
+    records = sorted(service.to_records(), key=lambda item: (item["edge_id"], item["segment_index_service"]))
+
+    assert [record["edge_id"] for record in records] == ["edge-1", "edge-2", "edge-3"]
+    assert records[2]["partial_service"] is True
+    assert records[2]["coverage_ratio_service"] == 0.5
+    assert records[2]["geometry"]["coordinates"] == ((2.0, 0.0), (2.5, 0.0))
+    assert records[0]["reachable_segment_count_service"] == 3
+    assert records[0]["partial_edge_count_service"] == 1
+
+
+def test_location_allocate_assigns_by_network_cost_and_capacity() -> None:
+    network = GeoPromptFrame.from_records(
+        [
+            {
+                "edge_id": "edge-1",
+                "from_node_id": "node-a",
+                "to_node_id": "node-b",
+                "from_node": (0.0, 0.0),
+                "to_node": (1.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-2",
+                "from_node_id": "node-b",
+                "to_node_id": "node-c",
+                "from_node": (1.0, 0.0),
+                "to_node": (2.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(1.0, 0.0), (2.0, 0.0)]},
+            },
+            {
+                "edge_id": "edge-3",
+                "from_node_id": "node-c",
+                "to_node_id": "node-d",
+                "from_node": (2.0, 0.0),
+                "to_node": (3.0, 0.0),
+                "edge_length": 1.0,
+                "geometry": {"type": "LineString", "coordinates": [(2.0, 0.0), (3.0, 0.0)]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    facilities = GeoPromptFrame.from_records(
+        [
+            {"facility_id": "facility-a", "capacity": 1.0, "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"facility_id": "facility-d", "capacity": 1.0, "geometry": {"type": "Point", "coordinates": [3.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    demands = GeoPromptFrame.from_records(
+        [
+            {"demand_id": "demand-1", "demand": 1.0, "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"demand_id": "demand-2", "demand": 1.0, "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+            {"demand_id": "demand-3", "demand": 1.0, "geometry": {"type": "Point", "coordinates": [3.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    allocation = network.location_allocate(
+        facilities,
+        demands,
+        facility_id_column="facility_id",
+        demand_id_column="demand_id",
+        demand_weight_column="demand",
+        facility_capacity_column="capacity",
+        aggregations={"demand": "sum"},
+        include_diagnostics=True,
+    )
+    records = sorted(allocation.to_records(), key=lambda item: item["facility_id"])
+
+    assert records[0]["facility_id"] == "facility-a"
+    assert records[0]["demand_ids_allocate"] == ["demand-1"]
+    assert records[0]["count_allocate"] == 1
+    assert records[0]["demand_sum_allocate"] == 1.0
+    assert records[0]["capacity_remaining_allocate"] == 0.0
+    assert records[0]["count_unallocated_allocate"] == 1
+    assert records[0]["demand_ids_unallocated_allocate"] == ["demand-2"]
+    assert records[0]["candidate_route_count_allocate"] == 6
+
+    assert records[1]["facility_id"] == "facility-d"
+    assert records[1]["demand_ids_allocate"] == ["demand-3"]
+    assert records[1]["cost_min_allocate"] == 0.0
+    assert records[1]["capacity_used_allocate"] == 1.0
+
+
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:
     geojson_path = tmp_path / "feature_collection.geojson"
     payload = {
@@ -1553,3 +1674,4 @@ def test_comparison_report_benchmarks_new_methods() -> None:
     assert "benchmark.geoprompt.network_build" in benchmark_ops
     assert "benchmark.geoprompt.shortest_path" in benchmark_ops
     assert "benchmark.geoprompt.service_area" in benchmark_ops
+    assert "benchmark.geoprompt.location_allocate" in benchmark_ops

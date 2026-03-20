@@ -524,6 +524,40 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
                     lambda: network_frame.service_area(first_row["from_node_id"], max_cost=float(first_row["edge_length"]) * 2.0),
                 )
                 benchmarks.append(benchmark)
+                node_lookup: dict[str, tuple[float, float]] = {}
+                for network_row in network_frame.to_records():
+                    node_lookup.setdefault(str(network_row["from_node_id"]), tuple(network_row["from_node"]))
+                    node_lookup.setdefault(str(network_row["to_node_id"]), tuple(network_row["to_node"]))
+                node_items = list(node_lookup.items())
+                if len(node_items) >= 4:
+                    facility_records = [
+                        {
+                            "facility_id": f"facility-{index + 1}",
+                            "geometry": {"type": "Point", "coordinates": list(node_items[index][1])},
+                        }
+                        for index in range(2)
+                    ]
+                    demand_records = [
+                        {
+                            "demand_id": f"demand-{index - 1}",
+                            "demand": 1.0,
+                            "geometry": {"type": "Point", "coordinates": list(node_items[index][1])},
+                        }
+                        for index in range(2, min(len(node_items), 6))
+                    ]
+                    facility_frame = GeoPromptFrame.from_records(facility_records, crs=case.crs)
+                    demand_frame = GeoPromptFrame.from_records(demand_records, crs=case.crs)
+                    benchmark, _ = _benchmark(
+                        f"{case.name}.geoprompt.location_allocate",
+                        lambda: network_frame.location_allocate(
+                            facility_frame,
+                            demand_frame,
+                            facility_id_column="facility_id",
+                            demand_id_column="demand_id",
+                            demand_weight_column="demand",
+                        ),
+                    )
+                    benchmarks.append(benchmark)
 
     return {
         "dataset": case.name,
