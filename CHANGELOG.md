@@ -4,6 +4,8 @@
 
 - Improved `nearest_neighbors(...)` so small-`k` lookups do not sort the full candidate list.
 - Added `GeoPromptFrame.nearest_join(...)` for ranked nearest-feature joins with optional `max_distance` filtering and `left` join behavior.
+- Added `GeoPromptFrame.assign_nearest(...)` for target-focused nearest-origin allocation workflows.
+- Reduced join-output overhead by skipping redundant geometry normalization for already-normalized derived rows.
 
 ## 0.1.5
 

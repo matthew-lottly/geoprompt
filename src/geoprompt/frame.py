@@ -285,6 +285,27 @@ class GeoPromptFrame:
 
         return GeoPromptFrame._from_internal_rows(joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
 
+    def assign_nearest(
+        self,
+        targets: "GeoPromptFrame",
+        how: SpatialJoinMode = "inner",
+        max_distance: float | None = None,
+        distance_method: str = "euclidean",
+        origin_suffix: str = "origin",
+    ) -> "GeoPromptFrame":
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if max_distance is not None and max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+        return targets.nearest_join(
+            self,
+            k=1,
+            how=how,
+            rsuffix=origin_suffix,
+            max_distance=max_distance,
+            distance_method=distance_method,
+        )
+
     def query_radius(
         self,
         anchor: str | Geometry | Coordinate,

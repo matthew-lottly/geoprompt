@@ -191,6 +191,33 @@ def test_nearest_join_supports_max_distance_and_left_mode() -> None:
     assert records[1]["nearest_rank_right"] is None
 
 
+def test_assign_nearest_returns_target_focused_output() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    assigned = origins.assign_nearest(targets, origin_suffix="origin")
+    records = sorted(assigned.to_records(), key=lambda item: item["target_id"])
+
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["site_id"] == "origin-a"
+    assert records[0]["nearest_rank_origin"] == 1
+    assert records[1]["target_id"] == "target-2"
+    assert records[1]["site_id"] == "origin-b"
+    assert records[1]["distance_origin"] == 1.0
+
+
 def test_buffer_converts_points_to_polygons() -> None:
     frame = read_points(PROJECT_ROOT / "data" / "sample_points.json", crs="EPSG:4326")
 
