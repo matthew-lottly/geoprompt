@@ -127,6 +127,31 @@ def overlay_intersections(left_geometries: list[Geometry], right_geometries: lis
     return intersections
 
 
+def overlay_union_faces(left_geometries: list[Geometry], right_geometries: list[Geometry]) -> list[tuple[list[int], list[int], Geometry]]:
+    if not left_geometries and not right_geometries:
+        return []
+
+    _load_shapely()
+    shapely_ops = importlib.import_module("shapely.ops")
+    left_shapes = [geometry_to_shapely(geometry) for geometry in left_geometries]
+    right_shapes = [geometry_to_shapely(geometry) for geometry in right_geometries]
+    noded_boundaries = shapely_ops.unary_union([shape.boundary for shape in [*left_shapes, *right_shapes]])
+
+    faces: list[tuple[list[int], list[int], Geometry]] = []
+    for face in shapely_ops.polygonize(noded_boundaries):
+        if face.is_empty:
+            continue
+        probe = face.representative_point()
+        left_indexes = [index for index, shape in enumerate(left_shapes) if shape.covers(probe)]
+        right_indexes = [index for index, shape in enumerate(right_shapes) if shape.covers(probe)]
+        if not left_indexes and not right_indexes:
+            continue
+        exploded = geometry_from_shapely(face)
+        if exploded:
+            faces.append((left_indexes, right_indexes, exploded[0]))
+    return faces
+
+
 
 
 def dissolve_geometries(geometries: list[Geometry]) -> list[Geometry]:
@@ -145,4 +170,5 @@ __all__ = [
     "geometry_to_geojson",
     "geometry_to_shapely",
     "overlay_intersections",
+    "overlay_union_faces",
 ]

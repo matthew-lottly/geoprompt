@@ -7,8 +7,8 @@ from heapq import heappop, heappush, nsmallest
 from typing import Any, Iterable, Literal, Sequence
 
 from .equations import accessibility_index, area_similarity, coordinate_distance, corridor_strength, directional_alignment, gravity_model, prompt_decay, prompt_influence, prompt_interaction
-from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_convex_hull, geometry_distance, geometry_envelope, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
-from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
+from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_convex_hull, geometry_distance, geometry_envelope, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_vertices, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
+from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections, overlay_union_faces
 from .spatial_index import SpatialIndex
 
 
@@ -1100,6 +1100,57 @@ class GeoPromptFrame:
                 rows.append(merged_row)
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
 
+    def overlay_union(
+        self,
+        other: "GeoPromptFrame",
+        left_id_column: str = "site_id",
+        right_id_column: str = "site_id",
+        rsuffix: str = "right",
+        union_suffix: str = "union",
+    ) -> "GeoPromptFrame":
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before overlay operations")
+        if any(geometry_type(row[self.geometry_column]) != "Polygon" for row in self._rows):
+            raise ValueError("overlay_union currently requires Polygon geometries on the left frame")
+        if any(geometry_type(row[other.geometry_column]) != "Polygon" for row in other._rows):
+            raise ValueError("overlay_union currently requires Polygon geometries on the right frame")
+        self._require_column(left_id_column)
+        other._require_column(right_id_column)
+
+        faces = overlay_union_faces(
+            [row[self.geometry_column] for row in self._rows],
+            [row[other.geometry_column] for row in other._rows],
+        )
+        left_columns = [column for column in self.columns if column != self.geometry_column]
+        right_columns = [column for column in other.columns if column != other.geometry_column]
+        right_rows = list(other._rows)
+        rows: list[Record] = []
+
+        for left_indexes, right_indexes, geometry in faces:
+            resolved: Record = {}
+            for column in left_columns:
+                resolved[column] = self._rows[left_indexes[0]][column] if len(left_indexes) == 1 else None
+            for column in right_columns:
+                target_name = column if column not in resolved else f"{column}_{rsuffix}"
+                resolved[target_name] = right_rows[right_indexes[0]][column] if len(right_indexes) == 1 else None
+            resolved[f"{left_id_column}s_{union_suffix}"] = [str(self._rows[index][left_id_column]) for index in left_indexes]
+            resolved[f"{right_id_column}s_{union_suffix}"] = [str(right_rows[index][right_id_column]) for index in right_indexes]
+            resolved[f"left_count_{union_suffix}"] = len(left_indexes)
+            resolved[f"right_count_{union_suffix}"] = len(right_indexes)
+            resolved[f"source_side_{union_suffix}"] = "both" if left_indexes and right_indexes else ("left" if left_indexes else "right")
+            resolved[f"area_{union_suffix}"] = geometry_area(geometry)
+            resolved[self.geometry_column] = geometry
+            rows.append(resolved)
+
+        rows.sort(
+            key=lambda row: (
+                str(row[f"source_side_{union_suffix}"]),
+                tuple(row[f"{left_id_column}s_{union_suffix}"]),
+                tuple(row[f"{right_id_column}s_{union_suffix}"]),
+            )
+        )
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
     def dissolve(
         self,
         by: str,
@@ -1372,6 +1423,226 @@ class GeoPromptFrame:
                 "sum": sum(numeric),
             }
         return stats
+
+    def snap_geometries(
+        self,
+        tolerance: float,
+        include_diagnostics: bool = False,
+        snap_suffix: str = "snap",
+    ) -> "GeoPromptFrame":
+        if tolerance <= 0:
+            raise ValueError("tolerance must be greater than zero")
+        if not self._rows:
+            return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
+
+        unique_vertices: dict[str, Coordinate] = {}
+        for row in self._rows:
+            geometry = row[self.geometry_column]
+            geometry_kind = geometry_type(geometry)
+            coordinates = geometry_vertices(geometry)
+            if geometry_kind == "Polygon":
+                coordinates = coordinates[:-1]
+            for coordinate in coordinates:
+                unique_vertices.setdefault(_coordinate_key(coordinate), coordinate)
+
+        vertex_values = list(unique_vertices.values())
+        vertex_index = SpatialIndex.from_points(vertex_values, cell_size=tolerance)
+        snap_lookup = _build_snap_coordinate_lookup(vertex_values, vertex_index, tolerance)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            resolved = dict(row)
+            snapped_geometry, changed_vertex_count, collapsed = _snap_geometry(
+                row[self.geometry_column],
+                snap_lookup,
+            )
+            resolved[self.geometry_column] = snapped_geometry
+            resolved[f"changed_{snap_suffix}"] = changed_vertex_count > 0
+            resolved[f"changed_vertex_count_{snap_suffix}"] = changed_vertex_count
+            if include_diagnostics:
+                vertex_count = len(geometry_vertices(row[self.geometry_column]))
+                if geometry_type(row[self.geometry_column]) == "Polygon":
+                    vertex_count -= 1
+                resolved[f"vertex_count_{snap_suffix}"] = vertex_count
+                resolved[f"collapsed_{snap_suffix}"] = collapsed
+                resolved[f"unique_vertex_count_{snap_suffix}"] = len(unique_vertices)
+                resolved[f"tolerance_{snap_suffix}"] = tolerance
+            rows.append(resolved)
+
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def clean_topology(
+        self,
+        tolerance: float | None = None,
+        min_segment_length: float = 0.0,
+        include_diagnostics: bool = False,
+        clean_suffix: str = "clean",
+    ) -> "GeoPromptFrame":
+        if tolerance is not None and tolerance <= 0:
+            raise ValueError("tolerance must be greater than zero")
+        if min_segment_length < 0:
+            raise ValueError("min_segment_length must be zero or greater")
+        if not self._rows:
+            return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
+
+        working_rows = self.snap_geometries(tolerance=tolerance, include_diagnostics=False)._rows if tolerance is not None else self._rows
+        rows: list[Record] = []
+        for original_row, working_row in zip(self._rows, working_rows, strict=True):
+            cleaned_geometry, diagnostics = _clean_geometry(
+                original_geometry=original_row[self.geometry_column],
+                working_geometry=working_row[self.geometry_column],
+                min_segment_length=min_segment_length,
+            )
+            resolved = dict(original_row)
+            resolved[self.geometry_column] = cleaned_geometry
+            resolved[f"changed_{clean_suffix}"] = diagnostics["changed"]
+            resolved[f"removed_vertex_count_{clean_suffix}"] = diagnostics["removed_vertex_count"]
+            resolved[f"removed_short_segment_count_{clean_suffix}"] = diagnostics["removed_short_segment_count"]
+            if include_diagnostics:
+                resolved[f"input_vertex_count_{clean_suffix}"] = diagnostics["input_vertex_count"]
+                resolved[f"output_vertex_count_{clean_suffix}"] = diagnostics["output_vertex_count"]
+                resolved[f"collapsed_{clean_suffix}"] = diagnostics["collapsed"]
+                resolved[f"tolerance_{clean_suffix}"] = tolerance
+                resolved[f"min_segment_length_{clean_suffix}"] = min_segment_length
+            rows.append(resolved)
+
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def line_split(
+        self,
+        splitters: "GeoPromptFrame | None" = None,
+        id_column: str = "site_id",
+        splitter_id_column: str = "site_id",
+        split_at_intersections: bool = True,
+        include_diagnostics: bool = False,
+        split_suffix: str = "split",
+    ) -> "GeoPromptFrame":
+        self._require_column(id_column)
+        if any(geometry_type(row[self.geometry_column]) != "LineString" for row in self._rows):
+            raise ValueError("line_split requires all geometries to be LineString")
+        if splitters is not None and self.crs and splitters.crs and self.crs != splitters.crs:
+            raise ValueError("frames must share the same CRS before line splitting")
+        if splitters is not None and splitter_id_column not in splitters.columns:
+            raise KeyError(f"column '{splitter_id_column}' is not present")
+        if not self._rows:
+            return GeoPromptFrame._from_internal_rows([], geometry_column=self.geometry_column, crs=self.crs)
+
+        line_infos = [
+            _build_linestring_info(row[self.geometry_column])
+            for row in self._rows
+        ]
+        cut_points: list[dict[str, Coordinate]] = [
+            {
+                _coordinate_key(line_info["coordinates"][0]): line_info["coordinates"][0],
+                _coordinate_key(line_info["coordinates"][-1]): line_info["coordinates"][-1],
+            }
+            for line_info in line_infos
+        ]
+        splitter_sources: list[set[str]] = [set() for _ in self._rows]
+        splitter_point_counts = [0 for _ in self._rows]
+        line_splitter_counts = [0 for _ in self._rows]
+        self_intersection_counts = [0 for _ in self._rows]
+
+        source_segments = _line_segment_records(self._rows, self.geometry_column)
+        source_segment_index = SpatialIndex([record["bounds"] for record in source_segments]) if source_segments else SpatialIndex([])
+
+        if split_at_intersections and source_segments:
+            for segment_index, segment in enumerate(source_segments):
+                for other_index in source_segment_index.query(segment["bounds"]):
+                    if other_index <= segment_index:
+                        continue
+                    other = source_segments[other_index]
+                    if segment["source_index"] == other["source_index"] and abs(segment["segment_index"] - other["segment_index"]) <= 1:
+                        continue
+                    intersection_points = _segment_intersection_points(segment["start"], segment["end"], other["start"], other["end"])
+                    for point in intersection_points:
+                        added_left = _register_cut_point(cut_points[segment["source_index"]], point)
+                        added_right = _register_cut_point(cut_points[other["source_index"]], point)
+                        if added_left:
+                            self_intersection_counts[segment["source_index"]] += 1
+                        if added_right:
+                            self_intersection_counts[other["source_index"]] += 1
+
+        if splitters is not None and splitters._rows:
+            line_index = self.spatial_index(mode="geometry")
+            point_splitters = [row for row in splitters._rows if geometry_type(row[splitters.geometry_column]) == "Point"]
+            line_splitters = [row for row in splitters._rows if geometry_type(row[splitters.geometry_column]) == "LineString"]
+            unsupported_types = [geometry_type(row[splitters.geometry_column]) for row in splitters._rows if geometry_type(row[splitters.geometry_column]) not in {"Point", "LineString"}]
+            if unsupported_types:
+                raise ValueError("line_split splitters must contain only Point or LineString geometries")
+
+            for splitter_row in point_splitters:
+                point = _as_coordinate(splitter_row[splitters.geometry_column]["coordinates"])
+                point_bounds = (point[0], point[1], point[0], point[1])
+                splitter_id = str(splitter_row[splitter_id_column])
+                for line_index_value in line_index.query(point_bounds):
+                    coordinates = line_infos[line_index_value]["coordinates"]
+                    if any(_point_on_segment(point, start, end) for start, end in zip(coordinates, coordinates[1:])):
+                        if _register_cut_point(cut_points[line_index_value], point):
+                            splitter_point_counts[line_index_value] += 1
+                        splitter_sources[line_index_value].add(splitter_id)
+
+            if line_splitters:
+                splitter_segments = _line_segment_records(line_splitters, splitters.geometry_column)
+                for splitter_segment in splitter_segments:
+                    splitter_id = str(line_splitters[splitter_segment["source_index"]][splitter_id_column])
+                    for source_segment_index_value in source_segment_index.query(splitter_segment["bounds"]):
+                        source_segment = source_segments[source_segment_index_value]
+                        for point in _segment_intersection_points(
+                            source_segment["start"],
+                            source_segment["end"],
+                            splitter_segment["start"],
+                            splitter_segment["end"],
+                        ):
+                            if _register_cut_point(cut_points[source_segment["source_index"]], point):
+                                line_splitter_counts[source_segment["source_index"]] += 1
+                            splitter_sources[source_segment["source_index"]].add(splitter_id)
+
+        rows: list[Record] = []
+        for row_index, row in enumerate(self._rows):
+            line_info = line_infos[row_index]
+            fractions = sorted(
+                {
+                    0.0,
+                    1.0,
+                    *(
+                        _locate_point_fraction_on_linestring(line_info, point)
+                        for point in cut_points[row_index].values()
+                    ),
+                }
+            )
+            split_ranges = [
+                (start_fraction, end_fraction)
+                for start_fraction, end_fraction in zip(fractions, fractions[1:])
+                if end_fraction > start_fraction + 1e-9
+            ]
+            part_rows: list[Record] = []
+            source_id = str(row[id_column])
+            ordered_splitter_ids = sorted(splitter_sources[row_index])
+            for part_index, (start_fraction, end_fraction) in enumerate(split_ranges, start=1):
+                split_geometry = _linestring_subgeometry(row[self.geometry_column], start_fraction, end_fraction)
+                if split_geometry is None:
+                    continue
+                resolved = dict(row)
+                resolved[self.geometry_column] = split_geometry
+                resolved[f"source_id_{split_suffix}"] = source_id
+                resolved[f"part_id_{split_suffix}"] = f"{source_id}-part-{part_index:05d}"
+                resolved[f"part_index_{split_suffix}"] = part_index
+                resolved[f"start_fraction_{split_suffix}"] = start_fraction
+                resolved[f"end_fraction_{split_suffix}"] = end_fraction
+                resolved[f"split_point_count_{split_suffix}"] = max(0, len(fractions) - 2)
+                resolved[f"splitter_ids_{split_suffix}"] = ordered_splitter_ids
+                if include_diagnostics:
+                    resolved[f"self_intersection_count_{split_suffix}"] = self_intersection_counts[row_index]
+                    resolved[f"point_splitter_count_{split_suffix}"] = splitter_point_counts[row_index]
+                    resolved[f"line_splitter_count_{split_suffix}"] = line_splitter_counts[row_index]
+                part_rows.append(resolved)
+            for resolved in part_rows:
+                resolved[f"part_count_{split_suffix}"] = len(part_rows)
+                rows.append(resolved)
+
+        rows.sort(key=lambda item: (str(item[f"source_id_{split_suffix}"]), int(item[f"part_index_{split_suffix}"])))
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs or (splitters.crs if splitters is not None else None))
 
     def fishnet(
         self,
@@ -2852,6 +3123,214 @@ def _coordinate_key(point: Coordinate) -> str:
 
 def _same_coordinate(left: Coordinate, right: Coordinate, tolerance: float = 1e-9) -> bool:
     return abs(left[0] - right[0]) <= tolerance and abs(left[1] - right[1]) <= tolerance
+
+
+def _build_snap_coordinate_lookup(
+    coordinates: Sequence[Coordinate],
+    coordinate_index: SpatialIndex,
+    tolerance: float,
+) -> dict[str, Coordinate]:
+    sorted_coordinates = sorted(coordinates)
+    visited: set[str] = set()
+    lookup: dict[str, Coordinate] = {}
+
+    for coordinate in sorted_coordinates:
+        coordinate_key = _coordinate_key(coordinate)
+        if coordinate_key in visited:
+            continue
+        component: dict[str, Coordinate] = {}
+        stack = [coordinate]
+        visited.add(coordinate_key)
+        while stack:
+            current = stack.pop()
+            current_key = _coordinate_key(current)
+            component[current_key] = current
+            candidate_indexes = coordinate_index.query(
+                (
+                    current[0] - tolerance,
+                    current[1] - tolerance,
+                    current[0] + tolerance,
+                    current[1] + tolerance,
+                )
+            )
+            for candidate_index in candidate_indexes:
+                candidate = coordinates[candidate_index]
+                candidate_key = _coordinate_key(candidate)
+                if candidate_key in visited:
+                    continue
+                if coordinate_distance(current, candidate, method="euclidean") > tolerance:
+                    continue
+                visited.add(candidate_key)
+                stack.append(candidate)
+        anchor = min(component.values())
+        for component_key in component:
+            lookup[component_key] = anchor
+    return lookup
+
+
+def _snap_geometry(
+    geometry: Geometry,
+    snap_lookup: dict[str, Coordinate],
+) -> tuple[Geometry, int, bool]:
+    geometry_kind = geometry_type(geometry)
+    if geometry_kind == "Point":
+        coordinate = _as_coordinate(geometry["coordinates"])
+        snapped = snap_lookup.get(_coordinate_key(coordinate), coordinate)
+        changed = 0 if _same_coordinate(snapped, coordinate) else 1
+        return {"type": "Point", "coordinates": snapped}, changed, False
+
+    coordinates = [_as_coordinate(value) for value in geometry["coordinates"]]
+    if geometry_kind == "Polygon":
+        coordinates = coordinates[:-1]
+    snapped_coordinates = [snap_lookup.get(_coordinate_key(coordinate), coordinate) for coordinate in coordinates]
+    changed_vertex_count = sum(
+        0 if _same_coordinate(original, snapped) else 1
+        for original, snapped in zip(coordinates, snapped_coordinates, strict=True)
+    )
+    deduped_coordinates: list[Coordinate] = []
+    for coordinate in snapped_coordinates:
+        if deduped_coordinates and _same_coordinate(deduped_coordinates[-1], coordinate):
+            continue
+        deduped_coordinates.append(coordinate)
+
+    if geometry_kind == "LineString":
+        if len(deduped_coordinates) < 2:
+            return geometry, changed_vertex_count, True
+        return {"type": "LineString", "coordinates": tuple(deduped_coordinates)}, changed_vertex_count, False
+
+    while len(deduped_coordinates) > 1 and _same_coordinate(deduped_coordinates[0], deduped_coordinates[-1]):
+        deduped_coordinates.pop()
+    if len(deduped_coordinates) < 3:
+        return geometry, changed_vertex_count, True
+    polygon_ring = tuple(deduped_coordinates + [deduped_coordinates[0]])
+    return {"type": "Polygon", "coordinates": polygon_ring}, changed_vertex_count, False
+
+
+def _build_linestring_info(geometry: Geometry) -> dict[str, Any]:
+    coordinates = tuple(_as_coordinate(value) for value in geometry["coordinates"])
+    cumulative_lengths = [0.0]
+    for start, end in zip(coordinates, coordinates[1:]):
+        cumulative_lengths.append(cumulative_lengths[-1] + coordinate_distance(start, end, method="euclidean"))
+    return {
+        "coordinates": coordinates,
+        "cumulative_lengths": tuple(cumulative_lengths),
+        "total_length": cumulative_lengths[-1],
+    }
+
+
+def _locate_point_fraction_on_linestring(line_info: dict[str, Any], point: Coordinate) -> float:
+    coordinates: Sequence[Coordinate] = line_info["coordinates"]
+    cumulative_lengths: Sequence[float] = line_info["cumulative_lengths"]
+    total_length = float(line_info["total_length"])
+    if total_length <= 0.0:
+        return 0.0
+    for segment_index, (start, end) in enumerate(zip(coordinates, coordinates[1:])):
+        if not _point_on_segment(point, start, end):
+            continue
+        segment_length = coordinate_distance(start, end, method="euclidean")
+        if segment_length <= 0.0:
+            return cumulative_lengths[segment_index] / total_length
+        distance_to_point = coordinate_distance(start, point, method="euclidean")
+        return (cumulative_lengths[segment_index] + distance_to_point) / total_length
+    raise ValueError("point does not lie on the input linestring")
+
+
+def _line_segment_records(rows: Sequence[Record], geometry_column: str) -> list[dict[str, Any]]:
+    segment_records: list[dict[str, Any]] = []
+    for row_index, row in enumerate(rows):
+        coordinates = tuple(_as_coordinate(value) for value in row[geometry_column]["coordinates"])
+        for segment_index, (start, end) in enumerate(zip(coordinates, coordinates[1:])):
+            segment_records.append(
+                {
+                    "source_index": row_index,
+                    "segment_index": segment_index,
+                    "start": start,
+                    "end": end,
+                    "bounds": (
+                        min(start[0], end[0]),
+                        min(start[1], end[1]),
+                        max(start[0], end[0]),
+                        max(start[1], end[1]),
+                    ),
+                }
+            )
+    return segment_records
+
+
+def _register_cut_point(points: dict[str, Coordinate], point: Coordinate) -> bool:
+    point_key = _coordinate_key(point)
+    if point_key in points:
+        return False
+    points[point_key] = point
+    return True
+
+
+def _clean_geometry(
+    original_geometry: Geometry,
+    working_geometry: Geometry,
+    min_segment_length: float,
+) -> tuple[Geometry, dict[str, Any]]:
+    geometry_kind = geometry_type(working_geometry)
+    input_vertex_count = len(geometry_vertices(original_geometry))
+    if geometry_kind == "Point":
+        changed = not _same_coordinate(_as_coordinate(original_geometry["coordinates"]), _as_coordinate(working_geometry["coordinates"]))
+        return working_geometry, {
+            "changed": changed,
+            "removed_vertex_count": 0,
+            "removed_short_segment_count": 0,
+            "input_vertex_count": 1,
+            "output_vertex_count": 1,
+            "collapsed": False,
+        }
+
+    coordinates = [_as_coordinate(value) for value in working_geometry["coordinates"]]
+    is_polygon = geometry_kind == "Polygon"
+    if is_polygon:
+        coordinates = coordinates[:-1]
+        input_vertex_count -= 1
+
+    deduped_coordinates: list[Coordinate] = []
+    for coordinate in coordinates:
+        if deduped_coordinates and _same_coordinate(deduped_coordinates[-1], coordinate):
+            continue
+        deduped_coordinates.append(coordinate)
+
+    cleaned_coordinates = [deduped_coordinates[0]] if deduped_coordinates else []
+    removed_short_segment_count = 0
+    for coordinate in deduped_coordinates[1:]:
+        if coordinate_distance(cleaned_coordinates[-1], coordinate, method="euclidean") < min_segment_length:
+            removed_short_segment_count += 1
+            continue
+        cleaned_coordinates.append(coordinate)
+
+    collapsed = False
+    if geometry_kind == "LineString":
+        if len(cleaned_coordinates) < 2:
+            collapsed = True
+            cleaned_geometry = original_geometry
+            output_vertex_count = len(geometry_vertices(original_geometry))
+        else:
+            cleaned_geometry = {"type": "LineString", "coordinates": tuple(cleaned_coordinates)}
+            output_vertex_count = len(cleaned_coordinates)
+    else:
+        while len(cleaned_coordinates) > 1 and _same_coordinate(cleaned_coordinates[0], cleaned_coordinates[-1]):
+            cleaned_coordinates.pop()
+        if len(cleaned_coordinates) < 3:
+            collapsed = True
+            cleaned_geometry = original_geometry
+            output_vertex_count = len(geometry_vertices(original_geometry)) - 1
+        else:
+            cleaned_geometry = {"type": "Polygon", "coordinates": tuple(cleaned_coordinates + [cleaned_coordinates[0]])}
+            output_vertex_count = len(cleaned_coordinates)
+
+    return cleaned_geometry, {
+        "changed": collapsed or cleaned_geometry != original_geometry,
+        "removed_vertex_count": max(0, input_vertex_count - output_vertex_count),
+        "removed_short_segment_count": removed_short_segment_count,
+        "input_vertex_count": input_vertex_count,
+        "output_vertex_count": output_vertex_count,
+        "collapsed": collapsed,
+    }
 
 
 def _is_coordinate_value(value: Any) -> bool:

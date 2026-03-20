@@ -529,6 +529,134 @@ def test_hotspot_grid_supports_runtime_diagnostics() -> None:
     assert "pruning_ratio_hotspot" in record
 
 
+def test_snap_geometries_snaps_nearby_vertices_deterministically() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "point-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "point-b", "geometry": {"type": "Point", "coordinates": [0.03, 0.0]}},
+            {"site_id": "line-a", "geometry": {"type": "LineString", "coordinates": [[0.03, 0.0], [1.0, 0.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    snapped = frame.snap_geometries(tolerance=0.05, include_diagnostics=True)
+    records = snapped.to_records()
+
+    assert records[0]["geometry"]["coordinates"] == (0.0, 0.0)
+    assert records[1]["geometry"]["coordinates"] == (0.0, 0.0)
+    assert records[2]["geometry"]["coordinates"][0] == (0.0, 0.0)
+    assert records[1]["changed_snap"] is True
+    assert records[2]["changed_vertex_count_snap"] == 1
+    assert records[0]["unique_vertex_count_snap"] == 3
+
+
+def test_clean_topology_removes_duplicate_vertices_and_short_segments() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {
+                "site_id": "route-a",
+                "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [1.0, 0.0], [1.0, 0.0], [1.02, 0.0], [2.0, 0.0]]},
+            },
+            {
+                "site_id": "zone-a",
+                "geometry": {"type": "Polygon", "coordinates": [[0.0, 0.0], [2.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    cleaned = frame.clean_topology(min_segment_length=0.05, include_diagnostics=True)
+    records = cleaned.to_records()
+
+    assert records[0]["geometry"]["coordinates"] == ((0.0, 0.0), (1.0, 0.0), (2.0, 0.0))
+    assert records[0]["removed_short_segment_count_clean"] == 1
+    assert records[0]["removed_vertex_count_clean"] == 2
+    assert records[1]["geometry"]["coordinates"] == ((0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 0.0))
+    assert records[1]["output_vertex_count_clean"] == 4
+
+
+def test_line_split_splits_line_by_point_splitters() -> None:
+    lines = GeoPromptFrame.from_records(
+        [
+            {"site_id": "route-a", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [4.0, 0.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+    splitters = GeoPromptFrame.from_records(
+        [
+            {"cut_id": "cut-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"cut_id": "cut-2", "geometry": {"type": "Point", "coordinates": [3.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    split = lines.line_split(splitters, splitter_id_column="cut_id", split_at_intersections=False, include_diagnostics=True)
+    records = split.to_records()
+
+    assert len(records) == 3
+    assert [record["part_index_split"] for record in records] == [1, 2, 3]
+    assert [record["geometry"]["coordinates"] for record in records] == [
+        ((0.0, 0.0), (1.0, 0.0)),
+        ((1.0, 0.0), (3.0, 0.0)),
+        ((3.0, 0.0), (4.0, 0.0)),
+    ]
+    assert records[0]["part_count_split"] == 3
+    assert records[0]["splitter_ids_split"] == ["cut-1", "cut-2"]
+    assert records[0]["point_splitter_count_split"] == 2
+
+
+def test_line_split_splits_lines_at_intersections() -> None:
+    lines = GeoPromptFrame.from_records(
+        [
+            {"site_id": "horizontal", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [2.0, 0.0]]}},
+            {"site_id": "vertical", "geometry": {"type": "LineString", "coordinates": [[1.0, -1.0], [1.0, 1.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    split = lines.line_split(include_diagnostics=True)
+    records = split.to_records()
+
+    assert len(records) == 4
+    assert [record["part_count_split"] for record in records if record["site_id"] == "horizontal"] == [2, 2]
+    assert [record["part_count_split"] for record in records if record["site_id"] == "vertical"] == [2, 2]
+    assert any(record["self_intersection_count_split"] == 1 for record in records)
+    assert {record["geometry"]["coordinates"] for record in records} == {
+        ((0.0, 0.0), (1.0, 0.0)),
+        ((1.0, 0.0), (2.0, 0.0)),
+        ((1.0, -1.0), (1.0, 0.0)),
+        ((1.0, 0.0), (1.0, 1.0)),
+    }
+
+
+def test_overlay_union_partitions_polygon_faces_with_lineage() -> None:
+    left = GeoPromptFrame.from_records(
+        [
+            {"region_id": "left-a", "geometry": {"type": "Polygon", "coordinates": [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+    right = GeoPromptFrame.from_records(
+        [
+            {"zone_id": "right-a", "geometry": {"type": "Polygon", "coordinates": [[1.0, 0.0], [3.0, 0.0], [3.0, 2.0], [1.0, 2.0], [1.0, 0.0]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    union = left.overlay_union(right, left_id_column="region_id", right_id_column="zone_id", rsuffix="right")
+    records = sorted(union.to_records(), key=lambda item: (item["source_side_union"], item["area_union"]))
+
+    assert len(records) == 3
+    assert [record["source_side_union"] for record in records] == ["both", "left", "right"]
+    assert records[0]["region_ids_union"] == ["left-a"]
+    assert records[0]["zone_ids_union"] == ["right-a"]
+    assert records[0]["area_union"] == 2.0
+    assert records[1]["region_ids_union"] == ["left-a"]
+    assert records[1]["zone_ids_union"] == []
+    assert records[2]["region_ids_union"] == []
+    assert records[2]["zone_ids_union"] == ["right-a"]
+
+
 def test_network_build_splits_lines_at_intersections() -> None:
     lines = GeoPromptFrame.from_records(
         [
@@ -1670,8 +1798,12 @@ def test_comparison_report_benchmarks_new_methods() -> None:
     assert "benchmark.geoprompt.overlay_summary_grouped" in benchmark_ops
     assert "sample.geoprompt.summarize_clusters" in benchmark_ops
     assert "benchmark.geoprompt.overlay_group_comparison" in benchmark_ops
+    assert "benchmark.geoprompt.overlay_union" in benchmark_ops
     assert "benchmark.geoprompt.corridor_diagnostics" in benchmark_ops
     assert "benchmark.geoprompt.network_build" in benchmark_ops
+    assert "sample.geoprompt.snap_geometries" in benchmark_ops
+    assert "sample.geoprompt.clean_topology" in benchmark_ops
+    assert "benchmark.geoprompt.line_split" in benchmark_ops
     assert "benchmark.geoprompt.shortest_path" in benchmark_ops
     assert "benchmark.geoprompt.service_area" in benchmark_ops
     assert "benchmark.geoprompt.location_allocate" in benchmark_ops

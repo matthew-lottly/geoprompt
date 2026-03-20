@@ -422,6 +422,8 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         (f"{case.name}.geoprompt.centroid_cluster", lambda: frame.centroid_cluster(k=min(3, len(frame)))),
         (f"{case.name}.geoprompt.cluster_diagnostics", lambda: frame.cluster_diagnostics(k_values=[1, min(2, len(frame)), min(3, len(frame))])),
         (f"{case.name}.geoprompt.summarize_clusters", lambda: frame.centroid_cluster(k=min(3, len(frame))).summarize_clusters()),
+        (f"{case.name}.geoprompt.snap_geometries", lambda: frame.snap_geometries(tolerance=0.005)),
+        (f"{case.name}.geoprompt.clean_topology", lambda: frame.clean_topology(tolerance=0.005, min_segment_length=0.001)),
     ]:
         benchmark, _ = _benchmark(operation, func)
         benchmarks.append(benchmark)
@@ -492,6 +494,15 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             lambda: frame.overlay_group_comparison(regions, group_by="region_band", right_id_column="region_id"),
         )
         benchmarks.append(benchmark)
+        benchmark, _ = _benchmark(
+            f"{case.name}.geoprompt.overlay_union",
+            lambda: regions.overlay_union(
+                regions.query_bounds(min_x=case.query_bounds[0], min_y=case.query_bounds[1], max_x=case.query_bounds[2], max_y=case.query_bounds[3]),
+                left_id_column="region_id",
+                right_id_column="region_id",
+            ),
+        )
+        benchmarks.append(benchmark)
 
         corridor_rows = [row for row in frame.to_records() if row["geometry"]["type"] == "LineString"]
         if corridor_rows:
@@ -510,6 +521,11 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             benchmark, _ = _benchmark(
                 f"{case.name}.geoprompt.corridor_diagnostics",
                 lambda: frame.corridor_diagnostics(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
+            )
+            benchmarks.append(benchmark)
+            benchmark, _ = _benchmark(
+                f"{case.name}.geoprompt.line_split",
+                lambda: corridor_frame.line_split(split_at_intersections=True),
             )
             benchmarks.append(benchmark)
             if len(network_frame) > 0:

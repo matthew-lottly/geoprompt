@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.15
+
+- Added `GeoPromptFrame.snap_geometries(...)` for deterministic tolerance-based vertex snapping across point, line, and polygon workflows with optional per-row diagnostics.
+- Added `GeoPromptFrame.line_split(...)` for point-driven or intersection-driven line segmentation with stable part identifiers and splitter lineage.
+- Added `GeoPromptFrame.clean_topology(...)` for duplicate-vertex removal and short-segment pruning with optional cleanup diagnostics.
+- Added `GeoPromptFrame.overlay_union(...)` for polygon face partitioning with left/right lineage arrays, source-side classification, and area outputs.
+- Extended the comparison harness with benchmark coverage for topology cleanup, line splitting, snapping, and overlay union, then regenerated the comparison report.
+- Expanded regression coverage for snapping, topology cleanup, line splitting, polygon overlay union, and benchmark registration.
+
 ## 0.1.14
 
 - Extended `GeoPromptFrame.service_area(...)` with optional partial-edge output so reachable networks can return clipped edge segments instead of only whole-edge inclusion.
