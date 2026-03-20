@@ -112,6 +112,17 @@ def test_query_radius_returns_sorted_distance_matches() -> None:
     assert records == sorted(records, key=lambda item: (float(item["distance"]), str(item["site_id"])))
 
 
+def test_within_distance_returns_boolean_mask() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    mask = frame.within_distance(anchor="north-hub-point", max_distance=0.09, include_anchor=False)
+    matched_ids = [row["site_id"] for row, include_row in zip(frame, mask, strict=True) if include_row]
+
+    assert "north-hub-point" not in matched_ids
+    assert "central-yard-point" in matched_ids
+    assert all(isinstance(value, bool) for value in mask)
+
+
 def test_proximity_join_matches_nearby_features() -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json", crs="EPSG:4326")
 
@@ -125,6 +136,16 @@ def test_proximity_join_matches_nearby_features() -> None:
     assert all(row["distance_right"] <= 0.05 for row in joined)
     assert len(left_joined) >= len(frame)
     assert all("distance_method_right" in row for row in left_joined)
+
+
+def test_buffer_converts_points_to_polygons() -> None:
+    frame = read_points(PROJECT_ROOT / "data" / "sample_points.json", crs="EPSG:4326")
+
+    buffered = frame.buffer(distance=0.01)
+
+    assert len(buffered) == len(frame)
+    assert all(record["geometry"]["type"] == "Polygon" for record in buffered)
+    assert all(record["site_id"] for record in buffered)
 
 
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:

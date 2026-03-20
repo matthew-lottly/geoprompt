@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, spatial joins, proximity joins, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, buffer, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -26,9 +26,11 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Basic nearest-neighbor analysis for point, line, and polygon centroids
 - Bounding-box queries for quick map-window style filtering
 - Radius queries for fast proximity filtering around a feature or coordinate anchor
+- Within-distance predicates for scoring or filtering without materializing a join
 - CRS assignment and reprojection through `GeoPromptFrame.to_crs(...)`
 - Spatial joins with `intersects`, `within`, and `contains` predicates
 - Proximity joins for distance-based matching without needing an overlay engine
+- Buffer generation for point, line, and polygon geometries through the overlay engine
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
 - Geographic distance support for longitude/latitude point workflows through haversine distance
@@ -95,6 +97,20 @@ proximity = regions.proximity_join(assets, max_distance=0.08)
 
 print(nearby.head(3))
 print(proximity.head(3))
+```
+
+Buffer and within-distance example:
+
+```python
+import geoprompt as gp
+
+assets = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+
+mask = assets.within_distance(anchor="north-hub-point", max_distance=0.08)
+buffers = assets.buffer(distance=0.01)
+
+print(mask)
+print(buffers.head(2))
 ```
 
 Overlay example:
@@ -263,8 +279,10 @@ The main package entry points are:
 - `GeoPromptFrame.nearest_neighbors(...)`
 - `GeoPromptFrame.query_bounds(...)`
 - `GeoPromptFrame.query_radius(...)`
+- `GeoPromptFrame.within_distance(...)`
 - `GeoPromptFrame.spatial_join(...)`
 - `GeoPromptFrame.proximity_join(...)`
+- `GeoPromptFrame.buffer(...)`
 - `GeoPromptFrame.dissolve(...)`
 - `GeoPromptFrame.clip(...)`
 - `GeoPromptFrame.overlay_intersections(...)`
@@ -302,9 +320,9 @@ Current validated snapshot from the built-in corpora:
 
 Representative relative speed ratios from the latest comparison report:
 
-- `sample` corpus: geometry metrics `6.59x`, nearest neighbors `7.27x`, bounds query `47.84x`, reprojection `1.84x`
-- `benchmark` corpus: geometry metrics `5.65x`, nearest neighbors `4.63x`, bounds query `23.00x`, reprojection `1.33x`, clip `0.77x`, spatial join `0.54x`, dissolve `13.45x`
-- `stress` corpus: geometry metrics `3.20x`, nearest neighbors `6.01x`, bounds query `5.20x`, reprojection `0.87x`, clip `0.70x`, spatial join `1.94x`, dissolve `5.38x`
+- `sample` corpus: geometry metrics `6.58x`, nearest neighbors `4.47x`, bounds query `36.55x`, reprojection `1.68x`
+- `benchmark` corpus: geometry metrics `4.83x`, nearest neighbors `2.54x`, bounds query `16.12x`, reprojection `1.93x`, clip `0.45x`, spatial join `0.61x`, dissolve `23.47x`
+- `stress` corpus: geometry metrics `3.44x`, nearest neighbors `5.10x`, bounds query `3.33x`, reprojection `0.91x`, clip `0.68x`, spatial join `2.97x`, dissolve `8.11x`
 
 ## Release Readiness
 

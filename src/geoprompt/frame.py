@@ -6,7 +6,7 @@ from typing import Any, Iterable, Literal, Sequence
 
 from .equations import area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
-from .overlay import clip_geometries, dissolve_geometries, overlay_intersections
+from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
 
 
 Record = dict[str, Any]
@@ -181,6 +181,28 @@ class GeoPromptFrame:
         rows.sort(key=lambda item: (float(item["distance"]), str(item.get(id_column, ""))))
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
+    def within_distance(
+        self,
+        anchor: str | Geometry | Coordinate,
+        max_distance: float,
+        id_column: str = "site_id",
+        include_anchor: bool = False,
+        distance_method: str = "euclidean",
+    ) -> list[bool]:
+        if max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+
+        anchor_geometry, anchor_id = self._resolve_anchor_geometry(anchor, id_column=id_column)
+        anchor_centroid = geometry_centroid(anchor_geometry)
+        centroids = self._centroids()
+
+        return [
+            False
+            if anchor_id is not None and not include_anchor and id_column in row and str(row[id_column]) == anchor_id
+            else coordinate_distance(anchor_centroid, centroid, method=distance_method) <= max_distance
+            for row, centroid in zip(self._rows, centroids, strict=True)
+        ]
+
     def proximity_join(
         self,
         other: "GeoPromptFrame",
@@ -236,6 +258,20 @@ class GeoPromptFrame:
                 joined_rows.append(merged_row)
 
         return GeoPromptFrame(rows=joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
+    def buffer(self, distance: float, resolution: int = 16) -> "GeoPromptFrame":
+        buffered_groups = buffer_geometries(
+            [row[self.geometry_column] for row in self._rows],
+            distance=distance,
+            resolution=resolution,
+        )
+        rows: list[Record] = []
+        for row, buffered_geometries in zip(self._rows, buffered_groups, strict=True):
+            for buffered_geometry in buffered_geometries:
+                buffered_row = dict(row)
+                buffered_row[self.geometry_column] = buffered_geometry
+                rows.append(buffered_row)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def query_bounds(
         self,

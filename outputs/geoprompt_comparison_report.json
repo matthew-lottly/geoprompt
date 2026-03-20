@@ -100,58 +100,58 @@
       "benchmarks": [
         {
           "operation": "sample.geoprompt.geometry_metrics",
-          "median_seconds": 7.6299998909235e-05,
-          "min_seconds": 6.709998706355691e-05,
-          "max_seconds": 0.00019530003191903234,
+          "median_seconds": 2.8499984182417393e-05,
+          "min_seconds": 2.7999980375170708e-05,
+          "max_seconds": 5.519995465874672e-05,
           "repeats": 20
         },
         {
           "operation": "sample.reference.geometry_metrics",
-          "median_seconds": 0.0005030999891459942,
-          "min_seconds": 0.0003092000260949135,
-          "max_seconds": 0.0009670999716036022,
+          "median_seconds": 0.0001874500303529203,
+          "min_seconds": 0.00017659994773566723,
+          "max_seconds": 0.000264400034211576,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.nearest_neighbors",
-          "median_seconds": 5.9349986258894205e-05,
-          "min_seconds": 5.3099996875971556e-05,
-          "max_seconds": 0.00013099994976073503,
+          "median_seconds": 5.045003490522504e-05,
+          "min_seconds": 4.930002614855766e-05,
+          "max_seconds": 7.870001718401909e-05,
           "repeats": 20
         },
         {
           "operation": "sample.reference.nearest_neighbors",
-          "median_seconds": 0.0004313999670557678,
-          "min_seconds": 0.00024800002574920654,
-          "max_seconds": 0.000964100006967783,
+          "median_seconds": 0.00022549997083842754,
+          "min_seconds": 0.00021109997760504484,
+          "max_seconds": 0.0002549999626353383,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.query_bounds",
-          "median_seconds": 1.9350001821294427e-05,
-          "min_seconds": 1.6900012269616127e-05,
-          "max_seconds": 6.559997564181685e-05,
+          "median_seconds": 1.775001874193549e-05,
+          "min_seconds": 1.650000922381878e-05,
+          "max_seconds": 4.9600028432905674e-05,
           "repeats": 20
         },
         {
           "operation": "sample.reference.query_bounds",
-          "median_seconds": 0.0009256500052288175,
-          "min_seconds": 0.0006652000010944903,
-          "max_seconds": 0.004415900039020926,
+          "median_seconds": 0.0006486999918706715,
+          "min_seconds": 0.0005834000185132027,
+          "max_seconds": 0.004665799904614687,
           "repeats": 20
         },
         {
           "operation": "sample.geoprompt.to_crs",
-          "median_seconds": 0.0009353499917779118,
-          "min_seconds": 0.0005722000496461987,
-          "max_seconds": 0.0015272999880835414,
+          "median_seconds": 0.0005525499582290649,
+          "min_seconds": 0.0005152999656274915,
+          "max_seconds": 0.0015545999631285667,
           "repeats": 20
         },
         {
           "operation": "sample.reference.to_crs",
-          "median_seconds": 0.0017205500043928623,
-          "min_seconds": 0.0009179000044241548,
-          "max_seconds": 0.002653100003954023,
+          "median_seconds": 0.0009273000760003924,
+          "min_seconds": 0.0008221000898629427,
+          "max_seconds": 0.003636200097389519,
           "repeats": 20
         }
       ]
@@ -313,100 +313,100 @@
       "benchmarks": [
         {
           "operation": "benchmark.geoprompt.geometry_metrics",
-          "median_seconds": 4.705000901594758e-05,
-          "min_seconds": 4.529999569058418e-05,
-          "max_seconds": 0.0005813000025227666,
+          "median_seconds": 4.569999873638153e-05,
+          "min_seconds": 4.369998350739479e-05,
+          "max_seconds": 7.51999905332923e-05,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.geometry_metrics",
-          "median_seconds": 0.0002659000165294856,
-          "min_seconds": 0.00023820000933483243,
-          "max_seconds": 0.0013672999921254814,
+          "median_seconds": 0.00022054993314668536,
+          "min_seconds": 0.00021160009782761335,
+          "max_seconds": 0.00045250006951391697,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.nearest_neighbors",
-          "median_seconds": 0.00020370000856928527,
-          "min_seconds": 0.00015130004612728953,
-          "max_seconds": 0.00027819996466860175,
+          "median_seconds": 0.0003194499877281487,
+          "min_seconds": 0.00015390000771731138,
+          "max_seconds": 0.0006579000037163496,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.nearest_neighbors",
-          "median_seconds": 0.0009438999986741692,
-          "min_seconds": 0.0008005000418052077,
-          "max_seconds": 0.0025454999995417893,
+          "median_seconds": 0.0008114000083878636,
+          "min_seconds": 0.0007403000490739942,
+          "max_seconds": 0.002103599952533841,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.query_bounds",
-          "median_seconds": 4.615000216290355e-05,
-          "min_seconds": 4.449998959898949e-05,
-          "max_seconds": 8.359999628737569e-05,
+          "median_seconds": 4.2599975131452084e-05,
+          "min_seconds": 4.20999713242054e-05,
+          "max_seconds": 7.670000195503235e-05,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.query_bounds",
-          "median_seconds": 0.0010612500191200525,
-          "min_seconds": 0.0007397999870590866,
-          "max_seconds": 0.00896519998786971,
+          "median_seconds": 0.0006868999917060137,
+          "min_seconds": 0.0005912999622523785,
+          "max_seconds": 0.0026191999204456806,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.to_crs",
-          "median_seconds": 0.0007101999945007265,
-          "min_seconds": 0.0006070000235922635,
-          "max_seconds": 0.0014429999864660203,
+          "median_seconds": 0.0006155000301077962,
+          "min_seconds": 0.0005562000442296267,
+          "max_seconds": 0.003986400086432695,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.to_crs",
-          "median_seconds": 0.0009426999895367771,
-          "min_seconds": 0.0008283000206574798,
-          "max_seconds": 0.0027264999807812274,
+          "median_seconds": 0.0011909499880857766,
+          "min_seconds": 0.0008168999338522553,
+          "max_seconds": 0.0026310000102967024,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.spatial_join",
-          "median_seconds": 0.0005552000075113028,
-          "min_seconds": 0.00045089999912306666,
-          "max_seconds": 0.0014309000107459724,
+          "median_seconds": 0.0004724999889731407,
+          "min_seconds": 0.00045160006266087294,
+          "max_seconds": 0.0014980999985709786,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.spatial_join",
-          "median_seconds": 0.000298250000923872,
-          "min_seconds": 0.00029559998074546456,
-          "max_seconds": 0.0005395000334829092,
+          "median_seconds": 0.00028989999555051327,
+          "min_seconds": 0.00026809994596987963,
+          "max_seconds": 0.00043460004962980747,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.clip",
-          "median_seconds": 0.0011714500142261386,
-          "min_seconds": 0.0008888000156730413,
-          "max_seconds": 0.0027283999952487648,
+          "median_seconds": 0.0012301000533625484,
+          "min_seconds": 0.0007964000105857849,
+          "max_seconds": 0.0037010000087320805,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.clip",
-          "median_seconds": 0.0008967499888967723,
-          "min_seconds": 0.0005494999932125211,
-          "max_seconds": 0.0015072999522089958,
+          "median_seconds": 0.0005476499791257083,
+          "min_seconds": 0.0005261000478640199,
+          "max_seconds": 0.0029833000153303146,
           "repeats": 20
         },
         {
           "operation": "benchmark.geoprompt.dissolve",
-          "median_seconds": 0.0005836499913129956,
-          "min_seconds": 0.00042179995216429234,
-          "max_seconds": 0.000889900024048984,
+          "median_seconds": 0.00044585001887753606,
+          "min_seconds": 0.00041089998558163643,
+          "max_seconds": 0.0010473000584170222,
           "repeats": 20
         },
         {
           "operation": "benchmark.reference.dissolve",
-          "median_seconds": 0.007847199973184615,
-          "min_seconds": 0.006303599977400154,
-          "max_seconds": 0.020465800014790148,
+          "median_seconds": 0.0104653500020504,
+          "min_seconds": 0.006672199931927025,
+          "max_seconds": 0.013058100012131035,
           "repeats": 20
         }
       ]
@@ -1520,100 +1520,100 @@
       "benchmarks": [
         {
           "operation": "stress.geoprompt.geometry_metrics",
-          "median_seconds": 0.00026760000037029386,
-          "min_seconds": 0.00024669995764270425,
-          "max_seconds": 0.0005566999898292124,
+          "median_seconds": 0.0002668499364517629,
+          "min_seconds": 0.00025510007981210947,
+          "max_seconds": 0.0003212000010535121,
           "repeats": 20
         },
         {
           "operation": "stress.reference.geometry_metrics",
-          "median_seconds": 0.0008550999918952584,
-          "min_seconds": 0.0008061000262387097,
-          "max_seconds": 0.00206979998620227,
+          "median_seconds": 0.0009167999378405511,
+          "min_seconds": 0.0008143000304698944,
+          "max_seconds": 0.0028231999604031444,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.nearest_neighbors",
-          "median_seconds": 0.014319350011646748,
-          "min_seconds": 0.009168500022497028,
-          "max_seconds": 0.027639900043141097,
+          "median_seconds": 0.015467499964870512,
+          "min_seconds": 0.009948599967174232,
+          "max_seconds": 0.025473700021393597,
           "repeats": 20
         },
         {
           "operation": "stress.reference.nearest_neighbors",
-          "median_seconds": 0.08605600000009872,
-          "min_seconds": 0.06181210000067949,
-          "max_seconds": 0.2539025000296533,
+          "median_seconds": 0.0788960000500083,
+          "min_seconds": 0.0686299999943003,
+          "max_seconds": 0.10020359989721328,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.query_bounds",
-          "median_seconds": 0.00024595001013949513,
-          "min_seconds": 0.00021889997879043221,
-          "max_seconds": 0.0008039000094868243,
+          "median_seconds": 0.00018579995958134532,
+          "min_seconds": 0.00017909996677190065,
+          "max_seconds": 0.00023370003327727318,
           "repeats": 20
         },
         {
           "operation": "stress.reference.query_bounds",
-          "median_seconds": 0.0012795999937225133,
-          "min_seconds": 0.0007244999869726598,
-          "max_seconds": 0.0036536999978125095,
+          "median_seconds": 0.0006186999962665141,
+          "min_seconds": 0.0005828000139445066,
+          "max_seconds": 0.005415500025264919,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.to_crs",
-          "median_seconds": 0.0023695999989286065,
-          "min_seconds": 0.0015164000215008855,
-          "max_seconds": 0.0066651999950408936,
+          "median_seconds": 0.001006099977530539,
+          "min_seconds": 0.0009118999587371945,
+          "max_seconds": 0.003448600065894425,
           "repeats": 20
         },
         {
           "operation": "stress.reference.to_crs",
-          "median_seconds": 0.0020514999923761934,
-          "min_seconds": 0.0012669999850913882,
-          "max_seconds": 0.00434109999332577,
+          "median_seconds": 0.0009113500127568841,
+          "min_seconds": 0.000875400030054152,
+          "max_seconds": 0.002528799930587411,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.spatial_join",
-          "median_seconds": 0.008151450019795448,
-          "min_seconds": 0.004077599965967238,
-          "max_seconds": 0.012540100025944412,
+          "median_seconds": 0.003691549994982779,
+          "min_seconds": 0.0032900000223889947,
+          "max_seconds": 0.008455700008198619,
           "repeats": 20
         },
         {
           "operation": "stress.reference.spatial_join",
-          "median_seconds": 0.015785149967996404,
-          "min_seconds": 0.010947000002488494,
-          "max_seconds": 0.025629699986893684,
+          "median_seconds": 0.010968849994242191,
+          "min_seconds": 0.008134300005622208,
+          "max_seconds": 0.014850800042040646,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.clip",
-          "median_seconds": 0.008795850008027628,
-          "min_seconds": 0.006193899956997484,
-          "max_seconds": 0.015467100020032376,
+          "median_seconds": 0.006254050007555634,
+          "min_seconds": 0.004460599971935153,
+          "max_seconds": 0.011762000038288534,
           "repeats": 20
         },
         {
           "operation": "stress.reference.clip",
-          "median_seconds": 0.006123049999587238,
-          "min_seconds": 0.004772700020112097,
-          "max_seconds": 0.011085100006312132,
+          "median_seconds": 0.0042426500003784895,
+          "min_seconds": 0.003702599904499948,
+          "max_seconds": 0.011869999929331243,
           "repeats": 20
         },
         {
           "operation": "stress.geoprompt.dissolve",
-          "median_seconds": 0.0023338000173680484,
-          "min_seconds": 0.0016988000134006143,
-          "max_seconds": 0.004947000008542091,
+          "median_seconds": 0.0014127500471659005,
+          "min_seconds": 0.0013028000248596072,
+          "max_seconds": 0.004078099969774485,
           "repeats": 20
         },
         {
           "operation": "stress.reference.dissolve",
-          "median_seconds": 0.012557749985717237,
-          "min_seconds": 0.009482100023888052,
-          "max_seconds": 0.015870300005190074,
+          "median_seconds": 0.0114542999654077,
+          "min_seconds": 0.007538900012150407,
+          "max_seconds": 0.01325020007789135,
           "repeats": 20
         }
       ]
