@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from geoprompt.compare import _stress_feature_records, _stress_region_records
-from geoprompt import geometry_centroid
+from geoprompt import GeoPromptFrame, geometry_centroid
 from geoprompt.demo import build_demo_report
 from geoprompt.equations import area_similarity, corridor_strength, directional_alignment, euclidean_distance, haversine_distance, prompt_decay, prompt_interaction
 from geoprompt.io import frame_to_geojson, read_features, read_geojson, read_points, write_geojson
@@ -146,6 +146,64 @@ def test_buffer_converts_points_to_polygons() -> None:
     assert len(buffered) == len(frame)
     assert all(record["geometry"]["type"] == "Polygon" for record in buffered)
     assert all(record["site_id"] for record in buffered)
+
+
+def test_buffer_join_extends_point_reach_to_polygon() -> None:
+    service_points = GeoPromptFrame.from_records(
+        [{"site_id": "anchor", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}}],
+        crs="EPSG:4326",
+    )
+    polygons = GeoPromptFrame.from_records(
+        [{
+            "region_id": "near-zone",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0.04, -0.01], [0.06, -0.01], [0.06, 0.01], [0.04, 0.01]]],
+            },
+        }],
+        crs="EPSG:4326",
+    )
+
+    joined = service_points.buffer_join(polygons, distance=0.05)
+
+    assert len(joined) == 1
+    assert joined.head(1)[0]["region_id"] == "near-zone"
+    assert joined.head(1)[0]["buffer_distance_left"] == 0.05
+
+
+def test_coverage_summary_counts_and_aggregates_matches() -> None:
+    service_areas = GeoPromptFrame.from_records(
+        [
+            {
+                "zone_id": "north-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]]},
+            },
+            {
+                "zone_id": "south-zone",
+                "geometry": {"type": "Polygon", "coordinates": [[[0.0, -1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 0.0]]]},
+            },
+        ],
+        crs="EPSG:4326",
+    )
+    assets = GeoPromptFrame.from_records(
+        [
+            {"site_id": "a", "demand_index": 2.0, "geometry": {"type": "Point", "coordinates": [0.25, 0.25]}},
+            {"site_id": "b", "demand_index": 3.0, "geometry": {"type": "Point", "coordinates": [0.75, 0.25]}},
+            {"site_id": "c", "demand_index": 5.0, "geometry": {"type": "Point", "coordinates": [0.75, -0.25]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    summary = service_areas.coverage_summary(assets, aggregations={"demand_index": "sum"})
+    records = sorted(summary.to_records(), key=lambda item: item["zone_id"])
+
+    assert records[0]["zone_id"] == "north-zone"
+    assert records[0]["count_covered"] == 2
+    assert records[0]["demand_index_sum_covered"] == 5.0
+    assert records[0]["site_ids_covered"] == ["a", "b"]
+    assert records[1]["zone_id"] == "south-zone"
+    assert records[1]["count_covered"] == 1
+    assert records[1]["demand_index_sum_covered"] == 5.0
 
 
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:

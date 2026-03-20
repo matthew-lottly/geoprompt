@@ -102,6 +102,35 @@ class GeoPromptFrame:
             return anchor_row[self.geometry_column], anchor
         return normalize_geometry(anchor), None
 
+    def _aggregate_rows(
+        self,
+        rows: Sequence[Record],
+        aggregations: dict[str, AggregationName] | None,
+        suffix: str,
+    ) -> dict[str, Any]:
+        aggregate_values: dict[str, Any] = {}
+        for column, operation in (aggregations or {}).items():
+            values = [row[column] for row in rows if column in row and row[column] is not None]
+            output_name = f"{column}_{operation}_{suffix}"
+            if not values:
+                aggregate_values[output_name] = None
+                continue
+            if operation == "sum":
+                aggregate_values[output_name] = sum(float(value) for value in values)
+            elif operation == "mean":
+                aggregate_values[output_name] = sum(float(value) for value in values) / len(values)
+            elif operation == "min":
+                aggregate_values[output_name] = min(values)
+            elif operation == "max":
+                aggregate_values[output_name] = max(values)
+            elif operation == "first":
+                aggregate_values[output_name] = values[0]
+            elif operation == "count":
+                aggregate_values[output_name] = len(values)
+            else:
+                raise ValueError(f"unsupported aggregation: {operation}")
+        return aggregate_values
+
     def distance_matrix(self, distance_method: str = "euclidean") -> list[list[float]]:
         return [
             [
@@ -272,6 +301,113 @@ class GeoPromptFrame:
                 buffered_row[self.geometry_column] = buffered_geometry
                 rows.append(buffered_row)
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def buffer_join(
+        self,
+        other: "GeoPromptFrame",
+        distance: float,
+        how: SpatialJoinMode = "inner",
+        lsuffix: str = "left",
+        rsuffix: str = "right",
+        resolution: int = 16,
+    ) -> "GeoPromptFrame":
+        if distance < 0:
+            raise ValueError("distance must be zero or greater")
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before buffer joins")
+
+        right_rows = list(other._rows)
+        right_columns = [column for column in other.columns if column != other.geometry_column]
+        right_bounds = [geometry_bounds(row[other.geometry_column]) for row in right_rows]
+        buffered_groups = buffer_geometries(
+            [row[self.geometry_column] for row in self._rows],
+            distance=distance,
+            resolution=resolution,
+        )
+
+        joined_rows: list[Record] = []
+        for left_row, buffered_geometries in zip(self._rows, buffered_groups, strict=True):
+            row_matches: list[tuple[Record, Geometry]] = []
+            for buffered_geometry in buffered_geometries:
+                buffered_bounds = geometry_bounds(buffered_geometry)
+                for right_row, right_bound in zip(right_rows, right_bounds, strict=True):
+                    if not _bounds_intersect(buffered_bounds, right_bound):
+                        continue
+                    if geometry_intersects(buffered_geometry, right_row[other.geometry_column]):
+                        row_matches.append((right_row, buffered_geometry))
+
+            if not row_matches and how == "left":
+                merged_row = dict(left_row)
+                merged_row[f"buffer_geometry_{lsuffix}"] = None
+                merged_row[f"buffer_distance_{lsuffix}"] = distance
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = None
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = None
+                joined_rows.append(merged_row)
+
+            for right_row, buffered_geometry in row_matches:
+                merged_row = dict(left_row)
+                merged_row[f"buffer_geometry_{lsuffix}"] = buffered_geometry
+                merged_row[f"buffer_distance_{lsuffix}"] = distance
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = right_row[column]
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = right_row[other.geometry_column]
+                joined_rows.append(merged_row)
+
+        return GeoPromptFrame(rows=joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
+    def coverage_summary(
+        self,
+        targets: "GeoPromptFrame",
+        predicate: SpatialJoinPredicate = "intersects",
+        target_id_column: str = "site_id",
+        aggregations: dict[str, AggregationName] | None = None,
+        rsuffix: str = "covered",
+    ) -> "GeoPromptFrame":
+        if self.crs and targets.crs and self.crs != targets.crs:
+            raise ValueError("frames must share the same CRS before coverage summaries")
+        if predicate not in {"intersects", "within", "contains"}:
+            raise ValueError(f"unsupported spatial join predicate: {predicate}")
+
+        targets._require_column(target_id_column)
+        target_rows = list(targets._rows)
+        target_bounds = [geometry_bounds(row[targets.geometry_column]) for row in target_rows]
+        predicate_bounds_filter = {
+            "intersects": _bounds_intersect,
+            "within": _bounds_within,
+            "contains": lambda left, right: _bounds_within(right, left),
+        }
+
+        def matches(left_geometry: Geometry, right_geometry: Geometry) -> bool:
+            if predicate == "intersects":
+                return geometry_intersects(left_geometry, right_geometry)
+            if predicate == "within":
+                return geometry_within(left_geometry, right_geometry)
+            return geometry_contains(left_geometry, right_geometry)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            left_geometry = row[self.geometry_column]
+            left_bounds = geometry_bounds(left_geometry)
+            matched_rows: list[Record] = []
+            for target_row, target_bound in zip(target_rows, target_bounds, strict=True):
+                if not predicate_bounds_filter[predicate](left_bounds, target_bound):
+                    continue
+                if matches(left_geometry, target_row[targets.geometry_column]):
+                    matched_rows.append(target_row)
+
+            resolved_row = dict(row)
+            resolved_row[f"{target_id_column}s_{rsuffix}"] = [str(item[target_id_column]) for item in matched_rows]
+            resolved_row[f"count_{rsuffix}"] = len(matched_rows)
+            resolved_row[f"predicate_{rsuffix}"] = predicate
+            resolved_row.update(self._aggregate_rows(matched_rows, aggregations=aggregations, suffix=rsuffix))
+            rows.append(resolved_row)
+
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or targets.crs)
 
     def query_bounds(
         self,

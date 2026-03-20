@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, buffer, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -31,6 +31,8 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Spatial joins with `intersects`, `within`, and `contains` predicates
 - Proximity joins for distance-based matching without needing an overlay engine
 - Buffer generation for point, line, and polygon geometries through the overlay engine
+- Buffer joins for service-area style matching against surrounding features
+- Coverage summaries for fast count and aggregate rollups per service geometry
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
 - Geographic distance support for longitude/latitude point workflows through haversine distance
@@ -111,6 +113,24 @@ buffers = assets.buffer(distance=0.01)
 
 print(mask)
 print(buffers.head(2))
+```
+
+Service-area example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+service_matches = origins.buffer_join(targets, distance=0.03)
+coverage = origins.buffer(distance=0.03).coverage_summary(
+    targets,
+    aggregations={"demand_index": "sum"},
+)
+
+print(service_matches.head(3))
+print(coverage.head(3))
 ```
 
 Overlay example:
@@ -283,6 +303,8 @@ The main package entry points are:
 - `GeoPromptFrame.spatial_join(...)`
 - `GeoPromptFrame.proximity_join(...)`
 - `GeoPromptFrame.buffer(...)`
+- `GeoPromptFrame.buffer_join(...)`
+- `GeoPromptFrame.coverage_summary(...)`
 - `GeoPromptFrame.dissolve(...)`
 - `GeoPromptFrame.clip(...)`
 - `GeoPromptFrame.overlay_intersections(...)`
@@ -320,9 +342,9 @@ Current validated snapshot from the built-in corpora:
 
 Representative relative speed ratios from the latest comparison report:
 
-- `sample` corpus: geometry metrics `6.58x`, nearest neighbors `4.47x`, bounds query `36.55x`, reprojection `1.68x`
-- `benchmark` corpus: geometry metrics `4.83x`, nearest neighbors `2.54x`, bounds query `16.12x`, reprojection `1.93x`, clip `0.45x`, spatial join `0.61x`, dissolve `23.47x`
-- `stress` corpus: geometry metrics `3.44x`, nearest neighbors `5.10x`, bounds query `3.33x`, reprojection `0.91x`, clip `0.68x`, spatial join `2.97x`, dissolve `8.11x`
+- `sample` corpus: geometry metrics `6.66x`, nearest neighbors `5.28x`, bounds query `30.28x`, reprojection `1.47x`
+- `benchmark` corpus: geometry metrics `5.10x`, nearest neighbors `5.57x`, bounds query `14.58x`, reprojection `1.38x`, clip `0.68x`, spatial join `0.60x`, dissolve `17.40x`
+- `stress` corpus: geometry metrics `3.44x`, nearest neighbors `6.50x`, bounds query `1.29x`, reprojection `1.19x`, clip `0.89x`, spatial join `2.50x`, dissolve `5.97x`
 
 ## Release Readiness
 
@@ -337,6 +359,8 @@ The project now includes:
 
 - License: [LICENSE](LICENSE)
 - Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
+- Release notes: [docs/release-notes-0.1.4.md](docs/release-notes-0.1.4.md)
 
 ## Repository Notes
 
