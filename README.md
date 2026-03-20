@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -30,6 +30,7 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - CRS assignment and reprojection through `GeoPromptFrame.to_crs(...)`
 - Spatial joins with `intersects`, `within`, and `contains` predicates
 - Proximity joins for distance-based matching without needing an overlay engine
+- Nearest joins for `k` closest matches when you want ranked association instead of a fixed distance cutoff
 - Buffer generation for point, line, and polygon geometries through the overlay engine
 - Buffer joins for service-area style matching against surrounding features
 - Coverage summaries for fast count and aggregate rollups per service geometry
@@ -99,6 +100,19 @@ proximity = regions.proximity_join(assets, max_distance=0.08)
 
 print(nearby.head(3))
 print(proximity.head(3))
+```
+
+Nearest-join example:
+
+```python
+import geoprompt as gp
+
+origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
+targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+nearest = origins.nearest_join(targets, k=2, max_distance=0.08, how="left")
+
+print(nearest.head(4))
 ```
 
 Buffer and within-distance example:
@@ -302,6 +316,7 @@ The main package entry points are:
 - `GeoPromptFrame.within_distance(...)`
 - `GeoPromptFrame.spatial_join(...)`
 - `GeoPromptFrame.proximity_join(...)`
+- `GeoPromptFrame.nearest_join(...)`
 - `GeoPromptFrame.buffer(...)`
 - `GeoPromptFrame.buffer_join(...)`
 - `GeoPromptFrame.coverage_summary(...)`

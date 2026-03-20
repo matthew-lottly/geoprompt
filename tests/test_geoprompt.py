@@ -138,6 +138,59 @@ def test_proximity_join_matches_nearby_features() -> None:
     assert all("distance_method_right" in row for row in left_joined)
 
 
+def test_nearest_join_returns_ranked_matches() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "target-2", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+            {"target_id": "target-3", "geometry": {"type": "Point", "coordinates": [11.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    joined = origins.nearest_join(targets, k=2)
+    records = joined.to_records()
+
+    assert len(records) == 4
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["nearest_rank_right"] == 1
+    assert records[1]["target_id"] == "target-2"
+    assert records[1]["nearest_rank_right"] == 2
+    assert any(record["site_id"] == "origin-b" and record["target_id"] == "target-3" and record["nearest_rank_right"] == 1 for record in records)
+
+
+def test_nearest_join_supports_max_distance_and_left_mode() -> None:
+    origins = GeoPromptFrame.from_records(
+        [
+            {"site_id": "origin-a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "origin-b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    targets = GeoPromptFrame.from_records(
+        [
+            {"target_id": "target-1", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    joined = origins.nearest_join(targets, k=1, max_distance=2.0, how="left")
+    records = sorted(joined.to_records(), key=lambda item: item["site_id"])
+
+    assert records[0]["target_id"] == "target-1"
+    assert records[0]["distance_right"] == 1.0
+    assert records[1]["target_id"] is None
+    assert records[1]["distance_right"] is None
+    assert records[1]["nearest_rank_right"] is None
+
+
 def test_buffer_converts_points_to_polygons() -> None:
     frame = read_points(PROJECT_ROOT / "data" / "sample_points.json", crs="EPSG:4326")
 

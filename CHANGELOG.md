@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Improved `nearest_neighbors(...)` so small-`k` lookups do not sort the full candidate list.
+- Added `GeoPromptFrame.nearest_join(...)` for ranked nearest-feature joins with optional `max_distance` filtering and `left` join behavior.
+
 ## 0.1.5
 
 - Optimized the Shapely-backed overlay path by caching Shapely module loading inside `overlay.py`.

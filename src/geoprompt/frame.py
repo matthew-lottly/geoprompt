@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
+from heapq import nsmallest
 from typing import Any, Iterable, Literal, Sequence
 
 from .equations import area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
@@ -17,6 +18,10 @@ AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
 
 
 Coordinate = tuple[float, float]
+
+
+def _row_sort_key(row: Record) -> str:
+    return str(row.get("site_id", row.get("region_id", "")))
 
 
 def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
@@ -56,6 +61,19 @@ class GeoPromptFrame:
     @classmethod
     def from_records(cls, records: Iterable[Record], geometry: str = "geometry", crs: str | None = None) -> "GeoPromptFrame":
         return cls(list(records), geometry_column=geometry, crs=crs)
+
+    @classmethod
+    def _from_internal_rows(
+        cls,
+        rows: Sequence[Record],
+        geometry_column: str = "geometry",
+        crs: str | None = None,
+    ) -> "GeoPromptFrame":
+        frame = cls.__new__(cls)
+        frame.geometry_column = geometry_column
+        frame.crs = crs
+        frame._rows = [dict(row) for row in rows]
+        return frame
 
     def __len__(self) -> int:
         return len(self._rows)
@@ -164,20 +182,108 @@ class GeoPromptFrame:
         nearest: list[Record] = []
         for origin_index, origin in enumerate(self._rows):
             candidates = [
-                {
-                    "origin": origin[id_column],
-                    "neighbor": destination[id_column],
-                    "distance": coordinate_distance(centroids[origin_index], centroids[destination_index], method=distance_method),
-                    "origin_geometry_type": geometry_types[origin_index],
-                    "neighbor_geometry_type": geometry_types[destination_index],
-                }
+                (
+                    destination,
+                    geometry_types[destination_index],
+                    coordinate_distance(centroids[origin_index], centroids[destination_index], method=distance_method),
+                )
                 for destination_index, destination in enumerate(self._rows)
                 if destination_index != origin_index
             ]
-            candidates.sort(key=lambda item: (float(item["distance"]), str(item["neighbor"])))
-            for rank, item in enumerate(candidates[:k], start=1):
-                nearest.append({**item, "rank": rank, "distance_method": distance_method})
+            for rank, (destination, destination_geometry_type, distance_value) in enumerate(
+                nsmallest(k, candidates, key=lambda item: (float(item[2]), _row_sort_key(item[0]))),
+                start=1,
+            ):
+                nearest.append(
+                    {
+                        "origin": origin[id_column],
+                        "neighbor": destination[id_column],
+                        "distance": distance_value,
+                        "origin_geometry_type": geometry_types[origin_index],
+                        "neighbor_geometry_type": destination_geometry_type,
+                        "rank": rank,
+                        "distance_method": distance_method,
+                    }
+                )
         return nearest
+
+    def _nearest_row_matches(
+        self,
+        origin_centroid: Coordinate,
+        right_rows: Sequence[Record],
+        right_centroids: Sequence[Coordinate],
+        k: int,
+        distance_method: str,
+        max_distance: float | None = None,
+    ) -> list[tuple[Record, float]]:
+        candidates: list[tuple[Record, float]] = []
+        for right_row, right_centroid in zip(right_rows, right_centroids, strict=True):
+            if max_distance is not None and distance_method == "euclidean":
+                if abs(origin_centroid[0] - right_centroid[0]) > max_distance or abs(origin_centroid[1] - right_centroid[1]) > max_distance:
+                    continue
+            distance_value = coordinate_distance(origin_centroid, right_centroid, method=distance_method)
+            if max_distance is None or distance_value <= max_distance:
+                candidates.append((right_row, distance_value))
+        return nsmallest(k, candidates, key=lambda item: (float(item[1]), _row_sort_key(item[0])))
+
+    def nearest_join(
+        self,
+        other: "GeoPromptFrame",
+        k: int = 1,
+        how: SpatialJoinMode = "inner",
+        lsuffix: str = "left",
+        rsuffix: str = "right",
+        max_distance: float | None = None,
+        distance_method: str = "euclidean",
+    ) -> "GeoPromptFrame":
+        if k <= 0:
+            raise ValueError("k must be greater than zero")
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if max_distance is not None and max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before nearest joins")
+
+        right_rows = list(other._rows)
+        right_columns = [column for column in other.columns if column != other.geometry_column]
+        left_centroids = self._centroids()
+        right_centroids = other._centroids()
+        joined_rows: list[Record] = []
+
+        for left_row, left_centroid in zip(self._rows, left_centroids, strict=True):
+            row_matches = self._nearest_row_matches(
+                origin_centroid=left_centroid,
+                right_rows=right_rows,
+                right_centroids=right_centroids,
+                k=k,
+                distance_method=distance_method,
+                max_distance=max_distance,
+            )
+
+            if not row_matches and how == "left":
+                merged_row = dict(left_row)
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = None
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = None
+                merged_row[f"distance_{rsuffix}"] = None
+                merged_row[f"distance_method_{rsuffix}"] = distance_method
+                merged_row[f"nearest_rank_{rsuffix}"] = None
+                joined_rows.append(merged_row)
+
+            for rank, (right_row, distance_value) in enumerate(row_matches, start=1):
+                merged_row = dict(left_row)
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = right_row[column]
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = right_row[other.geometry_column]
+                merged_row[f"distance_{rsuffix}"] = distance_value
+                merged_row[f"distance_method_{rsuffix}"] = distance_method
+                merged_row[f"nearest_rank_{rsuffix}"] = rank
+                joined_rows.append(merged_row)
+
+        return GeoPromptFrame._from_internal_rows(joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
 
     def query_radius(
         self,
@@ -286,7 +392,7 @@ class GeoPromptFrame:
                 merged_row[f"distance_method_{rsuffix}"] = distance_method
                 joined_rows.append(merged_row)
 
-        return GeoPromptFrame(rows=joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+        return GeoPromptFrame._from_internal_rows(joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
 
     def buffer(self, distance: float, resolution: int = 16) -> "GeoPromptFrame":
         buffered_groups = buffer_geometries(
