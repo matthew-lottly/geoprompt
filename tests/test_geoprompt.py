@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from geoprompt.compare import _stress_feature_records, _stress_region_records
 from geoprompt import geometry_centroid
 from geoprompt.demo import build_demo_report
 from geoprompt.equations import area_similarity, corridor_strength, directional_alignment, euclidean_distance, haversine_distance, prompt_decay, prompt_interaction
@@ -213,3 +214,16 @@ def test_build_demo_report(tmp_path: Path) -> None:
     assert report["summary"]["projected_bounds_3857"]["min_x"] < -12000000
     assert report["summary"]["valley_window_feature_count"] == 3
     assert (tmp_path / "charts" / "neighborhood-pressure-review.png").exists()
+
+
+def test_stress_corpus_generators_create_mixed_geometries() -> None:
+    feature_records = _stress_feature_records()
+    region_records = _stress_region_records()
+
+    geometry_types = {record["geometry"]["type"] for record in feature_records}
+
+    assert len(feature_records) == 93
+    assert geometry_types == {"Point", "LineString", "Polygon"}
+    assert any(record["site_id"] == "stress-remote-point" for record in feature_records)
+    assert len(region_records) == 16
+    assert {record["region_band"] for record in region_records} == {"north", "south"}
