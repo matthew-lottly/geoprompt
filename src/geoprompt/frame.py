@@ -4,7 +4,7 @@ import importlib
 from dataclasses import dataclass
 from typing import Any, Iterable, Literal, Sequence
 
-from .equations import area_similarity, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
+from .equations import area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
 from .overlay import clip_geometries, dissolve_geometries, overlay_intersections
 
@@ -88,6 +88,20 @@ class GeoPromptFrame:
         ys = [coord[1] for coord in centroids]
         return (sum(xs) / len(xs), sum(ys) / len(ys))
 
+    def _centroids(self, rows: Sequence[Record] | None = None, geometry_column: str | None = None) -> list[Coordinate]:
+        active_rows = rows if rows is not None else self._rows
+        active_geometry_column = geometry_column or self.geometry_column
+        return [geometry_centroid(row[active_geometry_column]) for row in active_rows]
+
+    def _resolve_anchor_geometry(self, anchor: str | Geometry | Coordinate, id_column: str) -> tuple[Geometry, str | None]:
+        if isinstance(anchor, str):
+            self._require_column(id_column)
+            anchor_row = next((row for row in self._rows if str(row[id_column]) == anchor), None)
+            if anchor_row is None:
+                raise KeyError(f"anchor '{anchor}' was not found in column '{id_column}'")
+            return anchor_row[self.geometry_column], anchor
+        return normalize_geometry(anchor), None
+
     def distance_matrix(self, distance_method: str = "euclidean") -> list[list[float]]:
         return [
             [
@@ -116,23 +130,112 @@ class GeoPromptFrame:
         if k <= 0:
             raise ValueError("k must be greater than zero")
 
+        centroids = self._centroids()
+        geometry_types = self.geometry_types()
         nearest: list[Record] = []
-        for origin in self._rows:
+        for origin_index, origin in enumerate(self._rows):
             candidates = [
                 {
                     "origin": origin[id_column],
                     "neighbor": destination[id_column],
-                    "distance": geometry_distance(origin[self.geometry_column], destination[self.geometry_column], method=distance_method),
-                    "origin_geometry_type": geometry_type(origin[self.geometry_column]),
-                    "neighbor_geometry_type": geometry_type(destination[self.geometry_column]),
+                    "distance": coordinate_distance(centroids[origin_index], centroids[destination_index], method=distance_method),
+                    "origin_geometry_type": geometry_types[origin_index],
+                    "neighbor_geometry_type": geometry_types[destination_index],
                 }
-                for destination in self._rows
-                if destination is not origin
+                for destination_index, destination in enumerate(self._rows)
+                if destination_index != origin_index
             ]
             candidates.sort(key=lambda item: (float(item["distance"]), str(item["neighbor"])))
             for rank, item in enumerate(candidates[:k], start=1):
                 nearest.append({**item, "rank": rank, "distance_method": distance_method})
         return nearest
+
+    def query_radius(
+        self,
+        anchor: str | Geometry | Coordinate,
+        max_distance: float,
+        id_column: str = "site_id",
+        include_anchor: bool = False,
+        distance_method: str = "euclidean",
+    ) -> "GeoPromptFrame":
+        if max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+
+        anchor_geometry, anchor_id = self._resolve_anchor_geometry(anchor, id_column=id_column)
+        anchor_centroid = geometry_centroid(anchor_geometry)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            row_id = str(row.get(id_column)) if id_column in row else None
+            distance_value = coordinate_distance(anchor_centroid, geometry_centroid(row[self.geometry_column]), method=distance_method)
+            if anchor_id is not None and not include_anchor and row_id == anchor_id:
+                continue
+            if distance_value <= max_distance:
+                resolved_row = dict(row)
+                resolved_row["distance"] = distance_value
+                resolved_row["distance_method"] = distance_method
+                if anchor_id is not None:
+                    resolved_row["anchor_id"] = anchor_id
+                rows.append(resolved_row)
+
+        rows.sort(key=lambda item: (float(item["distance"]), str(item.get(id_column, ""))))
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def proximity_join(
+        self,
+        other: "GeoPromptFrame",
+        max_distance: float,
+        how: SpatialJoinMode = "inner",
+        lsuffix: str = "left",
+        rsuffix: str = "right",
+        distance_method: str = "euclidean",
+    ) -> "GeoPromptFrame":
+        if max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before proximity joins")
+
+        right_rows = list(other._rows)
+        right_columns = [column for column in other.columns if column != other.geometry_column]
+        left_centroids = self._centroids()
+        right_centroids = other._centroids()
+        joined_rows: list[Record] = []
+
+        for left_row, left_centroid in zip(self._rows, left_centroids, strict=True):
+            row_matches: list[tuple[Record, float]] = []
+            for right_row, right_centroid in zip(right_rows, right_centroids, strict=True):
+                if distance_method == "euclidean":
+                    if abs(left_centroid[0] - right_centroid[0]) > max_distance or abs(left_centroid[1] - right_centroid[1]) > max_distance:
+                        continue
+                distance_value = coordinate_distance(left_centroid, right_centroid, method=distance_method)
+                if distance_value <= max_distance:
+                    row_matches.append((right_row, distance_value))
+
+            row_matches.sort(key=lambda item: (float(item[1]), str(item[0].get("site_id", item[0].get("region_id", "")))))
+
+            if not row_matches and how == "left":
+                merged_row = dict(left_row)
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = None
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = None
+                merged_row[f"distance_{rsuffix}"] = None
+                merged_row[f"distance_method_{rsuffix}"] = distance_method
+                joined_rows.append(merged_row)
+
+            for right_row, distance_value in row_matches:
+                merged_row = dict(left_row)
+                for column in right_columns:
+                    target_name = column if column not in merged_row else f"{column}_{rsuffix}"
+                    merged_row[target_name] = right_row[column]
+                merged_row[f"{other.geometry_column}_{rsuffix}"] = right_row[other.geometry_column]
+                merged_row[f"distance_{rsuffix}"] = distance_value
+                merged_row[f"distance_method_{rsuffix}"] = distance_method
+                joined_rows.append(merged_row)
+
+        return GeoPromptFrame(rows=joined_rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
 
     def query_bounds(
         self,

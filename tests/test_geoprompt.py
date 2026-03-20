@@ -100,6 +100,33 @@ def test_query_bounds_modes() -> None:
     ]
 
 
+def test_query_radius_returns_sorted_distance_matches() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
+
+    nearby = frame.query_radius(anchor="north-hub-point", max_distance=0.09, include_anchor=True)
+    records = nearby.to_records()
+
+    assert records[0]["site_id"] == "north-hub-point"
+    assert records[0]["distance"] == 0.0
+    assert all(record["distance"] <= 0.09 for record in records)
+    assert records == sorted(records, key=lambda item: (float(item["distance"]), str(item["site_id"])))
+
+
+def test_proximity_join_matches_nearby_features() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json", crs="EPSG:4326")
+
+    joined = frame.proximity_join(frame, max_distance=0.05, distance_method="euclidean")
+    left_joined = frame.proximity_join(frame, max_distance=0.01, how="left", distance_method="euclidean")
+
+    pairs = {f"{row['site_id']}->{row['site_id_right']}" for row in joined if row.get("site_id_right") is not None}
+
+    assert "north-hub-point->north-hub-point" in pairs
+    assert "central-yard-point->central-yard-point" in pairs
+    assert all(row["distance_right"] <= 0.05 for row in joined)
+    assert len(left_joined) >= len(frame)
+    assert all("distance_method_right" in row for row in left_joined)
+
+
 def test_read_geojson_feature_collection(tmp_path: Path) -> None:
     geojson_path = tmp_path / "feature_collection.geojson"
     payload = {
