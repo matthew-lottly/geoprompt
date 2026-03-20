@@ -21,6 +21,7 @@ ZoneGroupAggregation = Literal["max", "mean", "sum"]
 CorridorDistanceMode = Literal["direct", "network"]
 CorridorScoreMode = Literal["distance", "strength", "alignment", "combined"]
 ClusterRecommendMetric = Literal["silhouette", "sse"]
+CorridorPathAnchor = Literal["start", "end", "nearest"]
 
 
 Coordinate = tuple[float, float]
@@ -1260,6 +1261,7 @@ class GeoPromptFrame:
         score_mode: CorridorScoreMode = "distance",
         weight_column: str | None = None,
         preferred_bearing: float | None = None,
+        path_anchor: CorridorPathAnchor = "start",
         scale: float = 1.0,
         power: float = 2.0,
         reach_suffix: str = "reach",
@@ -1274,6 +1276,8 @@ class GeoPromptFrame:
             raise ValueError("distance_mode must be 'direct' or 'network'")
         if score_mode not in {"distance", "strength", "alignment", "combined"}:
             raise ValueError("score_mode must be 'distance', 'strength', 'alignment', or 'combined'")
+        if path_anchor not in {"start", "end", "nearest"}:
+            raise ValueError("path_anchor must be 'start', 'end', or 'nearest'")
         if scale <= 0:
             raise ValueError("scale must be greater than zero")
         if power <= 0:
@@ -1298,13 +1302,14 @@ class GeoPromptFrame:
                 if not corridor_vertices:
                     continue
                 min_dist, along_distance = _point_to_polyline_distance_details(left_centroid, corridor_vertices, method=distance_method)
+                corridor_length_value = _polyline_length(corridor_vertices, method=distance_method)
+                anchor_distance = _resolve_anchor_distance(along_distance, corridor_length_value, path_anchor)
                 if distance_mode == "network":
-                    min_dist = min_dist + along_distance
+                    min_dist = min_dist + anchor_distance
                 if min_dist <= max_distance:
                     matched_corridors.append(corridor_row)
                     matched_distances.append(min_dist)
 
-                    corridor_length_value = _polyline_length(corridor_vertices, method=distance_method)
                     alignment_score = None
                     if preferred_bearing is not None and len(corridor_vertices) >= 2:
                         alignment_score = (directional_alignment(corridor_vertices[0], corridor_vertices[-1], preferred_bearing) + 1.0) / 2.0
@@ -1324,6 +1329,7 @@ class GeoPromptFrame:
                             "corridor_id": str(corridor_row[corridor_id_column]),
                             "distance": min_dist,
                             "along_distance": along_distance,
+                            "anchor_distance": anchor_distance,
                             "corridor_length": corridor_length_value,
                             "alignment_score": alignment_score,
                             "score": corridor_score,
@@ -1348,6 +1354,7 @@ class GeoPromptFrame:
             resolved_row[f"distance_limit_{reach_suffix}"] = max_distance
             resolved_row[f"distance_method_{reach_suffix}"] = distance_method
             resolved_row[f"distance_mode_{reach_suffix}"] = distance_mode
+            resolved_row[f"path_anchor_{reach_suffix}"] = path_anchor
             resolved_row[f"score_mode_{reach_suffix}"] = score_mode
             resolved_row[f"corridor_scores_{reach_suffix}"] = corridor_scores
             resolved_row[f"best_corridor_{reach_suffix}"] = corridor_scores[0]["corridor_id"] if corridor_scores else None
@@ -1378,6 +1385,7 @@ class GeoPromptFrame:
         group_by: str | None = None,
         group_aggregation: ZoneGroupAggregation = "max",
         top_n: int | None = None,
+        score_callback: Any | None = None,
         score_suffix: str = "fit",
     ) -> "GeoPromptFrame":
         if max_distance is not None and max_distance < 0:
@@ -1437,6 +1445,8 @@ class GeoPromptFrame:
                 weighted_total = sum(component_scores[name] * component_weights[name] for name in component_weights)
                 total_weight = sum(component_weights.values())
                 score = weight * (weighted_total / total_weight)
+                if score_callback is not None:
+                    score = float(score_callback(left_row, zone_row, dict(component_scores), score))
 
                 zone_scores.append({
                     "zone_id": str(zone_row[zone_id_column]),
@@ -1716,6 +1726,128 @@ class GeoPromptFrame:
             return next(item for item in diagnostics if item["recommended_sse"])
         raise ValueError("metric must be 'silhouette' or 'sse'")
 
+    def summarize_clusters(
+        self,
+        cluster_column: str = "cluster_id",
+        group_by: str | None = None,
+        aggregations: dict[str, AggregationName] | None = None,
+    ) -> "GeoPromptFrame":
+        self._require_column(cluster_column)
+        if group_by is not None:
+            self._require_column(group_by)
+
+        grouped_rows: dict[int, list[Record]] = {}
+        for row in self._rows:
+            grouped_rows.setdefault(int(row[cluster_column]), []).append(row)
+
+        rows: list[Record] = []
+        for cluster_id, cluster_rows in grouped_rows.items():
+            centroid_x = sum(float(row["cluster_center"][0]) for row in cluster_rows if "cluster_center" in row) / len(cluster_rows)
+            centroid_y = sum(float(row["cluster_center"][1]) for row in cluster_rows if "cluster_center" in row) / len(cluster_rows)
+            summary_row: Record = {
+                cluster_column: cluster_id,
+                "cluster_member_count": len(cluster_rows),
+                "cluster_site_ids": [str(row.get("site_id", row.get("region_id", ""))) for row in cluster_rows],
+                "cluster_center_summary": (centroid_x, centroid_y),
+                "cluster_sse_total": sum(float(row.get("cluster_sse", 0.0)) for row in cluster_rows),
+                "cluster_mean_distance_summary": sum(float(row.get("cluster_distance", 0.0)) for row in cluster_rows) / len(cluster_rows),
+                self.geometry_column: {"type": "Point", "coordinates": (centroid_x, centroid_y)},
+            }
+            if group_by is not None:
+                group_counts: dict[str, int] = {}
+                for row in cluster_rows:
+                    group_counts[str(row[group_by])] = group_counts.get(str(row[group_by]), 0) + 1
+                summary_row[f"{group_by}_counts"] = group_counts
+                summary_row[f"dominant_{group_by}"] = max(group_counts.items(), key=lambda item: (int(item[1]), str(item[0])))[0] if group_counts else None
+            summary_row.update(self._aggregate_rows(cluster_rows, aggregations=aggregations, suffix="cluster"))
+            rows.append(summary_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def overlay_group_comparison(
+        self,
+        other: "GeoPromptFrame",
+        group_by: str,
+        right_id_column: str = "region_id",
+        normalize_by: OverlayNormalizeMode = "both",
+        comparison_suffix: str = "overlay_compare",
+    ) -> "GeoPromptFrame":
+        summary = self.overlay_summary(
+            other,
+            right_id_column=right_id_column,
+            group_by=group_by,
+            normalize_by=normalize_by,
+            how="left",
+            summary_suffix=comparison_suffix,
+        )
+
+        rows: list[Record] = []
+        for row in summary.to_records():
+            groups = list(row.get(f"groups_{comparison_suffix}", []))
+            groups.sort(key=lambda item: (-float(item["area_overlap"]), -float(item["length_overlap"]), str(item["group"])))
+            top_group = groups[0] if len(groups) >= 1 else None
+            second_group = groups[1] if len(groups) >= 2 else None
+            resolved = dict(row)
+            resolved[f"top_group_{comparison_suffix}"] = top_group["group"] if top_group else None
+            resolved[f"runner_up_group_{comparison_suffix}"] = second_group["group"] if second_group else None
+            resolved[f"area_gap_{comparison_suffix}"] = (top_group["area_overlap"] - second_group["area_overlap"]) if top_group and second_group else None
+            resolved[f"length_gap_{comparison_suffix}"] = (top_group["length_overlap"] - second_group["length_overlap"]) if top_group and second_group else None
+            resolved[f"comparison_strength_{comparison_suffix}"] = (
+                (top_group["area_overlap"] + top_group["length_overlap"]) - (second_group["area_overlap"] + second_group["length_overlap"])
+            ) if top_group and second_group else None
+            rows.append(resolved)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
+    def corridor_diagnostics(
+        self,
+        corridors: "GeoPromptFrame",
+        max_distance: float,
+        corridor_id_column: str = "site_id",
+        distance_method: str = "euclidean",
+        distance_mode: CorridorDistanceMode = "network",
+        score_mode: CorridorScoreMode = "combined",
+        path_anchor: CorridorPathAnchor = "start",
+        weight_column: str | None = None,
+        preferred_bearing: float | None = None,
+        scale: float = 1.0,
+        power: float = 2.0,
+    ) -> "GeoPromptFrame":
+        reach = self.corridor_reach(
+            corridors,
+            max_distance=max_distance,
+            corridor_id_column=corridor_id_column,
+            distance_method=distance_method,
+            distance_mode=distance_mode,
+            score_mode=score_mode,
+            weight_column=weight_column,
+            preferred_bearing=preferred_bearing,
+            path_anchor=path_anchor,
+            scale=scale,
+            power=power,
+            how="left",
+            reach_suffix="diagnostics",
+        )
+        corridor_scores_by_id: dict[str, list[Record]] = {}
+        for row in reach.to_records():
+            for item in row.get("corridor_scores_diagnostics", []):
+                corridor_scores_by_id.setdefault(str(item["corridor_id"]), []).append(item)
+
+        rows: list[Record] = []
+        for corridor_row in corridors.to_records():
+            corridor_id = str(corridor_row[corridor_id_column])
+            items = corridor_scores_by_id.get(corridor_id, [])
+            diagnostic_row = dict(corridor_row)
+            diagnostic_row["served_feature_count"] = len(items)
+            diagnostic_row["best_match_count"] = sum(1 for row in reach.to_records() if row.get("best_corridor_diagnostics") == corridor_id)
+            diagnostic_row["score_sum"] = sum(float(item["score"]) for item in items)
+            diagnostic_row["score_mean"] = (sum(float(item["score"]) for item in items) / len(items)) if items else None
+            diagnostic_row["distance_mean"] = (sum(float(item["distance"]) for item in items) / len(items)) if items else None
+            diagnostic_row["anchor_distance_mean"] = (sum(float(item["anchor_distance"]) for item in items) / len(items)) if items else None
+            diagnostic_row["path_anchor"] = path_anchor
+            diagnostic_row["distance_mode"] = distance_mode
+            diagnostic_row["score_mode"] = score_mode
+            rows.append(diagnostic_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=corridors.geometry_column, crs=self.crs or corridors.crs)
+
 
 def _resolve_zone_fit_weights(score_weights: dict[str, float] | None) -> dict[str, float]:
     default_weights = {
@@ -1842,6 +1974,14 @@ def _project_to_local_tangent_plane(point: Coordinate, vertices: Sequence[Coordi
         return (x_value, y_value)
 
     return (project(point), [project(vertex) for vertex in vertices])
+
+
+def _resolve_anchor_distance(along_distance: float, total_length: float, path_anchor: CorridorPathAnchor) -> float:
+    if path_anchor == "start":
+        return along_distance
+    if path_anchor == "end":
+        return max(0.0, total_length - along_distance)
+    return 0.0
 
 
 def _point_to_segment_distance(point: Coordinate, seg_start: Any, seg_end: Any, method: str = "euclidean") -> float:

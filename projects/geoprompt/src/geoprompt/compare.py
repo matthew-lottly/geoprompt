@@ -405,6 +405,7 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         (f"{case.name}.reference.to_crs", lambda: geopandas_frame.to_crs("EPSG:3857")),
         (f"{case.name}.geoprompt.centroid_cluster", lambda: frame.centroid_cluster(k=min(3, len(frame)))),
         (f"{case.name}.geoprompt.cluster_diagnostics", lambda: frame.cluster_diagnostics(k_values=[1, min(2, len(frame)), min(3, len(frame))])),
+        (f"{case.name}.geoprompt.summarize_clusters", lambda: frame.centroid_cluster(k=min(3, len(frame))).summarize_clusters()),
     ]:
         benchmark, _ = _benchmark(operation, func)
         benchmarks.append(benchmark)
@@ -470,12 +471,23 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         )
         benchmarks.append(benchmark)
 
+        benchmark, _ = _benchmark(
+            f"{case.name}.geoprompt.overlay_group_comparison",
+            lambda: frame.overlay_group_comparison(regions, group_by="region_band", right_id_column="region_id"),
+        )
+        benchmarks.append(benchmark)
+
         corridor_rows = [row for row in frame.to_records() if row["geometry"]["type"] == "LineString"]
         if corridor_rows:
             corridor_frame = GeoPromptFrame.from_records(corridor_rows, crs=case.crs)
             benchmark, _ = _benchmark(
                 f"{case.name}.geoprompt.corridor_reach",
                 lambda: frame.corridor_reach(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
+            )
+            benchmarks.append(benchmark)
+            benchmark, _ = _benchmark(
+                f"{case.name}.geoprompt.corridor_diagnostics",
+                lambda: frame.corridor_diagnostics(corridor_frame, max_distance=0.05, corridor_id_column="site_id"),
             )
             benchmarks.append(benchmark)
 

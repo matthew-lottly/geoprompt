@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.13
+
+- Extended `GeoPromptFrame.corridor_reach(...)` with `path_anchor` controls so network-style corridor distance can be ranked from the start, end, or nearest point along a corridor.
+- Added `GeoPromptFrame.corridor_diagnostics(...)` for per-corridor served-feature counts, best-match counts, score rollups, and anchor-distance summaries.
+- Extended `GeoPromptFrame.zone_fit_score(...)` with `score_callback` so callers can inject workflow-specific scoring logic after the standard component weighting step.
+- Added `GeoPromptFrame.summarize_clusters(...)` for per-cluster member counts, member ids, dominant groups, summary centroids, and aggregate rollups.
+- Added `GeoPromptFrame.overlay_group_comparison(...)` for top-group versus runner-up overlay gap metrics on grouped overlay summaries.
+- Added benchmark coverage for `summarize_clusters(...)`, `overlay_group_comparison(...)`, and `corridor_diagnostics(...)`.
+- Expanded regression coverage for anchor-aware corridor distance, corridor diagnostics, cluster summaries, overlay group comparison, and zone-fit callbacks.
+
 ## 0.1.12
 
 - Extended `GeoPromptFrame.corridor_reach(...)` with `distance_mode` (`direct` or `network`), corridor scoring modes, optional corridor weights, and directional alignment support.

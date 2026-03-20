@@ -9,7 +9,7 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition summaries, corridor reach with scoring and network-style distance, zone fit scoring with grouped rankings, centroid clustering with diagnostics, buffer, buffer joins, coverage summaries, overlay summaries with grouping, dissolve, clip and overlay intersections, nearest-neighbor analysis, gravity model, accessibility index, convex hull, envelope, frame utilities, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition summaries, corridor reach with scoring, anchor-aware network distance, and diagnostics, zone fit scoring with grouped rankings and callbacks, centroid clustering with diagnostics and rollups, buffer, buffer joins, coverage summaries, overlay summaries with grouping and comparison helpers, dissolve, clip and overlay intersections, nearest-neighbor analysis, gravity model, accessibility index, convex hull, envelope, frame utilities, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -40,9 +40,12 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 - Overlay summaries for overlap metrics when you need counts and shares instead of derived geometry outputs
 - Dissolve workflows with `GeoPromptFrame.dissolve(...)`
 - Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
-- Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening, scoring, and direct or network-style corridor distance
-- Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for configurable multi-factor zone matching and grouped zone rankings
+- Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening, scoring, direct or network-style corridor distance, and path-anchor-aware ranking
+- Corridor diagnostics with `GeoPromptFrame.corridor_diagnostics(...)` for per-corridor served-feature, score, and anchor-distance rollups
+- Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for configurable multi-factor zone matching, grouped zone rankings, and workflow-specific score callbacks
 - Centroid clustering with `GeoPromptFrame.centroid_cluster(...)` for deterministic spatial grouping plus cluster quality metrics and cluster-count diagnostics
+- Cluster rollups with `GeoPromptFrame.summarize_clusters(...)` for per-cluster member counts, dominant groups, and aggregate summaries
+- Overlay group comparison with `GeoPromptFrame.overlay_group_comparison(...)` for top-group and runner-up overlap gaps
 - Gravity model and accessibility index equations for interaction and access scoring
 - Geometry helpers: `geometry_convex_hull(...)`, `geometry_envelope(...)`, `GeoPromptFrame.envelopes()`, `GeoPromptFrame.convex_hulls()`
 - Frame utilities: `select(...)`, `rename_columns(...)`, `filter(...)`, `sort(...)`, `describe()`, `__repr__`, `__getitem__`
@@ -280,13 +283,33 @@ reach = assets.corridor_reach(
     max_distance=0.05,
     aggregations={"capacity_index": "sum"},
     distance_method="euclidean",
-    distance_mode="direct",
+    distance_mode="network",
+    path_anchor="nearest",
     score_mode="combined",
     weight_column="capacity_index",
     preferred_bearing=90.0,
 )
 
 print(reach.head(3))
+```
+
+Corridor-diagnostics example:
+
+```python
+import geoprompt as gp
+
+assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+corridors = assets.filter(lambda r: r["geometry"]["type"] == "LineString")
+
+diagnostics = assets.corridor_diagnostics(
+    corridors,
+    max_distance=0.05,
+    corridor_id_column="site_id",
+    path_anchor="end",
+    score_mode="combined",
+)
+
+print(diagnostics.head(3))
 ```
 
 Zone-fit-score example:
@@ -324,6 +347,7 @@ scored = features.zone_fit_score(
     group_by="region_band",
     group_aggregation="max",
     top_n=3,
+    score_callback=lambda feature, zone, components, score: score + (0.1 if zone["region_band"] == "north" else 0.0),
 )
 
 print(scored.head(3))
@@ -355,6 +379,36 @@ recommended = features.recommend_cluster_count([2, 3, 4, 5], metric="silhouette"
 
 print(diagnostics)
 print(recommended)
+```
+
+Cluster-summary example:
+
+```python
+import geoprompt as gp
+
+features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+clustered = features.centroid_cluster(k=3)
+summary = clustered.summarize_clusters(group_by="site_type", aggregations={"capacity_index": "sum"})
+
+print(summary.head(3))
+```
+
+Overlay-group comparison example:
+
+```python
+import geoprompt as gp
+
+regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
+assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+
+comparison = assets.overlay_group_comparison(
+    regions,
+    group_by="region_band",
+    right_id_column="region_id",
+)
+
+print(comparison.head(3))
 ```
 
 Frame utilities example:
