@@ -182,7 +182,7 @@ Install only overlay support if you want clip and intersection operations withou
 pip install -e .[overlay]
 ```
 
-After the package is published to a package index, the intended install command is:
+Install the published package from PyPI with:
 
 ```bash
 pip install geoprompt
@@ -266,12 +266,26 @@ geoprompt-compare
 This writes `outputs/geoprompt_comparison_report.json` with:
 
 - core metric agreement across the built-in sample and benchmark corpora
+- core metric agreement across a generated stress corpus with 93 features and 16 join regions
 - reprojection agreement against GeoPandas in EPSG:3857
 - dissolve agreement against GeoPandas on the benchmark region corpus
 - spatial-join agreement against Shapely and GeoPandas-style predicate behavior
 - nearest-neighbor agreement against a Shapely centroid-distance reference
 - bounding-box query agreement against GeoPandas
 - timing summaries for geometry metrics, reprojection, bounds queries, nearest neighbors, dissolve, clip, and joins
+
+Current validated snapshot from the built-in corpora:
+
+- correctness parity flags are all `true` for bounds, nearest neighbors, bounds queries, geometry metrics, reprojection, clip, dissolve, and spatial join
+- Geoprompt is consistently faster on geometry metrics, nearest-neighbor lookup, bounds queries, and dissolve
+- the generated stress corpus currently shows Geoprompt ahead on spatial join and still behind the reference stack on clip
+- the smaller benchmark corpus still shows clip and spatial join as the main optimization targets even after the latest bounds-prefilter pass
+
+Representative relative speed ratios from the latest comparison report:
+
+- `sample` corpus: geometry metrics `5.21x`, nearest neighbors `1.57x`, bounds query `39.70x`, reprojection `1.57x`
+- `benchmark` corpus: geometry metrics `8.92x`, nearest neighbors `1.11x`, bounds query `7.92x`, reprojection `1.15x`, clip `0.64x`, spatial join `0.77x`, dissolve `23.48x`
+- `stress` corpus: geometry metrics `1.32x`, nearest neighbors `2.25x`, bounds query `3.23x`, reprojection `1.29x`, clip `0.70x`, spatial join `2.14x`, dissolve `6.67x`
 
 ## Release Readiness
 

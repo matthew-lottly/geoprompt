@@ -19,6 +19,24 @@ AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
 Coordinate = tuple[float, float]
 
 
+def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
+    return not (
+        left[2] < right[0]
+        or left[0] > right[2]
+        or left[3] < right[1]
+        or left[1] > right[3]
+    )
+
+
+def _bounds_within(candidate: tuple[float, float, float, float], container: tuple[float, float, float, float]) -> bool:
+    return (
+        candidate[0] >= container[0]
+        and candidate[1] >= container[1]
+        and candidate[2] <= container[2]
+        and candidate[3] <= container[3]
+    )
+
+
 @dataclass(frozen=True)
 class Bounds:
     min_x: float
@@ -187,6 +205,16 @@ class GeoPromptFrame:
 
         right_columns = [column for column in other.columns if column != other.geometry_column]
         joined_rows: list[Record] = []
+        right_rows = list(other._rows)
+        right_bounds = [geometry_bounds(row[other.geometry_column]) for row in right_rows]
+
+        predicate_bounds_filter = {
+            "intersects": _bounds_intersect,
+            "within": _bounds_within,
+            "contains": lambda left, right: _bounds_within(right, left),
+        }
+        if predicate not in predicate_bounds_filter:
+            raise ValueError(f"unsupported spatial join predicate: {predicate}")
 
         def matches(left_geometry: Geometry, right_geometry: Geometry) -> bool:
             if predicate == "intersects":
@@ -198,9 +226,13 @@ class GeoPromptFrame:
             raise ValueError(f"unsupported spatial join predicate: {predicate}")
 
         for left_row in self._rows:
+            left_geometry = left_row[self.geometry_column]
+            left_bounds = geometry_bounds(left_geometry)
             row_matches = []
-            for right_row in other._rows:
-                if matches(left_row[self.geometry_column], right_row[other.geometry_column]):
+            for right_row, right_bound in zip(right_rows, right_bounds, strict=True):
+                if not predicate_bounds_filter[predicate](left_bounds, right_bound):
+                    continue
+                if matches(left_geometry, right_row[other.geometry_column]):
                     row_matches.append(right_row)
 
             if not row_matches and how == "left":
@@ -226,9 +258,10 @@ class GeoPromptFrame:
         if self.crs and mask.crs and self.crs != mask.crs:
             raise ValueError("frames must share the same CRS before clip operations")
 
+        mask_rows = list(mask)
         clipped_groups = clip_geometries(
             [row[self.geometry_column] for row in self._rows],
-            [row[mask.geometry_column] for row in mask],
+            [row[mask.geometry_column] for row in mask_rows],
         )
         rows: list[Record] = []
         for row, clipped_geometries in zip(self._rows, clipped_groups, strict=True):

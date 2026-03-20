@@ -3,7 +3,16 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-from .geometry import Geometry, geometry_type
+from .geometry import Geometry, geometry_bounds, geometry_type
+
+
+def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
+    return not (
+        left[2] < right[0]
+        or left[0] > right[2]
+        or left[3] < right[1]
+        or left[1] > right[3]
+    )
 
 
 def _load_shapely() -> tuple[Any, Any, Any]:
@@ -58,11 +67,25 @@ def geometry_from_shapely(value: Any) -> list[Geometry]:
 
 
 def clip_geometries(geometries: list[Geometry], mask_geometries: list[Geometry]) -> list[list[Geometry]]:
+    if not mask_geometries:
+        return [[] for _ in geometries]
+
     _, _, unary_union = _load_shapely()
     mask_shape = unary_union([geometry_to_shapely(geometry) for geometry in mask_geometries])
+    mask_bounds = tuple(float(value) for value in mask_shape.bounds)
     clipped: list[list[Geometry]] = []
     for geometry in geometries:
-        result = geometry_to_shapely(geometry).intersection(mask_shape)
+        if not _bounds_intersect(geometry_bounds(geometry), mask_bounds):
+            clipped.append([])
+            continue
+        source_shape = geometry_to_shapely(geometry)
+        if mask_shape.covers(source_shape):
+            clipped.append([geometry])
+            continue
+        if not mask_shape.intersects(source_shape):
+            clipped.append([])
+            continue
+        result = source_shape.intersection(mask_shape)
         clipped.append(geometry_from_shapely(result))
     return clipped
 
