@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.1.16
+
+### Bug Fixes
+- Fixed Moran's I / LISA weight normalization: `_autocorrelation_statistics` now row-standardizes weights by default (matching PySAL `transform='R'` behavior).
+- Improved kriging variogram fitting: expanded grid search range/nugget/sill factors and added Nelder-Mead simplex refinement for better convergence.
+- Implemented true natural neighbor interpolation using Voronoi area-stealing when `scipy.spatial.Voronoi` and `shapely` are available; falls back to 1/d² approximation.
+- Fixed `topographic_wetness_index` to compute D8 flow accumulation directly on the IDW grid instead of incorrectly delegating to `flow_accumulation`.
+- Fixed `max_flow` to build its own capacity adjacency from `edge_to`/`id_column` rather than calling `_network_graph()` without arguments.
+
+### Performance
+- `_pairwise_distance_matrix` now uses `scipy.spatial.distance.pdist`/`squareform` for euclidean distances when n >= 10.
+- `nearest_neighbor_distance` now uses `scipy.spatial.KDTree` for O(n log n) queries when available.
+
+### New Tools (101-130)
+- **Spatial Statistics**: `getis_ord_g_global`, `lees_l`, `spatial_correlogram`, `variogram_cloud`, `spatial_markov`
+- **Interpolation**: `universal_kriging`, `rbf_interpolation`
+- **Clustering**: `fuzzy_c_means`, `gaussian_mixture_spatial`, `spatially_constrained_clustering`, `max_p_regions`
+- **Regression**: `spatial_error_model`, `spatial_lag_model`, `spatial_regime_model`
+- **Terrain & Hydrology**: `curvature`, `topographic_wetness_index`, `depression_fill`, `solar_radiation`
+- **Network**: `network_voronoi`, `max_flow`
+- **Point Patterns**: `k_cross_function`, `pair_correlation_function`, `nn_g_function`, `empty_space_f_function`
+- **Geometry**: `minimum_bounding_circle`, `minimum_bounding_rectangle`, `hausdorff_distance`, `snap_to_grid`, `polygon_skeleton`
+- **I/O**: `wkt_to_geometry`, `geometry_to_wkt`
+
+### New Tools (131-148)
+- **Advanced Interpolation**: `co_kriging`, `empirical_bayesian_kriging`, `anisotropic_idw`
+- **Clustering**: `som_spatial` (Self-Organizing Map)
+- **Advanced Regression**: `mgwr` (Multiscale GWR), `gwr_poisson` (Poisson GWR for count data)
+- **Spatiotemporal**: `spacetime_morans_i`
+- **Terrain & Hydrology**: `watershed_delineation`, `stream_ordering` (Strahler/Shreve)
+- **Network & Routing**: `time_dependent_routing`, `cvrp` (Capacitated Vehicle Routing)
+- **Point Patterns**: `inhomogeneous_k`
+- **Geometry Operations**: `polygon_subdivision`, `line_planarize`
+- **File I/O**: `read_shapefile`, `to_shapefile`, `read_geopackage`, `read_kml`, `to_topojson`
+
+### API & Developer Experience
+- Added `SpatialWeights` class with `from_knn()`, `from_distance_band()`, `.transform('R'|'B'|'D')`, `.to_dense()`, and `.to_dict()` for reusable spatial weight matrices.
+- Added `py.typed` marker for PEP 561 type-checker support.
+
+### Testing & CI
+- Added 38 new tests for tools 101-130 (`test_new_tools_p3.py`).
+- Added 32 new tests for tools 131-148 (`test_tools_131_148.py`).
+- Added 11 SpatialWeights tests (`test_spatial_weights.py`).
+- CI now runs on Linux, macOS, and Windows across Python 3.11-3.13.
+- Added benchmark suite (`benchmarks/bench.py`) for tracking key tool performance.
+- Total: 498 tests passing.
+
 ## 0.1.15
 
 - Added `GeoPromptFrame.snap_geometries(...)` for deterministic tolerance-based vertex snapping across point, line, and polygon workflows with optional per-row diagnostics.

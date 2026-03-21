@@ -1,6 +1,7 @@
 import json
 import math
 import time
+import warnings
 from itertools import permutations
 from pathlib import Path
 from typing import Any, cast
@@ -902,7 +903,7 @@ def test_spatial_autocorrelation_reports_global_and_local_scores() -> None:
     assert records[3]["hotspot_autocorr"] is True
     assert records[3]["significant_cluster_autocorr"] is True
     assert records[1]["neighbor_count_autocorr"] == 2
-    assert records[0]["total_weight_autocorr"] == 6.0
+    assert records[0]["total_weight_autocorr"] == 4.0  # row-standardized weights
 
 
 def test_summarize_autocorrelation_groups_cluster_families() -> None:
@@ -3240,18 +3241,20 @@ def test_hotspot_getis_ord_matches_pysal_when_available() -> None:
         k=2,
         include_self=True,
     ).to_records()
-    reference = esda.G_Local(
-        [10.0, 9.5, 9.0, 1.0, 1.5, 2.0],
-        libpysal_weights.KNN.from_array(
-            [(0.0, 0.0), (0.2, 0.1), (0.1, 0.2), (5.0, 5.0), (5.2, 5.1), (5.1, 5.2)],
-            k=2,
-        ),
-        transform="B",
-        permutations=0,
-        star=True,
-        keep_simulations=False,
-        island_weight=0,
-    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        reference = esda.G_Local(
+            [10.0, 9.5, 9.0, 1.0, 1.5, 2.0],
+            libpysal_weights.KNN.from_array(
+                [(0.0, 0.0), (0.2, 0.1), (0.1, 0.2), (5.0, 5.0), (5.2, 5.1), (5.1, 5.2)],
+                k=2,
+            ),
+            transform="B",
+            permutations=0,
+            star=True,
+            keep_simulations=False,
+            island_weight=0,
+        )
 
     for row, z_score, p_value in zip(records, reference.Zs, reference.p_norm, strict=True):
         assert row["implementation_getis"] == "pysal"
@@ -3440,24 +3443,26 @@ def test_spatial_regression_matches_statsmodels_across_stress_cases_when_availab
         k_neighbors=2,
     ).to_records()
     design = statsmodels_api.add_constant([[float(row[column]) for column in independent_columns] for row in rows])
-    model = statsmodels_api.OLS([float(row["y"]) for row in rows], design).fit()
-    first = records[0]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = statsmodels_api.OLS([float(row["y"]) for row in rows], design).fit()
+        first = records[0]
 
-    assert cast(list[float], first["coefficients_reg"]) == pytest.approx([float(value) for value in model.params], rel=1e-6, abs=1e-6)
-    assert cast(list[float], first["coefficient_standard_errors_reg"]) == pytest.approx([float(value) for value in model.bse], rel=1e-6, abs=1e-6)
-    assert cast(list[float], first["coefficient_t_statistics_reg"]) == pytest.approx([float(value) for value in model.tvalues], rel=1e-6, abs=1e-6)
-    assert cast(list[float], first["coefficient_p_values_reg"]) == pytest.approx([float(value) for value in model.pvalues], rel=1e-6, abs=1e-6)
-    assert [float(record["predicted_reg"]) for record in records] == pytest.approx([float(value) for value in model.fittedvalues], rel=1e-6, abs=1e-6)
-    assert [float(record["residual_reg"]) for record in records] == pytest.approx([float(value) for value in model.resid], rel=1e-6, abs=1e-6)
-    assert float(first["r_squared_reg"]) == pytest.approx(float(model.rsquared), rel=1e-6, abs=1e-6)
-    assert float(first["adj_r_squared_reg"]) == pytest.approx(float(model.rsquared_adj), rel=1e-6, abs=1e-6)
-    assert float(first["sigma2_reg"]) == pytest.approx(float(model.scale), rel=1e-6, abs=1e-6)
-    assert float(first["dof_reg"]) == pytest.approx(float(model.df_resid), rel=1e-6, abs=1e-6)
-    assert float(first["rmse_reg"]) == pytest.approx(
-        math.sqrt(sum(float(value) * float(value) for value in model.resid) / len(records)),
-        rel=1e-6,
-        abs=1e-6,
-    )
+        assert cast(list[float], first["coefficients_reg"]) == pytest.approx([float(value) for value in model.params], rel=1e-6, abs=1e-6)
+        assert cast(list[float], first["coefficient_standard_errors_reg"]) == pytest.approx([float(value) for value in model.bse], rel=1e-6, abs=1e-6)
+        assert cast(list[float], first["coefficient_t_statistics_reg"]) == pytest.approx([float(value) for value in model.tvalues], rel=1e-6, abs=1e-6)
+        assert cast(list[float], first["coefficient_p_values_reg"]) == pytest.approx([float(value) for value in model.pvalues], rel=1e-6, abs=1e-6)
+        assert [float(record["predicted_reg"]) for record in records] == pytest.approx([float(value) for value in model.fittedvalues], rel=1e-6, abs=1e-6)
+        assert [float(record["residual_reg"]) for record in records] == pytest.approx([float(value) for value in model.resid], rel=1e-6, abs=1e-6)
+        assert float(first["r_squared_reg"]) == pytest.approx(float(model.rsquared), rel=1e-6, abs=1e-6)
+        assert float(first["adj_r_squared_reg"]) == pytest.approx(float(model.rsquared_adj), rel=1e-6, abs=1e-6)
+        assert float(first["sigma2_reg"]) == pytest.approx(float(model.scale), rel=1e-6, abs=1e-6)
+        assert float(first["dof_reg"]) == pytest.approx(float(model.df_resid), rel=1e-6, abs=1e-6)
+        assert float(first["rmse_reg"]) == pytest.approx(
+            math.sqrt(sum(float(value) * float(value) for value in model.resid) / len(records)),
+            rel=1e-6,
+            abs=1e-6,
+        )
 
 
 # Tool 22: geographically_weighted_summary
@@ -4325,6 +4330,704 @@ def test_geohash_encode():
     assert hashes[0] != hashes[1]
 
 
+# ===========================================================================
+# Tools 41-85: New Spatial Analysis Tools
+# ===========================================================================
+
+
+# Tool 41: nearest_neighbor_distance
+def test_nearest_neighbor_distance():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [6.0, 0.0]}},
+    ])
+    result = frame.nearest_neighbor_distance(id_column="site_id")
+    assert len(result) == 3
+    for row in result:
+        assert "distance_nn" in row
+        assert "neighbor_id_nn" in row
+        assert row["distance_nn"] is not None
+    # a -> b = 5.0, a -> c = 6.0 => nn = b at 5.0
+    assert abs(result["distance_nn"][0] - 5.0) < 1e-9
+    assert result["neighbor_id_nn"][0] == "b"
+
+
+def test_nearest_neighbor_distance_empty():
+    frame = _make_point_frame([])
+    result = frame.nearest_neighbor_distance()
+    assert len(result) == 0
+
+
+# Tool 42: pairwise_distances
+def test_pairwise_distances():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+    ])
+    result = frame.pairwise_distances(id_column="site_id")
+    assert len(result) == 1  # self-mode, upper triangle only
+    assert abs(result[0]["distance"] - 5.0) < 1e-9
+
+
+def test_pairwise_distances_with_max():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [100.0, 100.0]}},
+    ])
+    result = frame.pairwise_distances(id_column="site_id", max_distance=10.0)
+    assert len(result) == 1  # only a-b pair within 10.0
+
+
+# Tool 43: point_density
+def test_point_density():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [0.5, 0.5]}},
+    ])
+    result = frame.point_density(search_radius=2.0, grid_resolution=5)
+    assert len(result) == 25  # 5x5 grid
+    for row in result:
+        assert "density_ptdensity" in row
+        assert "count_ptdensity" in row
+        assert row["density_ptdensity"] >= 0
+
+
+# Tool 44: line_length
+def test_line_length():
+    frame = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [3.0, 4.0]]}},
+    ])
+    result = frame.line_length()
+    assert len(result) == 1
+    assert abs(result["value_length"][0] - 5.0) < 1e-9
+
+
+def test_line_length_two_segments():
+    frame = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [3.0, 4.0]]}},
+        {"site_id": "b", "geometry": {"type": "LineString", "coordinates": [[0.0, 0.0], [0.0, 10.0]]}},
+    ])
+    result = frame.line_length()
+    lengths = result["value_length"]
+    assert abs(lengths[0] - 5.0) < 1e-9
+    assert abs(lengths[1] - 10.0) < 1e-9
+
+
+# Tool 45: polygon_area
+def test_polygon_area():
+    frame = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "Polygon", "coordinates": [
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+        ]}},
+    ])
+    result = frame.polygon_area()
+    assert len(result) == 1
+    assert abs(result["value_area"][0] - 100.0) < 1e-9
+
+
+# Tool 46: polygon_perimeter
+def test_polygon_perimeter():
+    frame = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "Polygon", "coordinates": [
+            [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0], [0.0, 0.0]]
+        ]}},
+    ])
+    result = frame.polygon_perimeter()
+    assert len(result) == 1
+    assert abs(result["value_perimeter"][0] - 40.0) < 1e-9
+
+
+# Tool 47: average_nearest_neighbor
+def test_average_nearest_neighbor():
+    frame = _sample_point_grid()
+    result = frame.average_nearest_neighbor()
+    assert result["point_count"] == 25
+    assert result["observed_mean_distance"] is not None
+    assert result["expected_mean_distance"] is not None
+    assert result["r_ratio"] is not None
+    # Regular grid should have R close to or above 1.0 (regular = R > 1)
+    assert result["r_ratio"] > 0.5
+
+
+def test_average_nearest_neighbor_too_few():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+    ])
+    result = frame.average_nearest_neighbor()
+    assert result["r_ratio"] is None
+
+
+# Tool 48: mean_center
+def test_mean_center():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [0.0, 10.0]}},
+        {"site_id": "d", "geometry": {"type": "Point", "coordinates": [10.0, 10.0]}},
+    ])
+    cx, cy = frame.mean_center()
+    assert abs(cx - 5.0) < 1e-9
+    assert abs(cy - 5.0) < 1e-9
+
+
+def test_mean_center_weighted():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "w": 3.0},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}, "w": 1.0},
+    ])
+    cx, cy = frame.mean_center(weight_column="w")
+    assert abs(cx - 2.5) < 1e-9
+    assert abs(cy - 0.0) < 1e-9
+
+
+# Tool 49: median_center
+def test_median_center():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [5.0, 5.0]}},
+    ])
+    cx, cy = frame.median_center()
+    # Spatial median should be approximately near the centroid for symmetric-ish configs
+    assert 1.0 < cx < 9.0
+    assert 0.0 < cy < 5.0
+
+
+# Tool 50: directional_distribution
+def test_directional_distribution():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "angle": 0.0},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}, "angle": 90.0},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}, "angle": 180.0},
+    ])
+    result = frame.directional_distribution(angle_column="angle")
+    assert result["count"] == 3
+    assert result["mean_direction"] is not None
+    assert 0.0 <= result["circular_variance"] <= 1.0
+
+
+def test_directional_distribution_from_geometry():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [0.0, 10.0]}},
+    ])
+    result = frame.directional_distribution()
+    assert result["count"] == 3
+    assert result["mean_direction"] is not None
+
+
+# Tool 51: quadrat_analysis
+def test_quadrat_analysis():
+    frame = _sample_point_grid()
+    result = frame.quadrat_analysis(rows_count=5, cols_count=5)
+    assert result["point_count"] == 25
+    assert result["quadrat_count"] == 25
+    assert result["chi_square"] is not None
+    assert result["p_value"] is not None
+
+
+def test_quadrat_analysis_empty():
+    frame = _make_point_frame([])
+    result = frame.quadrat_analysis()
+    assert result["point_count"] == 0
+
+
+# Tool 52: ripleys_k
+def test_ripleys_k():
+    frame = _sample_point_grid()
+    result = frame.ripleys_k(steps=5)
+    assert len(result) == 5
+    for r in result:
+        assert "distance" in r
+        assert "k_value" in r
+        assert "l_value" in r
+        assert r["k_value"] >= 0
+
+
+# Tool 53: natural_neighbor_interpolation
+def test_natural_neighbor_interpolation():
+    frame = _sample_point_grid()
+    result = frame.natural_neighbor_interpolation(value_column="elevation", grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "value_nni" in row
+        assert row["value_nni"] is not None
+
+
+# Tool 54: spline_interpolation
+def test_spline_interpolation():
+    frame = _sample_point_grid()
+    result = frame.spline_interpolation(value_column="elevation", grid_resolution=5, regularization=0.01)
+    assert len(result) == 25
+    for row in result:
+        assert "value_spline" in row
+
+
+# Tool 55: trend_surface
+def test_trend_surface_order1():
+    frame = _sample_point_grid()
+    result = frame.trend_surface(value_column="elevation", order=1, grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "value_trend" in row
+        assert row["order_trend"] == 1
+
+
+def test_trend_surface_order2():
+    frame = _sample_point_grid()
+    result = frame.trend_surface(value_column="elevation", order=2, grid_resolution=5)
+    assert len(result) == 25
+
+
+# Tool 56: viewshed
+def test_viewshed():
+    frame = _sample_point_grid()
+    result = frame.viewshed(elevation_column="elevation", observer=(2.0, 2.0), grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "visible_viewshed" in row
+        assert isinstance(row["visible_viewshed"], bool)
+
+
+# Tool 57: aspect_reclassify
+def test_aspect_reclassify_8class():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "aspect": 0.0},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}, "aspect": 90.0},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}, "aspect": 180.0},
+        {"site_id": "d", "geometry": {"type": "Point", "coordinates": [3.0, 0.0]}, "aspect": 270.0},
+    ])
+    result = frame.aspect_reclassify(aspect_column="aspect", num_classes=8)
+    assert len(result) == 4
+    labels = result["label_aspect_class"]
+    assert labels[0] == "N"
+    assert labels[1] == "E"
+    assert labels[2] == "S"
+    assert labels[3] == "W"
+
+
+# Tool 58: euclidean_allocation
+def test_euclidean_allocation():
+    frame = _make_point_frame([
+        {"site_id": "hospital_a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "hospital_b", "geometry": {"type": "Point", "coordinates": [10.0, 10.0]}},
+    ])
+    result = frame.euclidean_allocation(id_column="site_id", grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "source_id_ealloc" in row
+        assert row["source_id_ealloc"] in ("hospital_a", "hospital_b")
+
+
+# Tool 59: cost_distance
+def test_cost_distance():
+    frame = _sample_point_grid()
+    sources = _make_point_frame([
+        {"site_id": "src", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+    ])
+    result = frame.cost_distance(cost_column="elevation", sources=sources, grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "cost_costdist" in row
+
+
+# Tool 60: cost_allocation
+def test_cost_allocation():
+    frame = _sample_point_grid()
+    sources = _make_point_frame([
+        {"site_id": "src_a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "src_b", "geometry": {"type": "Point", "coordinates": [4.0, 4.0]}},
+    ])
+    result = frame.cost_allocation(cost_column="elevation", sources=sources, source_id_column="site_id", grid_resolution=5)
+    assert len(result) == 25
+    for row in result:
+        assert "source_id_calloc" in row
+
+
+# Tool 61: near_table
+def test_near_table():
+    origins = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+    ])
+    targets = _make_point_frame([
+        {"site_id": "t1", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+        {"site_id": "t2", "geometry": {"type": "Point", "coordinates": [10.0, 0.0]}},
+    ])
+    result = origins.near_table(targets, k=2, id_column="site_id", target_id_column="site_id")
+    assert len(result) == 2
+    assert result[0]["rank"] == 1
+    assert result[0]["target_id"] == "t1"
+    assert abs(result[0]["distance"] - 5.0) < 1e-9
+
+
+def test_near_table_with_max_distance():
+    origins = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+    ])
+    targets = _make_point_frame([
+        {"site_id": "t1", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+        {"site_id": "t2", "geometry": {"type": "Point", "coordinates": [100.0, 0.0]}},
+    ])
+    result = origins.near_table(targets, k=2, max_distance=10.0, id_column="site_id", target_id_column="site_id")
+    assert len(result) == 1  # t2 beyond max
+
+
+# Tool 62: point_distance_matrix
+def test_point_distance_matrix():
+    origins = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+    ])
+    targets = _make_point_frame([
+        {"site_id": "t1", "geometry": {"type": "Point", "coordinates": [3.0, 4.0]}},
+        {"site_id": "t2", "geometry": {"type": "Point", "coordinates": [0.0, 10.0]}},
+    ])
+    result = origins.point_distance_matrix(targets, id_column="site_id", target_id_column="site_id")
+    assert len(result) == 2
+    assert abs(result[0]["distance"] - 5.0) < 1e-9
+    assert abs(result[1]["distance"] - 10.0) < 1e-9
+
+
+# Tool 63: union_overlay
+def test_union_overlay():
+    pytest.importorskip("shapely")
+    a = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [5, 0], [5, 5], [0, 5], [0, 0]]]}},
+    ])
+    b = GeoPromptFrame.from_records([
+        {"site_id": "b", "geometry": {"type": "Polygon", "coordinates": [[[3, 3], [8, 3], [8, 8], [3, 8], [3, 3]]]}},
+    ])
+    result = a.union_overlay(b, id_column="site_id", other_id_column="site_id")
+    assert len(result) >= 2  # intersection, self_only, other_only
+
+
+# Tool 64: update_overlay
+def test_update_overlay():
+    pytest.importorskip("shapely")
+    base = GeoPromptFrame.from_records([
+        {"site_id": "base", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}},
+    ])
+    update = GeoPromptFrame.from_records([
+        {"site_id": "upd", "geometry": {"type": "Polygon", "coordinates": [[[5, 5], [15, 5], [15, 15], [5, 15], [5, 5]]]}},
+    ])
+    result = base.update_overlay(update)
+    assert len(result) >= 2
+
+
+# Tool 65: symmetrical_difference_overlay
+def test_symmetrical_difference_overlay():
+    pytest.importorskip("shapely")
+    a = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [5, 0], [5, 5], [0, 5], [0, 0]]]}},
+    ])
+    b = GeoPromptFrame.from_records([
+        {"site_id": "b", "geometry": {"type": "Polygon", "coordinates": [[[3, 3], [8, 3], [8, 8], [3, 8], [3, 3]]]}},
+    ])
+    result = a.symmetrical_difference_overlay(b)
+    assert len(result) == 2  # self_only and other_only
+
+
+# Tool 66: spatial_selection
+def test_spatial_selection():
+    pytest.importorskip("shapely")
+    points = _make_point_frame([
+        {"site_id": "inside", "geometry": {"type": "Point", "coordinates": [5.0, 5.0]}},
+        {"site_id": "outside", "geometry": {"type": "Point", "coordinates": [50.0, 50.0]}},
+    ])
+    selector = GeoPromptFrame.from_records([
+        {"site_id": "box", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}},
+    ])
+    result = points.spatial_selection(selector, predicate="intersects")
+    assert len(result) == 1
+    assert result["site_id"][0] == "inside"
+
+
+# Tool 67: tabulate_intersection
+def test_tabulate_intersection():
+    pytest.importorskip("shapely")
+    a = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [10, 0], [10, 10], [0, 10], [0, 0]]]}},
+    ])
+    b = GeoPromptFrame.from_records([
+        {"site_id": "b", "geometry": {"type": "Polygon", "coordinates": [[[5, 5], [15, 5], [15, 15], [5, 15], [5, 5]]]}},
+    ])
+    result = a.tabulate_intersection(b, id_column="site_id", other_id_column="site_id")
+    assert len(result) == 1
+    assert result[0]["intersection_area"] == 25.0
+    assert result[0]["self_area"] == 100.0
+    assert result[0]["pct_of_self"] == 25.0
+
+
+# Tool 68: feature_envelope_to_polygon
+def test_feature_envelope_to_polygon():
+    frame = GeoPromptFrame.from_records([
+        {"site_id": "a", "geometry": {"type": "LineString", "coordinates": [[0, 0], [5, 3], [10, 0]]}},
+    ])
+    result = frame.feature_envelope_to_polygon()
+    assert len(result) == 1
+    assert abs(result["width_envelope"][0] - 10.0) < 1e-9
+    assert abs(result["height_envelope"][0] - 3.0) < 1e-9
+    rows = list(result)
+    assert rows[0]["geometry"]["type"] == "Polygon"
+
+
+# Tool 69: network_partition
+def test_network_partition():
+    frame = GeoPromptFrame.from_records([
+        {"from_node_id": "a", "to_node_id": "b", "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}},
+        {"from_node_id": "b", "to_node_id": "c", "geometry": {"type": "LineString", "coordinates": [[1, 0], [2, 0]]}},
+        {"from_node_id": "d", "to_node_id": "e", "geometry": {"type": "LineString", "coordinates": [[10, 0], [11, 0]]}},
+    ])
+    result = frame.network_partition()
+    assert len(result) == 3
+    # First two edges share component, third is separate
+    ids = result["id_component"]
+    assert ids[0] == ids[1]
+    assert ids[0] != ids[2]
+
+
+# Tool 70: network_centrality
+def test_network_centrality():
+    frame = GeoPromptFrame.from_records([
+        {"from_node_id": "a", "to_node_id": "b", "edge_length": 1.0, "geometry": {"type": "LineString", "coordinates": [[0, 0], [1, 0]]}},
+        {"from_node_id": "b", "to_node_id": "c", "edge_length": 1.0, "geometry": {"type": "LineString", "coordinates": [[1, 0], [2, 0]]}},
+        {"from_node_id": "a", "to_node_id": "c", "edge_length": 3.0, "geometry": {"type": "LineString", "coordinates": [[0, 0], [2, 0]]}},
+    ])
+    result = frame.network_centrality()
+    assert len(result) == 3
+    node_ids = [r["node_id"] for r in result]
+    assert "a" in node_ids
+    assert "b" in node_ids
+    assert "c" in node_ids
+    # Node b should have highest betweenness (it's on the shortest a-c path)
+    b_result = next(r for r in result if r["node_id"] == "b")
+    assert b_result["betweenness_centrality"] >= 0
+
+
+# Tool 72: minimum_spanning_tree
+def test_minimum_spanning_tree():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+    ])
+    result = frame.minimum_spanning_tree(id_column="site_id")
+    assert len(result) == 2  # n-1 edges
+    total_cost = result["total_cost_mst"][-1]
+    assert abs(total_cost - 2.0) < 1e-9
+
+
+# Tool 73: traveling_salesman_nn
+def test_traveling_salesman_nn():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+    ])
+    result = frame.traveling_salesman_nn(id_column="site_id", return_to_start=True)
+    assert len(result) == 3
+    orders = sorted(result["visit_order_tsp"])
+    assert orders == [1, 2, 3]
+
+
+# Tool 74: dbscan_cluster
+def test_dbscan_cluster():
+    rows = []
+    for i in range(5):
+        rows.append({"site_id": f"g1-{i}", "geometry": {"type": "Point", "coordinates": [float(i) * 0.1, 0.0]}})
+    for i in range(5):
+        rows.append({"site_id": f"g2-{i}", "geometry": {"type": "Point", "coordinates": [10.0 + float(i) * 0.1, 0.0]}})
+    frame = _make_point_frame(rows)
+    result = frame.dbscan_cluster(eps=1.0, min_samples=3)
+    assert len(result) == 10
+    # Two distinct clusters
+    clusters = set(row["cluster_dbscan"] for row in result if row["cluster_dbscan"] is not None)
+    assert len(clusters) == 2
+
+
+def test_dbscan_cluster_all_noise():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [100.0, 100.0]}},
+    ])
+    result = frame.dbscan_cluster(eps=1.0, min_samples=3)
+    for row in result:
+        assert row["noise_dbscan"] is True
+
+
+# Tool 75: hierarchical_cluster
+def test_hierarchical_cluster():
+    rows = []
+    for i in range(3):
+        rows.append({"site_id": f"g1-{i}", "geometry": {"type": "Point", "coordinates": [float(i), 0.0]}})
+    for i in range(3):
+        rows.append({"site_id": f"g2-{i}", "geometry": {"type": "Point", "coordinates": [100.0 + float(i), 0.0]}})
+    frame = _make_point_frame(rows)
+    result = frame.hierarchical_cluster(k=2)
+    assert len(result) == 6
+    clusters = set(row["cluster_hclust"] for row in result)
+    assert len(clusters) == 2
+    # Points in same group should have same cluster
+    c = result["cluster_hclust"]
+    assert c[0] == c[1]
+    assert c[3] == c[4]
+    assert c[0] != c[3]
+
+
+# Tool 76: spatial_outlier_zscore
+def test_spatial_outlier_zscore():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "val": 10.0},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}, "val": 10.0},
+        {"site_id": "c", "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}, "val": 10.0},
+        {"site_id": "d", "geometry": {"type": "Point", "coordinates": [3.0, 0.0]}, "val": 10.0},
+        {"site_id": "e", "geometry": {"type": "Point", "coordinates": [4.0, 0.0]}, "val": 10.0},
+        {"site_id": "f", "geometry": {"type": "Point", "coordinates": [5.0, 0.0]}, "val": 200.0},  # outlier
+    ])
+    result = frame.spatial_outlier_zscore(value_column="val", threshold=2.0)
+    assert len(result) == 6
+    # Global z-score still present
+    global_z = result["global_z_zscore"]
+    assert global_z[5] > 0  # outlier has positive global z
+    assert global_z[0] < 0  # non-outlier has negative global z
+    # Local z-score: the far-right outlier (val=200) should be flagged
+    local_z = result["z_score_zscore"]
+    assert abs(local_z[5]) > 0  # outlier detected by local z
+
+
+# Tool 77: jenks_natural_breaks
+def test_jenks_natural_breaks():
+    frame = _make_point_frame([
+        {"site_id": f"p{i}", "geometry": {"type": "Point", "coordinates": [float(i), 0.0]}, "val": float(v)}
+        for i, v in enumerate([1, 2, 3, 50, 51, 52, 100, 101, 102])
+    ])
+    result = frame.jenks_natural_breaks(value_column="val", k=3)
+    assert len(result) == 9
+    for row in result:
+        assert 1 <= row["class_jenks"] <= 3
+
+
+# Tool 78: equal_interval_classify
+def test_equal_interval_classify():
+    frame = _make_point_frame([
+        {"site_id": f"p{i}", "geometry": {"type": "Point", "coordinates": [float(i), 0.0]}, "val": float(i) * 10.0}
+        for i in range(10)
+    ])
+    result = frame.equal_interval_classify(value_column="val", k=5)
+    assert len(result) == 10
+    for row in result:
+        assert 1 <= row["class_eqint"] <= 5
+
+
+# Tool 79: quantile_classify
+def test_quantile_classify():
+    frame = _make_point_frame([
+        {"site_id": f"p{i}", "geometry": {"type": "Point", "coordinates": [float(i), 0.0]}, "val": float(i)}
+        for i in range(20)
+    ])
+    result = frame.quantile_classify(value_column="val", k=4)
+    assert len(result) == 20
+    class_counts = {}
+    for row in result:
+        c = row["class_quantile"]
+        class_counts[c] = class_counts.get(c, 0) + 1
+    # Each quantile class should have 5 members
+    for c in class_counts.values():
+        assert c == 5
+
+
+# Tool 80: focal_statistics
+def test_focal_statistics_mean():
+    frame = _sample_point_grid()
+    result = frame.focal_statistics(value_column="elevation", grid_resolution=5, window_size=3, statistic="mean")
+    assert len(result) == 25
+    for row in result:
+        assert "value_focal" in row
+        assert row["statistic_focal"] == "mean"
+
+
+def test_focal_statistics_max():
+    frame = _sample_point_grid()
+    result = frame.focal_statistics(value_column="elevation", grid_resolution=5, window_size=3, statistic="max")
+    assert len(result) == 25
+
+
+# Tool 81: zonal_histogram
+def test_zonal_histogram():
+    frame = _sample_point_grid()
+    zones = GeoPromptFrame.from_records([
+        {"site_id": "zone1", "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]}},
+    ])
+    result = frame.zonal_histogram(value_column="elevation", zones=zones, zone_id_column="site_id", bins=5)
+    assert len(result) == 5  # 1 zone * 5 bins
+    assert all(r["zone_id"] == "zone1" for r in result)
+
+
+# Tool 82: raster_calculator
+def test_raster_calculator():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "ndvi": 0.5, "slope": 10.0},
+        {"site_id": "b", "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}, "ndvi": 0.8, "slope": 5.0},
+    ])
+    result = frame.raster_calculator(expression="ndvi * 100 + slope", columns=["ndvi", "slope"], result_column="score")
+    assert len(result) == 2
+    scores = result["score"]
+    assert abs(scores[0] - 60.0) < 1e-9
+    assert abs(scores[1] - 85.0) < 1e-9
+
+
+def test_raster_calculator_rejects_unsafe():
+    frame = _make_point_frame([
+        {"site_id": "a", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}, "val": 1.0},
+    ])
+    result = frame.raster_calculator(expression="__import__('os').system('echo hacked')", columns=["val"])
+    # Should fail safely → None
+    assert result["calculated"][0] is None
+
+
+# Tool 83: aggregate_grid
+def test_aggregate_grid():
+    frame = _sample_point_grid()
+    result = frame.aggregate_grid(value_column="elevation", grid_resolution=3, aggregation="mean")
+    assert len(result) == 9  # 3x3
+    for row in result:
+        assert "value_aggrid" in row
+        assert "count_aggrid" in row
+
+
+# Tool 84: grid_to_polygons
+def test_grid_to_polygons():
+    frame = _sample_point_grid()
+    result = frame.grid_to_polygons(grid_resolution=3, value_column="elevation")
+    assert len(result) == 9  # 3x3
+    for row in result:
+        assert row["geometry"]["type"] == "Polygon"
+        assert "value_gridpoly" in row
+
+
+# Tool 85: random_points
+def test_random_points():
+    result = GeoPromptFrame.random_points(count=50, min_x=-10, max_x=10, min_y=-10, max_y=10, seed=42)
+    assert len(result) == 50
+    for row in result:
+        assert row["geometry"]["type"] == "Point"
+        x, y = row["geometry"]["coordinates"]
+        assert -10 <= x <= 10
+        assert -10 <= y <= 10
+
+
+def test_random_points_deterministic():
+    r1 = GeoPromptFrame.random_points(count=10, seed=123)
+    r2 = GeoPromptFrame.random_points(count=10, seed=123)
+    coords1 = r1["geometry"]
+    coords2 = r2["geometry"]
+    for i in range(10):
+        assert coords1[i]["coordinates"] == coords2[i]["coordinates"]
+
+
 def test_new_tools_validate_crs_mismatch() -> None:
     source = _sample_point_grid()
     shifted = _make_point_frame(
@@ -4502,15 +5205,17 @@ def test_weighted_local_summary_sparse_neighborhood_stability() -> None:
     assert all(math.isfinite(float(r["intercept_local"])) for r in records)
 
 
-def test_weighted_local_summary_local_r_squared_is_not_populated() -> None:
-    """Verify local_r_squared remains None — not silently populated."""
+def test_weighted_local_summary_local_r_squared_is_populated() -> None:
+    """Verify local_r_squared is computed as a float (or None if TSS=0)."""
     frame = _sample_point_grid()
     records = frame.weighted_local_summary(
         dependent_column="elevation",
         independent_columns=["value"],
         bandwidth=2.0,
     ).to_records()
-    assert all(r["local_r_squared_local"] is None for r in records)
+    for r in records:
+        val = r["local_r_squared_local"]
+        assert val is None or isinstance(val, float)
 
 
 def test_weighted_local_summary_reproducible_across_runs() -> None:

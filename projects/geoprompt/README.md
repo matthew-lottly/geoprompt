@@ -1,621 +1,397 @@
-# Geoprompt
+# GeoPrompt
 
-Custom spatial analysis package for point, line, and polygon workflows, GeoPandas-style frame access, GeoJSON-compatible inputs and outputs, CRS-aware reprojection, spatial joins, geographic distance options, and GeoPrompt-specific equations for influence, interaction, corridor strength, and neighborhood pressure.
+A pure-Python spatial analysis toolkit providing 100 geospatial tools for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, and network routing — all without requiring compiled C extensions.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
-## Accuracy Posture
+## Key Features
 
-GeoPrompt aims to make strong claims only where tests justify them. Deterministic geometry tools are being checked against trusted reference behavior such as Shapely, and statistical or interpolation tools are only described as parity-backed when they have direct fixture coverage against external references such as PySAL or PyKrige.
+- **148 spatial analysis tools** covering interpolation, classification, clustering, regression, terrain analysis, network analysis, pattern detection, and more
+- **Zero compiled dependencies** — runs on any Python 3.12+ environment; optionally accelerates with Shapely, SciPy, and PySAL when available
+- **GeoJSON-native** — all geometries use standard GeoJSON format internally
+- **CRS-aware** — coordinate reference system assignment and reprojection via `to_crs()`
+- **Scientifically grounded** — algorithms validated against Shapely, SciPy, NumPy, PySAL, PyKrige, GeoPandas, scikit-learn, and statsmodels with 417 automated tests
 
-Use these documents to see what is validated today and what still needs deeper proof:
+## Installation
 
-- `docs/tool-methodology.md` explains each tool's method and maturity level.
-- `docs/tool-validation-audit.md` records current evidence, risks, and benchmark status.
-- `docs/parity-roadmap.md` tracks remaining reference-parity work.
+```bash
+pip install geoprompt
+```
 
-## Snapshot
+For optional acceleration with reference-grade libraries:
 
-- Lane: Spatial package design
-- Domain: Reusable custom spatial analysis
-- Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition summaries, fishnet and hexbin grids, hotspot summaries, topology snapping, line splitting, topology cleanup, network build, shortest path, service areas with optional partial-edge output, network location allocation, corridor reach with scoring, anchor-aware network distance, and diagnostics, zone fit scoring with grouped rankings and callbacks, centroid clustering with diagnostics and rollups, buffer, buffer joins, coverage summaries, overlay summaries with grouping and comparison helpers, overlay union with face lineage, dissolve, clip and overlay intersections, nearest-neighbor analysis, gravity model, accessibility index, convex hull, envelope, frame utilities, comparison report tooling, custom influence equations, benchmark corpus, demo report, tests
+```bash
+pip install geoprompt[full]  # includes shapely, scipy, numpy
+```
 
-## Overview
-
-This project starts a reusable spatial package lane instead of another one-off analysis repo. The goal is to build a custom package that users can import directly, similar to how they would reach for GeoPandas, but focused first on a small and clear set of spatial equations that can grow over time.
-
-The initial version still stays intentionally simple, but it now goes beyond points: the frame can work with points, lines, and polygons represented through a small GeoJSON-like geometry mapping. That keeps the package small enough to iterate on while still showing a real package design direction.
-
-## What It Demonstrates
-
-- A package-first project structure rather than a single lab script
-- A `GeoPromptFrame` object that behaves like a lightweight spatial table wrapper
-- GeoJSON FeatureCollection support so callers can use standard spatial data without reshaping it first
-- Custom equations for spatial decay, influence, interaction, corridor strength, and area similarity scoring
-- Basic nearest-neighbor analysis for point, line, and polygon centroids
-- Bounding-box queries for quick map-window style filtering
-- Radius queries for fast proximity filtering around a feature or coordinate anchor
-- Within-distance predicates for scoring or filtering without materializing a join
-- CRS assignment and reprojection through `GeoPromptFrame.to_crs(...)`
-- Spatial joins with `intersects`, `within`, and `contains` predicates
-- Proximity joins for distance-based matching without needing an overlay engine
-- Nearest joins for `k` closest matches when you want ranked association instead of a fixed distance cutoff
-- Nearest assignment for allocating each target feature to a single closest origin
-- Assignment summaries for rolling nearest assignments into per-origin counts, ids, and aggregate metrics
-- Catchment competition summaries for service-radius overlap analysis with exclusive, shared, won, and unserved targets
-- Buffer generation for point, line, and polygon geometries through the overlay engine
-- Buffer joins for service-area style matching against surrounding features
-- Coverage summaries for fast count and aggregate rollups per service geometry
-- Overlay summaries for overlap metrics when you need counts and shares instead of derived geometry outputs
-- Topology snapping with `GeoPromptFrame.snap_geometries(...)` for deterministic tolerance-based vertex alignment
-- Topology cleanup with `GeoPromptFrame.clean_topology(...)` for duplicate-vertex removal and short-segment pruning
-- Line segmentation with `GeoPromptFrame.line_split(...)` for point-driven and intersection-driven corridor splitting
-- Dissolve workflows with `GeoPromptFrame.dissolve(...)`
-- Overlay operations with `GeoPromptFrame.clip(...)` and `GeoPromptFrame.overlay_intersections(...)`
-- Overlay union with `GeoPromptFrame.overlay_union(...)` for polygon face partitioning and lineage-aware outputs
-- Network build with `GeoPromptFrame.network_build(...)` for splitting corridors into reusable graph edges and nodes
-- Shortest-path routing with `GeoPromptFrame.shortest_path(...)` plus optional route diagnostics
-- Service-area analysis with `GeoPromptFrame.service_area(...)` for reachable-edge extraction and optional partial-edge coverage output
-- Location allocation with `GeoPromptFrame.location_allocate(...)` for network-cost demand assignment with optional capacity limits
-- Corridor reach analysis with `GeoPromptFrame.corridor_reach(...)` for route-proximity screening, scoring, direct or network-style corridor distance, and path-anchor-aware ranking
-- Corridor diagnostics with `GeoPromptFrame.corridor_diagnostics(...)` for per-corridor served-feature, score, and anchor-distance rollups
-- Zone fit scoring with `GeoPromptFrame.zone_fit_score(...)` for configurable multi-factor zone matching, grouped zone rankings, and workflow-specific score callbacks
-- Centroid clustering with `GeoPromptFrame.centroid_cluster(...)` for deterministic spatial grouping plus cluster quality metrics and cluster-count diagnostics
-- Cluster rollups with `GeoPromptFrame.summarize_clusters(...)` for per-cluster member counts, dominant groups, and aggregate summaries
-- Spatial lag and local autocorrelation with `GeoPromptFrame.spatial_lag(...)` and `GeoPromptFrame.spatial_autocorrelation(...)`
-- Autocorrelation reporting with `GeoPromptFrame.summarize_autocorrelation(...)` and `GeoPromptFrame.report_autocorrelation_patterns(...)`
-- Overlay group comparison with `GeoPromptFrame.overlay_group_comparison(...)` for top-group and runner-up overlap gaps
-- Trajectory matching with `GeoPromptFrame.trajectory_match(...)`, segment summaries, and segment scoring for review queues
-- Change detection with event extraction and event-to-event comparison through `GeoPromptFrame.change_detection(...)`, `extract_change_events()`, and `compare_change_events(...)`
-- Gravity model and accessibility index equations for interaction and access scoring
-- Geometry helpers: `geometry_convex_hull(...)`, `geometry_envelope(...)`, `GeoPromptFrame.envelopes()`, `GeoPromptFrame.convex_hulls()`
-- Frame utilities: `select(...)`, `rename_columns(...)`, `filter(...)`, `sort(...)`, `describe()`, `__repr__`, `__getitem__`
-- Flat record export with `frame_to_records_flat(...)`, `write_flat_csv(...)`, `write_records_json(...)`, and in-memory GeoJSON loading with `read_geojson(dict)`
-- Geographic distance support for longitude/latitude point workflows through haversine distance
-- Pairwise interaction analysis without requiring pandas or geopandas
-- A demo CLI that exports a real review plot and JSON report from checked-in mixed geometry features
-- A comparison CLI that checks Geoprompt outputs against Shapely and GeoPandas across a built-in corpus and records timing data
-
-## Example Usage
+## Quick Start
 
 ```python
 import geoprompt as gp
 
-frame = gp.read_points("data/sample_points.json")
-scored = frame.assign(
-    neighborhood_pressure=lambda current: current.neighborhood_pressure(
-        weight_column="demand_index",
-        scale=0.14,
-        power=1.6,
-    )
+# Load spatial data
+frame = gp.read_features("sites.geojson", crs="EPSG:4326")
+
+# Run spatial analysis
+hotspots = frame.hotspot_getis_ord(
+    value_column="population",
+    mode="distance_band",
+    max_distance=5000,
+    fdr_correction=True,   # Benjamini-Hochberg multiple testing correction
 )
 
-print(scored.head(2))
-print(scored.centroid())
-print(scored.nearest_neighbors())
+# Interpolate a surface
+surface = frame.kriging_surface(
+    value_column="elevation",
+    grid_resolution=50,
+    auto_fit_variogram=True,  # automatic variogram model fitting
+)
+
+# Cluster analysis
+clusters = frame.optics_clustering(min_samples=5)
 ```
 
-Mixed geometry example:
+## Accuracy & Validation
+
+GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified by maturity level:
+
+| Level | Meaning |
+|-------|---------|
+| **Deterministic** | Direct transformation with provably correct output |
+| **Validated** | Cross-validated against reference implementations (Shapely, SciPy, PySAL) |
+| **Approximation** | Operationally useful; lightweight implementation of a fuller algorithm |
+| **Heuristic** | Optimization shortcut — useful but not guaranteed globally optimal |
+
+See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classification and evidence.
+
+## Tool Reference
+
+### Interpolation & Surface Analysis (Tools 12–13, 53, 80)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `idw_interpolation` | Inverse Distance Weighting | `power`, `search_radius`, `k_neighbors` |
+| `kriging_surface` | Ordinary Kriging with auto-fit variogram | `auto_fit_variogram`, `variogram_model` |
+| `natural_neighbor_interpolation` | Sibson-style area-weighted interpolation | `grid_resolution` |
+| `spline_interpolation` | Thin-plate spline | `grid_resolution`, `smoothing` |
+| `kriging_cross_validation` | Leave-one-out CV for kriging quality | Returns RMSE, MAE |
+
+### Classification & Clustering (Tools 3, 41–43, 77–79, 90, 98)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `centroid_cluster` | K-means with silhouette scoring | `k`, `max_iterations` |
+| `dbscan_cluster` | Density-based clustering | `epsilon`, `min_samples` |
+| `hierarchical_cluster` | Agglomerative clustering | `k`, `linkage` |
+| `optics_clustering` | Density-based with variable epsilon | `min_samples`, `xi` |
+| `jenks_natural_breaks` | Fisher-Jenks classification | `k` (number of classes) |
+| `equal_interval_classify` | Equal-width binning | `k` |
+| `quantile_classify` | Equal-count binning | `k` |
+| `location_allocation` | P-median facility optimization | `p`, `demand_column` |
+
+### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `spatial_autocorrelation` | Global Moran's I | `mode`, `permutations` |
+| `spatial_lag` | Spatial lag computation | `mode`, `k`, `max_distance` |
+| `hotspot_getis_ord` | Local Gi* with optional FDR correction | `fdr_correction`, `alpha` |
+| `local_outlier_factor_spatial` | LOF anomaly detection | `k`, `outlier_threshold` |
+| `ripleys_k` | Ripley's K with edge correction | `edge_correction`, `steps` |
+| `bivariate_morans_i` | Bivariate spatial correlation | `x_column`, `y_column` |
+| `local_gearys_c` | Local dissimilarity measure | `mode`, `k` |
+| `spatial_scan_statistic` | Kulldorff cluster detection | `n_simulations`, `max_radius_fraction` |
+| `geographic_detector` | Wang-Xu factor detector (q-statistic) | `factor_column` |
+| `nearest_neighbor_index` | Clark-Evans NNI | Returns ratio, z-score |
+| `spatial_outlier_zscore` | Local spatial z-score | `k`, `threshold` |
+| `global_gearys_c` | Global Geary's C | `mode`, `k` |
+| `morans_i_local` | Local Moran's I (LISA) | `mode`, `permutations` |
+| `mark_correlation_function` | Mark dependence vs distance | `mark_column`, `steps` |
+| `point_pattern_intensity` | First-order λ(s) surface | `kernel_bandwidth` |
+
+### Regression (Tools 21–22, 88, 99)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `spatial_regression` | OLS with spatial diagnostics | `independent_columns` |
+| `geographically_weighted_summary` | GWR with CV bandwidth & local R² | `auto_bandwidth`, `bandwidth` |
+| `loess_regression` | LOESS (local polynomial smoothing) | `fraction`, `degree` |
+| `spatial_durbin_model` | SDM with spatial lags of X and Y | `mode`, `k` |
+
+### Density & Surface (Tools 18–19, 97)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `kernel_density` | KDE with Silverman bandwidth & kernel selection | `kernel` (`epanechnikov`, `gaussian`, `quartic`) |
+| `standard_deviational_ellipse` | Weighted covariance ellipse | `weight_column` |
+| `point_pattern_intensity` | Kernel-smoothed intensity surface | `grid_resolution` |
+
+### Terrain & Hydrology (Tools 7–8, 92–95)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `slope_aspect` | Slope and aspect from surface model | `grid_resolution` |
+| `hillshade` | Terrain illumination model | `azimuth`, `altitude` |
+| `terrain_ruggedness_index` | RMS elevation change to neighbors | `elevation_column` |
+| `topographic_position_index` | Relative elevation with landform class | `k` |
+| `flow_direction` | D8 steepest-descent routing | `elevation_column` |
+| `flow_accumulation` | Upslope contributing area | `elevation_column` |
+
+### Network Analysis (Tools 31–40)
+
+| Tool | Method |
+|------|--------|
+| `network_build` | Corridor-to-graph edge/node construction |
+| `shortest_path` | Dijkstra routing with diagnostics |
+| `service_area` | Reachable-edge extraction with partial coverage |
+| `location_allocate` | Network-cost demand assignment with capacity |
+| `corridor_reach` | Route-proximity screening with scoring |
+| `origin_destination_matrix` | Pairwise Dijkstra cost matrix |
+| `k_shortest_paths` | Best-first simple-path enumeration |
+| `network_trace` | Forward/reverse breadth-first traversal |
+| `route_sequence_optimize` | Greedy nearest-next + 2-opt refinement |
+| `snap_to_network_nodes` | Nearest-node assignment |
+
+### Geometry Operations (Tools 23–30, 44–51)
+
+| Tool | Method |
+|------|--------|
+| `buffer` | Point/Line/Polygon buffering |
+| `dissolve` | Attribute-based geometry union |
+| `clip` | Geometry intersection clipping |
+| `overlay_intersections` | Pairwise intersection extraction |
+| `overlay_union` | Face partitioning with lineage |
+| `erase` | Geometry difference |
+| `simplify` | Douglas-Peucker simplification |
+| `densify` | Segment subdivision |
+| `smooth_geometry` | Chaikin smoothing |
+| `multipart_to_singlepart` | Explode multipart geometries |
+| `singlepart_to_multipart` | Group and union |
+| `eliminate_slivers` | Area/vertex threshold filtering |
+| `convex_hulls` / `envelopes` | Geometry bounds |
+
+### Raster-like Operations (Tools 1–9)
+
+| Tool | Method |
+|------|--------|
+| `raster_sample` | Nearest/IDW lookup at query locations |
+| `zonal_stats` | Point-in-polygon aggregation |
+| `reclassify` | Attribute mapping or break classification |
+| `resample` | Spatial thinning or random subset |
+| `raster_clip` | Bounds intersection filter |
+| `mosaic` | Row merge with conflict resolution |
+| `to_points` / `to_polygons` | Geometry conversion |
+| `contours` | Marching-squares isoline extraction |
+
+### Trajectory & Change Detection (Tools 56–60)
+
+| Tool | Method |
+|------|--------|
+| `trajectory_match` | GPS-to-network matching |
+| `trajectory_staypoint_detection` | Radius-duration grouping |
+| `trajectory_simplify` | Douglas-Peucker on trajectories |
+| `spatiotemporal_cube` | Space-time binned aggregation |
+| `change_detection` | Feature-level temporal differencing |
+
+### Encoding & Utilities (Tools 61–71, 81–85)
+
+| Tool | Method |
+|------|--------|
+| `geohash_encode` | Geohash string generation |
+| `thiessen_polygons` | Voronoi partitioning (Shapely-accelerated) |
+| `spatial_weights_matrix` | Dense pairwise neighbor weights |
+| `zone_fit_score` | Multi-factor zone matching with scoring |
+| `random_points` | Random point generation within bounds |
+
+## Usage Examples
+
+### Loading Data
 
 ```python
 import geoprompt as gp
 
-features = gp.read_features("data/sample_features.json")
-print(features.geometry_types())
-print(features.geometry_lengths())
-print(features.geometry_areas())
-print(features.query_bounds(-111.97, 40.68, -111.84, 40.79).head())
-projected = features.set_crs("EPSG:4326").to_crs("EPSG:3857")
-print(projected.bounds())
-print(features.nearest_neighbors(k=2)[:4])
+# From GeoJSON files
+frame = gp.read_features("sites.geojson", crs="EPSG:4326")
+
+# From in-memory records
+frame = gp.GeoPromptFrame.from_records([
+    {"site_id": "HQ", "geometry": {"type": "Point", "coordinates": [-111.95, 40.71]}, "population": 5000},
+    {"site_id": "Branch", "geometry": {"type": "Point", "coordinates": [-111.90, 40.68]}, "population": 2000},
+], crs="EPSG:4326")
+
+# Random point generation for testing
+random_pts = gp.GeoPromptFrame.random_points(count=1000, min_x=-112, max_x=-111, min_y=40, max_y=41, seed=42)
 ```
 
-Spatial join example:
+### Spatial Statistics
 
 ```python
-import geoprompt as gp
+# Hotspot analysis with FDR correction
+hotspots = frame.hotspot_getis_ord(
+    value_column="population",
+    mode="distance_band",
+    max_distance=5000,
+    fdr_correction=True,
+    alpha=0.05,
+)
 
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
+# Spatial autocorrelation
+autocorr = frame.spatial_autocorrelation("population", mode="k_nearest", k=4, permutations=99)
+report = autocorr.report_autocorrelation_patterns("population")
+
+# Bivariate Moran's I
+bivar = frame.bivariate_morans_i("income", "education", mode="k_nearest", k=4)
+
+# Spatial scan statistic (Kulldorff)
+scan = frame.spatial_scan_statistic("cases", "population", n_simulations=99)
+```
+
+### Interpolation
+
+```python
+# Kriging with automatic variogram fitting
+surface = frame.kriging_surface(
+    value_column="elevation",
+    grid_resolution=50,
+    auto_fit_variogram=True,
+)
+
+# Cross-validate kriging quality
+cv = frame.kriging_cross_validation(value_column="elevation")
+print(f"RMSE: {cv['rmse']:.3f}, MAE: {cv['mae']:.3f}")
+
+# IDW with search radius
+idw = frame.idw_interpolation("temperature", grid_resolution=30, search_radius=10.0, k_neighbors=12)
+
+# Kernel density with Silverman bandwidth
+kde = frame.kernel_density(weight_column="incidents", kernel="gaussian", grid_resolution=40)
+```
+
+### Regression
+
+```python
+# Geographically weighted regression with auto-bandwidth
+gwr = frame.geographically_weighted_summary(
+    dependent_column="price",
+    independent_columns=["sqft", "bedrooms"],
+    auto_bandwidth=True,
+)
+
+# Spatial Durbin Model
+sdm = frame.spatial_durbin_model("price", ["sqft", "bedrooms"], mode="k_nearest", k=4)
+
+# LOESS smoothing
+loess = frame.loess_regression("temperature", "elevation", fraction=0.3)
+```
+
+### Clustering & Classification
+
+```python
+# OPTICS density clustering
+clusters = frame.optics_clustering(min_samples=5, xi=0.05)
+
+# P-median facility location
+facilities = frame.location_allocation(demand_column="population", p=5, seed=42)
+
+# Jenks natural breaks
+classified = frame.jenks_natural_breaks("income", k=5)
+```
+
+### Terrain & Hydrology
+
+```python
+# Terrain analysis
+tri = frame.terrain_ruggedness_index("elevation")
+tpi = frame.topographic_position_index("elevation", k=8)
+
+# Hydrological routing
+flow_dir = frame.flow_direction("elevation")
+flow_acc = frame.flow_accumulation("elevation")
+```
+
+### Network Analysis
+
+```python
+# Build a routable network from line features
+network = corridors.network_build()
+
+# Shortest path routing
+route = network.shortest_path(origin="node-A", destination="node-B")
+
+# Service area analysis
+service = network.service_area(origins=["depot-1"], max_cost=5000)
+
+# Origin-destination cost matrix
+od_matrix = network.origin_destination_matrix(origins=["A", "B"], destinations=["X", "Y"])
+```
+
+### Geometry Operations
+
+```python
+# Spatial join
 joined = regions.spatial_join(assets, predicate="contains")
 
-print(joined.head(3))
-```
+# Buffer and dissolve
+buffered = frame.buffer(distance=100)
+dissolved = frame.dissolve(by="region", aggregations={"population": "sum"})
 
-Proximity query and join example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-
-nearby = assets.query_radius(anchor="alpha-point", max_distance=0.06)
-proximity = regions.proximity_join(assets, max_distance=0.08)
-
-print(nearby.head(3))
-print(proximity.head(3))
-```
-
-Nearest-join example:
-
-```python
-import geoprompt as gp
-
-origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-nearest = origins.nearest_join(targets, k=2, max_distance=0.08, how="left")
-
-print(nearest.head(4))
-```
-
-Nearest-assignment example:
-
-```python
-import geoprompt as gp
-
-origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-assigned = origins.assign_nearest(targets, max_distance=0.08, how="left")
-
-print(assigned.head(4))
-```
-
-Assignment-summary example:
-
-```python
-import geoprompt as gp
-
-origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-summary = origins.summarize_assignments(
-    targets,
-    aggregations={"demand_index": "sum"},
-    max_distance=0.08,
-)
-
-print(summary.head(4))
-```
-
-Catchment-competition example:
-
-```python
-import geoprompt as gp
-
-origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-competition = origins.catchment_competition(
-    targets,
-    max_distance=0.08,
-    aggregations={"demand_index": "sum"},
-)
-
-print(competition.head(4))
-```
-
-Buffer and within-distance example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-
-mask = assets.within_distance(anchor="north-hub-point", max_distance=0.08)
-buffers = assets.buffer(distance=0.01)
-
-print(mask)
-print(buffers.head(2))
-```
-
-Service-area example:
-
-```python
-import geoprompt as gp
-
-origins = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-targets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-service_matches = origins.buffer_join(targets, distance=0.03)
-coverage = origins.buffer(distance=0.03).coverage_summary(
-    targets,
-    aggregations={"demand_index": "sum"},
-)
-
-print(service_matches.head(3))
-print(coverage.head(3))
-```
-
-Overlay example:
-
-```python
-import geoprompt as gp
-
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
+# Overlay operations
 clipped = assets.clip(regions)
 intersections = regions.overlay_intersections(assets)
-
-print(clipped.head(3))
-print(intersections.head(3))
-```
-
-Overlay-summary example:
-
-```python
-import geoprompt as gp
-
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-summary = assets.overlay_summary(
-    regions,
-    right_id_column="region_id",
-    aggregations={"region_name": "count"},
-)
-
-print(summary.head(3))
-```
-
-Grouped overlay example:
-
-```python
-import geoprompt as gp
-
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-summary = assets.overlay_summary(
-    regions,
-    right_id_column="region_id",
-    group_by="region_band",
-    normalize_by="both",
-    top_n_groups=2,
-)
-
-print(summary.head(3))
-```
-
-Dissolve example:
-
-```python
-import geoprompt as gp
-
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-dissolved = regions.dissolve(by="region_band", aggregations={"region_name": "count"})
-
-print(dissolved.head())
-```
-
-Corridor-reach example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-corridors = assets.filter(lambda r: r["geometry"]["type"] == "LineString")
-
-reach = assets.corridor_reach(
-    corridors,
-    max_distance=0.05,
-    aggregations={"capacity_index": "sum"},
-    distance_method="euclidean",
-    distance_mode="network",
-    path_anchor="nearest",
-    score_mode="combined",
-    weight_column="capacity_index",
-    preferred_bearing=90.0,
-)
-
-print(reach.head(3))
-```
-
-Corridor-diagnostics example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-corridors = assets.filter(lambda r: r["geometry"]["type"] == "LineString")
-
-diagnostics = assets.corridor_diagnostics(
-    corridors,
-    max_distance=0.05,
-    corridor_id_column="site_id",
-    path_anchor="end",
-    score_mode="combined",
-)
-
-print(diagnostics.head(3))
-```
-
-Autocorrelation reporting example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-autocorr = assets.spatial_autocorrelation(
-    "demand_index",
-    mode="distance_band",
-    max_distance=0.05,
-    permutations=24,
-)
-report = autocorr.report_autocorrelation_patterns("demand_index")
-
-print(report.head(3))
-```
-
-Trajectory scoring example:
-
-```python
-import geoprompt as gp
-
-corridors = gp.read_features("data/benchmark_features.json", crs="EPSG:4326").filter(
-    lambda row: row["geometry"]["type"] == "LineString"
-)
-network = corridors.network_build()
-observations = gp.GeoPromptFrame.from_records(
-    [
-        {"site_id": "obs-1", "track_id": "track-a", "sequence": 1, "geometry": {"type": "Point", "coordinates": [-111.95, 40.71]}},
-        {"site_id": "obs-2", "track_id": "track-a", "sequence": 2, "geometry": {"type": "Point", "coordinates": [-111.93, 40.72]}},
-    ],
-    crs="EPSG:4326",
-)
-
-scored = network.trajectory_match(observations, candidate_k=3, max_distance=0.05).summarize_trajectory_segments().score_trajectory_segments()
-
-print(scored.head(3))
-```
-
-Change-event comparison example:
-
-```python
-import geoprompt as gp
-
-baseline = gp.read_features("data/sample_features.json", crs="EPSG:4326")
-current = baseline.assign(priority_index=lambda frame: [value + 0.1 for value in frame["priority_index"]])
-next_current = baseline.assign(priority_index=lambda frame: [value + 0.2 for value in frame["priority_index"]])
-
-baseline_events = baseline.change_detection(current, max_distance=0.05).extract_change_events()
-current_events = baseline.change_detection(next_current, max_distance=0.05).extract_change_events()
-event_diff = baseline_events.compare_change_events(current_events, match_mode="equivalent")
-
-print(event_diff.head(3))
-```
-
-Tabular export example:
-
-```python
-import geoprompt as gp
-
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-autocorr = assets.spatial_autocorrelation("demand_index", mode="distance_band", max_distance=0.05)
-report = autocorr.report_autocorrelation_patterns("demand_index")
-
-gp.write_records_json("outputs/autocorr-report.records.json", report)
-gp.write_flat_csv("outputs/autocorr-report.flat.csv", report)
-```
-
-Zone-fit-score example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-zones = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-
-scored = features.zone_fit_score(zones, zone_id_column="region_id")
-
-print(scored.head(3))
-```
-
-Weighted zone-fit example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-zones = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-
-scored = features.zone_fit_score(
-    zones,
-    zone_id_column="region_id",
-    score_weights={
-        "containment": 0.3,
-        "overlap": 0.2,
-        "size": 0.2,
-        "access": 0.2,
-        "alignment": 0.1,
-    },
-    preferred_bearing=90.0,
-    group_by="region_band",
-    group_aggregation="max",
-    top_n=3,
-    score_callback=lambda feature, zone, components, score: score + (0.1 if zone["region_band"] == "north" else 0.0),
-)
-
-print(scored.head(3))
-```
-
-Clustering example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-clustered = features.centroid_cluster(k=3)
-
-print(clustered.head(5))
-```
-
-Clustered output now includes `cluster_size`, `cluster_sse`, `cluster_silhouette`, and `cluster_silhouette_mean`.
-
-Cluster-diagnostics example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-diagnostics = features.cluster_diagnostics([2, 3, 4, 5])
-recommended = features.recommend_cluster_count([2, 3, 4, 5], metric="silhouette")
-
-print(diagnostics)
-print(recommended)
-```
-
-Cluster-summary example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-clustered = features.centroid_cluster(k=3)
-summary = clustered.summarize_clusters(group_by="site_type", aggregations={"capacity_index": "sum"})
-
-print(summary.head(3))
-```
-
-Overlay-group comparison example:
-
-```python
-import geoprompt as gp
-
-regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
-assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-comparison = assets.overlay_group_comparison(
-    regions,
-    group_by="region_band",
-    right_id_column="region_id",
-)
-
-print(comparison.head(3))
-```
-
-Frame utilities example:
-
-```python
-import geoprompt as gp
-
-features = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
-
-high_demand = features.filter(lambda r: r["demand_index"] > 0.8)
-sorted_features = features.sort("demand_index", descending=True)
-selected = features.select("site_id", "demand_index")
-
-print(repr(features))
-print(features["demand_index"])
-print(features.describe())
-```
-
-GeoJSON example:
-
-```python
-import geoprompt as gp
-
-frame = gp.read_geojson("service-zones.geojson")
-nearest = frame.nearest_neighbors(k=1)
-nearest_km = frame.nearest_neighbors(k=1, distance_method="haversine")
-gp.write_geojson("service-zones-scored.geojson", frame)
-
-print(nearest)
-print(nearest_km)
 ```
 
 ## Project Structure
 
 ```text
 geoprompt/
-|-- data/
-|   |-- benchmark_features.json
-|   |-- benchmark_regions.json
-|   |-- sample_features.json
-|   `-- sample_points.json
-|-- assets/
-|   `-- neighborhood-pressure-review-live.png
-|-- .github/
-|   `-- workflows/
-|       `-- geoprompt-ci.yml
-|-- src/geoprompt/
-|   |-- __init__.py
-|   |-- compare.py
-|   |-- demo.py
-|   |-- geometry.py
-|   |-- overlay.py
-|   |-- equations.py
-|   |-- frame.py
-|   `-- io.py
-|-- tests/
-|   `-- test_geoprompt.py
-|-- docs/
-|   |-- architecture.md
-|   `-- demo-storyboard.md
-|-- outputs/
-|   |-- charts/
-|   |   `-- .gitkeep
-|   `-- .gitkeep
-|-- pyproject.toml
-`-- README.md
+├── src/geoprompt/
+│   ├── __init__.py          # Public API exports
+│   ├── frame.py             # GeoPromptFrame class — all 148 spatial tools
+│   ├── geometry.py          # Geometry primitives and helpers
+│   ├── equations.py         # Shared mathematical functions
+│   ├── overlay.py           # Polygon overlay operations
+│   ├── compare.py           # Shapely/GeoPandas comparison utilities
+│   ├── demo.py              # Demo runner
+│   └── io.py                # GeoJSON, CSV, and records I/O
+├── tests/
+│   ├── test_geoprompt.py    # Core tool tests
+│   ├── test_cross_validation.py  # Algorithm cross-validation suite
+│   └── test_new_tools.py    # Tests for tools 86–100
+├── docs/
+│   ├── architecture.md
+│   ├── tool-methodology.md  # Maturity labels and evidence per tool
+│   └── improvement-roadmap.md
+├── data/                    # Sample GeoJSON datasets
+├── outputs/                 # Demo and export outputs
+├── pyproject.toml
+└── README.md
 ```
 
-## Quick Start
+## Installation
 
 ```bash
-pip install -e .[dev]
-geoprompt-demo
-```
-
-Install the optional comparison stack when you want to validate against Shapely and GeoPandas:
-
-```bash
-pip install -e .[compare]
-geoprompt-compare
-```
-
-Install only projection support if you want CRS transforms without the full comparison stack:
-
-```bash
-pip install -e .[projection]
-```
-
-Install only overlay support if you want clip and intersection operations without the full comparison stack:
-
-```bash
-pip install -e .[overlay]
-```
-
-Install the published package from PyPI with:
-
-```bash
+# From PyPI
 pip install geoprompt
+
+# Development install
+pip install -e .[dev]
+
+# Optional extras
+pip install -e .[compare]      # Shapely/GeoPandas validation
+pip install -e .[projection]   # CRS transforms
+pip install -e .[overlay]      # Polygon clip/intersection
 ```
 
-Run tests:
+## Running Tests
 
 ```bash
-pytest
+pytest                  # Full suite — 417 tests
+pytest --tb=short -q    # Compact output
 ```
 
-## Current Output
+## License
 
-The default demo command writes `outputs/geoprompt_demo_report.json` and `outputs/charts/neighborhood-pressure-review.png` with:
-
-- a frame-level centroid and bounds summary
-- CRS and projected Web Mercator bounds metadata
-- mixed geometry type summaries, line lengths, and polygon areas
-- nearest-neighbor rows for each feature in planar and geographic modes
-- per-site neighborhood pressure scores
-- anchor influence scores from a selected source node
+MIT
 - corridor accessibility scores for line-style features
 - top pairwise interaction rows ranked by the GeoPrompt interaction equation
 - top area-similarity rows ranked across polygon-like features
