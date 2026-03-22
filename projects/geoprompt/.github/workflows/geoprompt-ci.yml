@@ -6,19 +6,13 @@ on:
       - ".github/workflows/geoprompt-ci.yml"
       - "pyproject.toml"
       - "README.md"
-      - "PUBLISHING.md"
       - "src/**"
-      - "tests/**"
-      - "data/**"
   pull_request:
     paths:
       - ".github/workflows/geoprompt-ci.yml"
       - "pyproject.toml"
       - "README.md"
-      - "PUBLISHING.md"
       - "src/**"
-      - "tests/**"
-      - "data/**"
 
 jobs:
   validate:
