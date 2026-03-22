@@ -1,6 +1,6 @@
 # GeoPrompt
 
-A pure-Python spatial analysis toolkit providing 201 geospatial tools for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, network routing, and interchange formats — all without requiring compiled C extensions.
+A pure-Python spatial analysis toolkit providing **400+ geospatial tools** for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, network routing, and interchange formats — all without requiring compiled C extensions.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
@@ -10,7 +10,7 @@ A pure-Python spatial analysis toolkit providing 201 geospatial tools for point,
 - **Zero compiled dependencies** — runs on any Python 3.11+ environment; optionally accelerates with Shapely, SciPy, and PySAL when available
 - **GeoJSON-native** — all geometries use standard GeoJSON format internally
 - **CRS-aware** — coordinate reference system assignment and reprojection via `to_crs()`
-- **Scientifically grounded** — algorithms validated against Shapely, SciPy, NumPy, PySAL, PyKrige, GeoPandas, scikit-learn, and statsmodels with 940 automated tests
+- **Scientifically grounded** — algorithms validated against Shapely, SciPy, NumPy, PySAL, PyKrige, GeoPandas, scikit-learn, and statsmodels
 
 ## Installation
 
@@ -61,8 +61,6 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | **Validated** | Cross-validated against reference implementations (Shapely, SciPy, PySAL) |
 | **Approximation** | Operationally useful; lightweight implementation of a fuller algorithm |
 | **Heuristic** | Optimization shortcut — useful but not guaranteed globally optimal |
-
-See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classification and evidence.
 
 ## Tool Reference
 
@@ -369,68 +367,28 @@ intersections = regions.overlay_intersections(assets)
 geoprompt/
 ├── src/geoprompt/
 │   ├── __init__.py          # Public API exports
-│   ├── frame.py             # GeoPromptFrame class — all 400 spatial tools
+│   ├── frame.py             # GeoPromptFrame class — all 400+ spatial tools
 │   ├── geometry.py          # Geometry primitives and helpers
 │   ├── equations.py         # Shared mathematical functions
 │   ├── overlay.py           # Polygon overlay operations
 │   ├── compare.py           # Shapely/GeoPandas comparison utilities
+│   ├── spatial_index.py     # R-tree spatial index
 │   ├── demo.py              # Demo runner
 │   └── io.py                # GeoJSON, CSV, and records I/O
-├── tests/
-│   ├── test_geoprompt.py    # Core tool tests
-│   ├── test_cross_validation.py  # Algorithm cross-validation suite
-│   └── test_new_tools.py    # Tests for tools 86–100
-├── docs/
-│   ├── architecture.md
-│   ├── tool-methodology.md  # Maturity labels and evidence per tool
-│   └── improvement-roadmap.md
-├── data/                    # Sample GeoJSON datasets
-├── outputs/                 # Demo and export outputs
+├── assets/                  # Demo images
 ├── pyproject.toml
+├── CHANGELOG.md
+├── CONTRIBUTING.md
 └── README.md
-```
-
-## Installation
-
-```bash
-# From PyPI
-pip install geoprompt
-
-# Development install
-pip install -e .[dev]
-
-# Optional extras
-pip install -e .[compare]      # Shapely/GeoPandas validation
-pip install -e .[projection]   # CRS transforms
-pip install -e .[overlay]      # Polygon clip/intersection
 ```
 
 ## Running Tests
 
 ```bash
-pytest                  # Full suite — 940 passed, 1 skipped
-pytest --tb=short -q    # Compact output
+pytest --tb=short -q
 ```
 
-## Demo Outputs
-
-Running the demo produces:
-
-- corridor accessibility scores for line-style features
-- top pairwise interaction rows ranked by the GeoPrompt interaction equation
-- top area-similarity rows ranked across polygon-like features
-- a bounding-box query count for the default valley review window
-- a GeoJSON export in `outputs/geoprompt_demo_features.geojson`
-- a committed pressure plot in `assets/neighborhood-pressure-review-live.png`
-
-CI validation is defined in `.github/workflows/geoprompt-ci.yml` and runs tests, demo generation, comparison validation, and package builds.
-It also runs `python -m twine check dist/*` so distribution metadata is validated before release.
-
-See [docs/architecture.md](docs/architecture.md) for the package design notes.
-See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthrough.
-See [docs/tool-methodology.md](docs/tool-methodology.md) for the current algorithm and maturity classification of the toolset.
-See [docs/tool-validation-audit.md](docs/tool-validation-audit.md) for the current validation gaps, benchmark snapshot, and proof plan.
-See [docs/parity-roadmap.md](docs/parity-roadmap.md) for the ordered parity and algorithm-hardening plan.
+CI validation is defined in `.github/workflows/geoprompt-ci.yml`.
 
 ## License
 
@@ -487,56 +445,16 @@ The main package entry points are:
 
 ## Comparison Workflow
 
-Before calling Geoprompt production-ready, use the comparison CLI to verify results and get a timing snapshot against Shapely and GeoPandas:
+Verify results against Shapely and GeoPandas reference implementations:
 
 ```bash
 geoprompt-compare
 ```
 
-This writes `outputs/geoprompt_comparison_report.json` with:
-
-- core metric agreement across the built-in sample and benchmark corpora
-- core metric agreement across a generated stress corpus with 93 features and 16 join regions
-- reprojection agreement against GeoPandas in EPSG:3857
-- dissolve agreement against GeoPandas on the benchmark region corpus
-- spatial-join agreement against Shapely and GeoPandas-style predicate behavior
-- nearest-neighbor agreement against a Shapely centroid-distance reference
-- bounding-box query agreement against GeoPandas
-- timing summaries for geometry metrics, reprojection, bounds queries, nearest neighbors, dissolve, clip, and joins
-
-Current validated snapshot from the built-in corpora:
-
-- correctness parity flags are all `true` for bounds, nearest neighbors, bounds queries, geometry metrics, reprojection, clip, dissolve, and spatial join
-- Geoprompt is consistently faster on geometry metrics, nearest-neighbor lookup, bounds queries, and dissolve
-- the generated stress corpus now shows Geoprompt ahead on both spatial join and clip
-- the smaller benchmark corpus now shows `spatial_join` ahead of the reference path in the latest snapshot, while `clip` remains close enough to keep watching in later passes
-
-Representative relative speed ratios from the latest comparison report:
-
-- `sample` corpus: geometry metrics `2.75x`, nearest neighbors `7.50x`, bounds query `61.59x`, reprojection `1.24x`
-- `benchmark` corpus: geometry metrics `6.06x`, nearest neighbors `5.93x`, bounds query `24.51x`, reprojection `1.46x`, clip `0.72x`, spatial join `1.11x`, dissolve `18.74x`
-- `stress` corpus: geometry metrics `3.35x`, nearest neighbors `6.04x`, bounds query `3.11x`, reprojection `0.98x`, clip `0.76x`, spatial join `3.18x`, dissolve `7.51x`
-
-## Release Readiness
-
-The project now includes:
-
-- an MIT license in `LICENSE`
-- a GitHub Actions workflow for repeatable validation
-- a checked-in benchmark corpus for broader parity testing
-- packaging extras for comparison, projection, and overlay support
+Validated correctness parity covers bounds queries, nearest neighbors, geometry metrics, reprojection, clip, dissolve, and spatial join. GeoPrompt is consistently faster on geometry metrics, nearest-neighbor lookup, bounds queries, and dissolve operations.
 
 ## Publication
 
 - License: [LICENSE](LICENSE)
-- Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Release notes: [docs/release-notes-0.1.8.md](docs/release-notes-0.1.8.md)
-- Tool roadmap: [docs/tool-roadmap.md](docs/tool-roadmap.md)
-- Tool methodology: [docs/tool-methodology.md](docs/tool-methodology.md)
-- Tool validation audit: [docs/tool-validation-audit.md](docs/tool-validation-audit.md)
-- Parity roadmap: [docs/parity-roadmap.md](docs/parity-roadmap.md)
-
-## Repository Notes
-
-This copy is intended to be publishable as its own repository.
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
