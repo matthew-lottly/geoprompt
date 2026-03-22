@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 import pytest
 from geoprompt import GeoPromptFrame
 
 
-def _point_frame(coords: list[tuple[float, float]], values: list[float] | None = None) -> GeoPromptFrame:
+def _point_frame(coords: Sequence[tuple[float, float]], values: list[float] | None = None) -> GeoPromptFrame:
     rows = []
     for i, (x, y) in enumerate(coords):
         row: dict = {"site_id": f"p{i}", "geometry": {"type": "Point", "coordinates": (x, y)}}

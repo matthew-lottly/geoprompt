@@ -31,11 +31,14 @@
 1. Run `pytest`.
 2. Run `geoprompt-demo`.
 3. Run `geoprompt-compare`.
-4. Run `python -m build`.
-5. Run `python -m twine check dist/*`.
-6. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
-7. Confirm the PyPI Trusted Publisher is linked to `.github/workflows/publish-pypi.yml` in the `geoprompt` GitHub repository.
-8. Push a version tag such as `v0.1.0` to trigger the publish workflow, or run the workflow manually from GitHub Actions.
+4. Confirm the tool count in `README.md` matches `docs/tool-inventory.json`.
+5. Confirm the test count in `README.md`, `docs/tool-methodology.md`, and `docs/tool-inventory.json` matches the current suite result.
+6. Review `CHANGELOG.md` and verify the release section covers all new tools and behavior changes.
+7. Run `python -m build`.
+8. Run `python -m twine check dist/*`.
+9. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
+10. Confirm the PyPI Trusted Publisher is linked to `.github/workflows/publish-pypi.yml` in the `geoprompt` GitHub repository.
+11. Push a version tag such as `v0.1.0` to trigger the publish workflow, or run the workflow manually from GitHub Actions.
 
 ## PyPI Commands
 

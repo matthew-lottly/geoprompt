@@ -8,7 +8,7 @@ The goal is to avoid overstating maturity. Some tools are deterministic transfor
 
 ## Current Evidence Base
 
-- Regression suite status: **417 passed** (338 core + 35 new-tool tests + 44 reference-parity tests)
+- Regression suite status: **940 passed, 1 skipped** across core, cross-validation, reference-parity, and tool-batch coverage
 - Validation harness: `geoprompt-compare` and `build_comparison_report(...)`
 - Current reference engines where applicable: Shapely, GeoPandas, hand-built analytical fixtures
 - Optional reference engines now exercised directly where applicable: Shapely Voronoi, PySAL `esda`, PyKrige, `statsmodels`, SciPy, NumPy, scikit-learn, and GeoPandas

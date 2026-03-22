@@ -1,16 +1,16 @@
 # GeoPrompt
 
-A pure-Python spatial analysis toolkit providing 100 geospatial tools for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, and network routing — all without requiring compiled C extensions.
+A pure-Python spatial analysis toolkit providing 201 geospatial tools for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, network routing, and interchange formats — all without requiring compiled C extensions.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
 ## Key Features
 
-- **148 spatial analysis tools** covering interpolation, classification, clustering, regression, terrain analysis, network analysis, pattern detection, and more
-- **Zero compiled dependencies** — runs on any Python 3.12+ environment; optionally accelerates with Shapely, SciPy, and PySAL when available
+- **400 spatial analysis tools** covering interpolation, classification, clustering, regression, terrain analysis, network analysis, point patterns, geometry utilities, I/O formats, raster operations, and more
+- **Zero compiled dependencies** — runs on any Python 3.11+ environment; optionally accelerates with Shapely, SciPy, and PySAL when available
 - **GeoJSON-native** — all geometries use standard GeoJSON format internally
 - **CRS-aware** — coordinate reference system assignment and reprojection via `to_crs()`
-- **Scientifically grounded** — algorithms validated against Shapely, SciPy, NumPy, PySAL, PyKrige, GeoPandas, scikit-learn, and statsmodels with 417 automated tests
+- **Scientifically grounded** — algorithms validated against Shapely, SciPy, NumPy, PySAL, PyKrige, GeoPandas, scikit-learn, and statsmodels with 940 automated tests
 
 ## Installation
 
@@ -66,7 +66,7 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 
 ## Tool Reference
 
-### Interpolation & Surface Analysis (Tools 12–13, 53, 80)
+### Interpolation & Surface Analysis (Tools 12–13, 53, 80, 191, 193, 199)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -75,8 +75,11 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `natural_neighbor_interpolation` | Sibson-style area-weighted interpolation | `grid_resolution` |
 | `spline_interpolation` | Thin-plate spline | `grid_resolution`, `smoothing` |
 | `kriging_cross_validation` | Leave-one-out CV for kriging quality | Returns RMSE, MAE |
+| `adaptive_idw` | IDW with LOO cross-validated local power | `k_neighbors`, `powers` |
+| `raster_algebra` | Safe math expression on grid values | `expression` (uses `x`) |
+| `space_time_kriging` | Product-sum variogram space-time kriging | `value_column`, `time_column` |
 
-### Classification & Clustering (Tools 3, 41–43, 77–79, 90, 98)
+### Classification & Clustering (Tools 3, 41–43, 77–79, 90, 98, 187–188)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -88,8 +91,10 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `equal_interval_classify` | Equal-width binning | `k` |
 | `quantile_classify` | Equal-count binning | `k` |
 | `location_allocation` | P-median facility optimization | `p`, `demand_column` |
+| `dbscan` | DBSCAN with true distance matrix | `eps`, `min_samples` |
+| `hdbscan` | Hierarchical DBSCAN via mutual reachability MST | `min_cluster_size` |
 
-### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91)
+### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91, 189–190)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -108,8 +113,10 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `morans_i_local` | Local Moran's I (LISA) | `mode`, `permutations` |
 | `mark_correlation_function` | Mark dependence vs distance | `mark_column`, `steps` |
 | `point_pattern_intensity` | First-order λ(s) surface | `kernel_bandwidth` |
+| `multivariate_morans_i` | Cross-variable Moran's I matrix | `columns`, `k` |
+| `local_geary_decomposition` | Multivariate local Geary statistic | `columns`, `k` |
 
-### Regression (Tools 21–22, 88, 99)
+### Regression (Tools 21–22, 88, 99, 197–198)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -117,6 +124,8 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `geographically_weighted_summary` | GWR with CV bandwidth & local R² | `auto_bandwidth`, `bandwidth` |
 | `loess_regression` | LOESS (local polynomial smoothing) | `fraction`, `degree` |
 | `spatial_durbin_model` | SDM with spatial lags of X and Y | `mode`, `k` |
+| `negative_binomial_gwr` | GW negative binomial regression (IRLS) | `independent_columns`, `bandwidth` |
+| `geographically_weighted_pca` | Local PCA with spatial weights | `columns`, `n_components` |
 
 ### Density & Surface (Tools 18–19, 97)
 
@@ -137,7 +146,7 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `flow_direction` | D8 steepest-descent routing | `elevation_column` |
 | `flow_accumulation` | Upslope contributing area | `elevation_column` |
 
-### Network Analysis (Tools 31–40)
+### Network Analysis (Tools 31–40, 195–196)
 
 | Tool | Method |
 |------|--------|
@@ -151,8 +160,10 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `network_trace` | Forward/reverse breadth-first traversal |
 | `route_sequence_optimize` | Greedy nearest-next + 2-opt refinement |
 | `snap_to_network_nodes` | Nearest-node assignment |
+| `service_area_polygons` | Dijkstra reachability → convex hull polygons |
+| `isochrones` | Travel-time contour rings from network origin |
 
-### Geometry Operations (Tools 23–30, 44–51)
+### Geometry Operations (Tools 23–30, 44–51, 194)
 
 | Tool | Method |
 |------|--------|
@@ -169,6 +180,7 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `singlepart_to_multipart` | Group and union |
 | `eliminate_slivers` | Area/vertex threshold filtering |
 | `convex_hulls` / `envelopes` | Geometry bounds |
+| `polygon_triangulation` | Ear-clipping polygon triangulation |
 
 ### Raster-like Operations (Tools 1–9)
 
@@ -202,6 +214,17 @@ See [docs/tool-methodology.md](docs/tool-methodology.md) for per-tool classifica
 | `spatial_weights_matrix` | Dense pairwise neighbor weights |
 | `zone_fit_score` | Multi-factor zone matching with scoring |
 | `random_points` | Random point generation within bounds |
+
+### I/O & Interchange (Tools 145–148, 200–201)
+
+| Tool | Method |
+|------|--------|
+| `read_shapefile` / `to_shapefile` | ESRI Shapefile import/export |
+| `read_geopackage` | OGC GeoPackage import |
+| `read_kml` | KML import |
+| `to_topojson` | TopoJSON export |
+| `read_geoparquet` / `to_geoparquet` | GeoParquet import/export via GeoPandas |
+| `read_flatgeobuf` / `to_flatgeobuf` | FlatGeobuf import/export via GeoPandas |
 
 ## Usage Examples
 
@@ -346,7 +369,7 @@ intersections = regions.overlay_intersections(assets)
 geoprompt/
 ├── src/geoprompt/
 │   ├── __init__.py          # Public API exports
-│   ├── frame.py             # GeoPromptFrame class — all 148 spatial tools
+│   ├── frame.py             # GeoPromptFrame class — all 400 spatial tools
 │   ├── geometry.py          # Geometry primitives and helpers
 │   ├── equations.py         # Shared mathematical functions
 │   ├── overlay.py           # Polygon overlay operations
@@ -385,13 +408,14 @@ pip install -e .[overlay]      # Polygon clip/intersection
 ## Running Tests
 
 ```bash
-pytest                  # Full suite — 417 tests
+pytest                  # Full suite — 940 passed, 1 skipped
 pytest --tb=short -q    # Compact output
 ```
 
-## License
+## Demo Outputs
 
-MIT
+Running the demo produces:
+
 - corridor accessibility scores for line-style features
 - top pairwise interaction rows ranked by the GeoPrompt interaction equation
 - top area-similarity rows ranked across polygon-like features
@@ -407,6 +431,10 @@ See [docs/demo-storyboard.md](docs/demo-storyboard.md) for the reviewer walkthro
 See [docs/tool-methodology.md](docs/tool-methodology.md) for the current algorithm and maturity classification of the toolset.
 See [docs/tool-validation-audit.md](docs/tool-validation-audit.md) for the current validation gaps, benchmark snapshot, and proof plan.
 See [docs/parity-roadmap.md](docs/parity-roadmap.md) for the ordered parity and algorithm-hardening plan.
+
+## License
+
+MIT
 
 ## Custom Equations
 

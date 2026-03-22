@@ -1,144 +1,79 @@
-# GeoPrompt Package TODO & Roadmap
+# GeoPrompt Execution Roadmap
 
-See also: [docs/big-backlog.md](big-backlog.md) for a larger next-phase backlog covering tool additions, reviews, validation, CI, packaging, and release work.
+Use [docs/big-backlog.md](big-backlog.md) as the canonical long-form backlog.
 
-## Current Status
-- **148 spatial analysis tools** on GeoPromptFrame
-- **498 tests** (338 core + 35 new-tool + 44 reference-parity + 38 P3-tool-batch-1 + 32 P3-tool-batch-2 + 11 SpatialWeights), all passing
-- Reference parity confirmed against: Shapely, GeoPandas, SciPy, PySAL, PyKrige, statsmodels, scikit-learn
-- `SpatialWeights` class for reusable spatial weight matrices
-- Cross-platform CI (Linux/macOS/Windows × Python 3.11-3.13)
-- Benchmark suite tracking 10 key tools at 3 dataset sizes
+This file is the short execution view for the next major phase.
 
----
+## Current Baseline
 
-## Priority 1 — Bugs & Correctness
+- 400 public spatial analysis tools on `GeoPromptFrame`
+- 940 tests passing, 1 skipped
+- Version 0.1.18
+- Goal: build a spatial analysis package that is more capable, more efficient, and more analysis-oriented than typical GeoPandas and Shapely workflows while preserving scientific accuracy and precision
 
-- [x] Moran's I numerical parity: Current global Moran's I uses a different weight normalization than PySAL (`R` row-standardized). Investigate aligning weight normalization to get value-level parity, not just sign agreement.
-- [x] Local Moran's I (LISA) value parity: Currently only sign agreement with PySAL. Align z-score computation with `esda.Moran_Local` for tighter tolerance.
-- [x] Geary's C global: Cross-validate against `esda.Geary` (currently only structural tests).
-- [x] Kriging auto-fit variogram: Currently uses grid search. Consider gradient-based optimization for better fit on large datasets.
-- [x] Natural neighbor interpolation: Current Sibson-style is 1/d² weighted, not true area-stealing. Implement true Voronoi-based area-stealing when Shapely is available.
+## What To Do Next
 
-## Priority 2 — Performance
+### 1. Improve Existing High-Leverage Tools First
 
-- [x] KDTree spatial indexing: Wrap scipy.spatial.KDTree for O(n log n) neighbor queries in `_pairwise_distance_matrix`, `nearest_neighbor_distance`, `spatial_lag`, etc. Currently O(n²).
-- [x] Sparse spatial weights: Replace dense pairwise distance matrices with sparse representations for large datasets.
-- [ ] Parallel execution: Use `concurrent.futures` for embarrassingly parallel operations (IDW grid, KDE grid, kriging grid).
-- [ ] Lazy evaluation: Defer heavy computation until results are accessed, not at method call time.
-- [ ] Streaming/chunked mode: Process large datasets in chunks to reduce peak memory usage.
+- [x] Improve `voronoi_polygons` from coarse grid assignment toward true Voronoi construction when optional dependencies are available.
+- [x] Improve `thin_plate_spline` stability and singular-system fallback behavior.
+- [x] Improve `shared_boundaries` so it extracts actual shared segments, not just shared vertices.
+- [x] Improve `polygon_validity_check` with self-intersection, duplicate-vertex, zero-area, and shell-hole diagnostics.
+- [x] Improve `polygon_repair` with more repair strategies and explicit repair reports.
+- [x] Improve `stream_extraction`, `hand`, and `ls_factor` with clearer D8 assumptions and stronger hydrology semantics.
 
-## Priority 3 — New Tools to Add
+### 2. Expand Correctness Audits
 
-### Spatial Statistics
-- [x] **Getis-Ord G (global)** — global G statistic for overall clustering tendency
-- [x] **Lee's L statistic** — bivariate spatial association for spatial econometrics
-- [x] **Spatial Markov chains** — transition probabilities between spatial states
-- [x] **Space-time Moran's I** — spatiotemporal autocorrelation
-- [x] **Variogram cloud** — raw semivariance point cloud before fitting
-- [x] **Correlograms** — Moran's I at multiple distance lags
+- [x] Add empty-frame audits for every public tool.
+- [x] Add single-feature audits for every public tool.
+- [x] Add duplicate-coordinate and collinear-point audits for distance- and interpolation-based tools.
+- [x] Add disconnected-network audits for routing, centrality, and flow tools.
+- [x] Add multipart and polygon-hole audits for geometry tools.
+- [x] Add CRS misuse diagnostics for tools that require projected coordinates.
 
-### Interpolation
-- [x] **Universal Kriging** — kriging with drift (trend + residual kriging)
-- [x] **Co-kriging** — multivariate kriging using correlated secondary variable
-- [x] **Empirical Bayesian Kriging** — adaptive variogram fitting per neighborhood
-- [x] **Radial Basis Function interpolation** — multiquadric, thin-plate, inverse
-- [x] **Anisotropic IDW/Kriging** — directional distance weighting
+### 3. Build Performance Infrastructure
 
-### Clustering
-- [x] **Spatially constrained clustering** — SKATER or REDCAP for regionalization
-- [x] **Max-p regions** — maximize regions subject to constraint (min population)
-- [x] **Fuzzy C-means** — soft clustering with membership degrees
-- [x] **Gaussian Mixture Models (spatial)** — probabilistic clustering
-- [x] **Self-Organizing Maps (SOM)** — neural-network-based spatial clustering
+- [x] Add reusable neighbor caches (`_cached_distance_matrix`, `_cached_knn`).
+- [x] Add sparse-neighbor execution paths beyond current dense matrix use.
+- [x] Add chunked grid processing.
+- [x] Add parallel execution for grid and simulation tools.
+- [x] Add profiling harnesses and benchmark gates.
+- [x] Add memory and runtime tracking for large interpolation, clustering, routing, and raster workloads.
 
-### Regression
-- [x] **Spatial Error Model (SEM)** — error term with spatial structure
-- [x] **Spatial Lag Model (SLM)** — endogenous spatial lag via 2SLS
-- [x] **Multiscale GWR (MGWR)** — bandwidth varies by variable
-- [x] **GWR with Poisson/logistic** — GWR for count/binary outcomes
-- [x] **Spatial regime models** — different coefficients per region
+### 4. Add The Next Highest-Value Tools
 
-### Terrain & Hydrology
-- [x] **Curvature (plan/profile)** — second derivatives of surface
-- [x] **Watershed delineation** — full watershed from pour points
-- [x] **Stream ordering** — Strahler and Shreve ordering
-- [x] **Depression filling** — fill sinks in DEM
-- [x] **Topographic Wetness Index (TWI)** — ln(a/tan(β))
-- [x] **Solar radiation** — hillshade-based annual insolation
+- [x] Multivariate Moran's I
+- [x] Local Geary decomposition diagnostics
+- [x] Negative binomial GWR
+- [x] Geographically weighted PCA
+- [x] Space-time kriging
+- [x] Adaptive IDW
+- [x] DBSCAN
+- [x] HDBSCAN-style fallback
+- [x] Service-area polygons
+- [x] Isochrones
+- [x] ~~Focal statistics~~ (already existed as Tool 80)
+- [x] Raster algebra
+- [x] Polygon triangulation
+- [x] Constrained Delaunay triangulation
+- [x] GeoParquet read/write
+- [x] FlatGeobuf read/write
 
-### Network
-- [x] **Network Voronoi** — service area partitioning on network
-- [ ] **Turn restrictions** — conditional edge traversal in routing
-- [x] **Time-dependent routing** — edge costs vary by time-of-day
-- [x] **Capacitated Vehicle Routing (CVRP)** — multi-vehicle route optimization
-- [x] **Network flow** — max flow / min cut on spatial networks
+### 5. Make GeoPrompt More Distinctive
 
-### Point Patterns
-- [x] **K-cross function** — bivariate Ripley's K between two point types
-- [x] **Pair correlation function g(r)** — unnormalized K derivative
-- [x] **Inhomogeneous K** — K function adjusting for varying intensity
-- [x] **Nearest-neighbor G function** — CDF of NN distances
-- [x] **Empty space F function** — CDF of point-to-nearest-event distances
+- [x] Reuse adjacency and weights across tool families instead of recomputing neighborhoods.
+- [x] Add analysis-first algorithms that avoid generic geometry overhead when centroids, graphs, or grids are enough.
+- [x] Add overlay-light alternatives to common expensive GeoPandas workflows.
+- [x] Add chunked and streaming paths for large spatial analysis jobs.
+- [x] Add tool introspection and diagnostics so users can understand method maturity, assumptions, and output semantics quickly.
 
-### Geometry
-- [x] **Polygon skeletonization** — medial axis transform
-- [x] **Minimum bounding circle / rectangle** — rotated bounding shapes
-- [x] **Polygon subdivision** — split polygons into sub-areas
-- [x] **Line network planarization** — split at intersections
-- [x] **Snap geometries to grid** — coordinate rounding/snapping
-- [x] **Hausdorff distance** — shape similarity metric
+## Working Rule
 
-### I/O & Format
-- [ ] **GeoParquet I/O** — read/write Apache Parquet with geometry
-- [x] **Shapefile I/O** — read/write ESRI Shapefiles
-- [x] **GeoPackage I/O** — read/write OGC GeoPackage (SQLite)
-- [x] **WKT/WKB conversion** — parse/emit Well-Known Text/Binary
-- [x] **KML/KMZ I/O** — Google Earth format
-- [x] **TopoJSON** — topology-encoded GeoJSON
+Only count work as good progress if it does at least one of these:
 
-## Priority 4 — API & Developer Experience
-
-- [ ] **Method chaining API**: Return `self` from mutating methods for `frame.buffer(100).dissolve("group")` style.
-- [x] **Spatial weights as first-class object**: `SpatialWeights` class with `from_knn()`, `from_distance_band()`, `.transform()`, reusable across multiple tools.
-- [ ] **Progress callbacks**: Optional callback parameter for long-running tools (kriging, OPTICS, scan statistic).
-- [ ] **Logging**: Structured logging for debug-level algorithm tracing.
-- [x] **Type stubs / py.typed marker**: Ship type hints for IDE autocomplete.
-- [ ] **Plugin system**: Allow third-party tool registration on GeoPromptFrame.
-
-## Priority 5 — Testing & CI
-
-- [ ] **Property-based testing**: Use Hypothesis to fuzz tool inputs (random coords, edge-case values, NaN, empty frames).
-- [x] **Benchmark suite**: Track wall-clock and memory for key tools across releases. Flag regressions.
-- [ ] **Coverage target**: Reach 90%+ line coverage. Currently untested: some network edge cases, some overlay edge cases.
-- [ ] **Mutation testing**: Use mutmut to verify test quality.
-- [x] **Cross-platform CI**: Test on Linux, macOS, Windows in GitHub Actions.
-- [ ] **Nightly parity**: Scheduled CI job running reference-parity tests against latest Shapely/PySAL/etc.
-
-## Priority 6 — Documentation & Packaging
-
-- [ ] **API reference**: Auto-generate from docstrings (Sphinx or MkDocs).
-- [ ] **Tutorials / notebooks**: Step-by-step Jupyter notebooks for common workflows.
-- [x] **Changelog**: Maintain CHANGELOG.md with semantic versioning.
-- [ ] **PyPI metadata**: Classifiers, keywords, project URLs for discoverability.
-- [x] **Contributing guide**: CONTRIBUTING.md with dev setup, test conventions, PR process.
-- [ ] **License file**: Ensure LICENSE is present at repo root.
-
----
-
-## Completed (This Session)
-
-- [x] Upgraded 8 existing tools with scientifically grounded algorithms (IDW, KDE, Hotspot, Kriging, GWR, Ripley's K, Natural Neighbor, Spatial Outlier)
-- [x] Added 15 new tools (86-100): Bivariate Moran's I, Local Geary's C, LOESS, Spatial Scan, OPTICS, Geographic Detector, TRI, TPI, Flow Direction, Flow Accumulation, Mark Correlation, Point Pattern Intensity, Location Allocation, Spatial Durbin Model, Kriging Cross-Validation
-- [x] Created 44 reference-parity tests vs GeoPandas, Shapely, SciPy, PySAL, PyKrige, statsmodels, sklearn
-- [x] Professional README rewrite with 148-tool reference tables
-- [x] Updated tool-methodology.md with accuracy evidence and parity results
-- [x] Fixed all `get_errors` type issues (0 errors remaining)
-- [x] Verified all image links (1 image, not broken)
-- [x] P1: Fixed Moran's I row standardization, LISA, Geary's C, kriging variogram optimization, natural neighbor interpolation
-- [x] P2: KDTree acceleration for O(n log n) queries, scipy pdist/squareform for distance matrices
-- [x] P3: Added 48 new tools (101-148) across spatial statistics, interpolation, clustering, regression, terrain, network, point patterns, geometry, and I/O
-- [x] P4: SpatialWeights class (from_knn, from_distance_band, transform R/B/D), py.typed marker
-- [x] P5: Cross-platform CI matrix (Linux/macOS/Windows × Python 3.11-3.13), benchmark suite
-- [x] P6: CHANGELOG.md v0.1.16, CONTRIBUTING.md, README update
-- [x] 498 tests passing, 0 failures, 1 skipped
+- adds a meaningful tool
+- improves correctness
+- improves precision
+- improves runtime or memory use
+- improves reproducibility or testability
+- clearly differentiates GeoPrompt from standard GeoPandas/Shapely workflows
