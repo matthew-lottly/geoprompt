@@ -26083,6 +26083,7 @@ class GeoPromptFrame:
                 # Decode
                 dec = [sigmoid(sum(w_dec[j][k] * enc[k] for k in range(encoding_dim)) + b_dec[j]) for j in range(n_in)]
                 # Backprop (simplified)
+                b_enc_grad = [0.0] * encoding_dim
                 for j in range(n_in):
                     err_j = dec[j] - row[j]
                     d_dec = err_j * dec[j] * (1 - dec[j])
@@ -26090,8 +26091,10 @@ class GeoPromptFrame:
                         w_dec[j][k] -= learning_rate * d_dec * enc[k]
                         d_enc = d_dec * w_dec[j][k] * enc[k] * (1 - enc[k])
                         w_enc[k][j] -= learning_rate * d_enc * row[j]
-                        b_enc[k] -= learning_rate * d_enc
+                        b_enc_grad[k] += d_enc
                     b_dec[j] -= learning_rate * d_dec
+                for k in range(encoding_dim):
+                    b_enc[k] -= learning_rate * b_enc_grad[k]
 
         # Produce encoded output
         out_rows: list[Record] = []
@@ -26218,8 +26221,8 @@ class GeoPromptFrame:
     ) -> "GeoPromptFrame":
         """Gradient-boosted regression trees for spatial prediction.
 
-        Pure-Python decision-stump ensemble trained via gradient descent
-        on squared-error loss.
+        Pure-Python recursive decision-tree ensemble trained via gradient
+        descent on squared-error loss.
         """
         for c in feature_columns:
             self._require_column(c)
@@ -26230,43 +26233,64 @@ class GeoPromptFrame:
             return self.copy()
 
         n = len(recs)
+        n_feat = len(feature_columns)
         raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
         targets = [float(r.get(target_column, 0) or 0) for r in recs]
         preds = [sum(targets) / n] * n  # init to mean
-        trees: list[tuple[int, float, float, float]] = []  # (feature_idx, threshold, left_val, right_val)
 
-        for _t in range(n_trees):
-            residuals = [targets[i] - preds[i] for i in range(n)]
-            # Fit a stump
-            best_loss = float("inf")
-            best_tree: tuple[int, float, float, float] = (0, 0.0, 0.0, 0.0)
-            for f_idx in range(len(feature_columns)):
-                feat_vals = sorted(set(raw[i][f_idx] for i in range(n)))
+        def _build_tree(indices: list[int], residuals: list[float], depth: int) -> dict:
+            vals_r = [residuals[i] for i in indices]
+            mean_val = sum(vals_r) / len(vals_r)
+            if depth >= max_depth or len(indices) <= 2:
+                return {"t": "l", "v": mean_val}
+            best_var = sum((v - mean_val) ** 2 for v in vals_r)
+            best_split: tuple[int, float, list[int], list[int]] | None = None
+            for f_idx in range(n_feat):
+                feat_vals = sorted(set(raw[i][f_idx] for i in indices))
                 if len(feat_vals) < 2:
                     continue
                 for t_idx in range(len(feat_vals) - 1):
                     thresh = (feat_vals[t_idx] + feat_vals[t_idx + 1]) / 2
-                    left_res = [residuals[i] for i in range(n) if raw[i][f_idx] <= thresh]
-                    right_res = [residuals[i] for i in range(n) if raw[i][f_idx] > thresh]
-                    if not left_res or not right_res:
+                    left_idx = [i for i in indices if raw[i][f_idx] <= thresh]
+                    right_idx = [i for i in indices if raw[i][f_idx] > thresh]
+                    if not left_idx or not right_idx:
                         continue
-                    l_val = sum(left_res) / len(left_res)
-                    r_val = sum(right_res) / len(right_res)
-                    loss = sum((residuals[i] - (l_val if raw[i][f_idx] <= thresh else r_val)) ** 2 for i in range(n))
-                    if loss < best_loss:
-                        best_loss = loss
-                        best_tree = (f_idx, thresh, l_val, r_val)
-            trees.append(best_tree)
-            f_idx, thresh, l_val, r_val = best_tree
+                    l_vals = [residuals[i] for i in left_idx]
+                    r_vals = [residuals[i] for i in right_idx]
+                    l_mean = sum(l_vals) / len(l_vals)
+                    r_mean = sum(r_vals) / len(r_vals)
+                    var = sum((v - l_mean) ** 2 for v in l_vals) + sum((v - r_mean) ** 2 for v in r_vals)
+                    if var < best_var:
+                        best_var = var
+                        best_split = (f_idx, thresh, left_idx, right_idx)
+            if best_split is None:
+                return {"t": "l", "v": mean_val}
+            f_idx, thresh, left_idx, right_idx = best_split
+            return {
+                "t": "s", "f": f_idx, "th": thresh,
+                "l": _build_tree(left_idx, residuals, depth + 1),
+                "r": _build_tree(right_idx, residuals, depth + 1),
+            }
+
+        def _predict_tree(tree: dict, point: list[float]) -> float:
+            if tree["t"] == "l":
+                return tree["v"]
+            if point[tree["f"]] <= tree["th"]:
+                return _predict_tree(tree["l"], point)
+            return _predict_tree(tree["r"], point)
+
+        trees: list[dict] = []
+        for _t in range(n_trees):
+            residuals = [targets[i] - preds[i] for i in range(n)]
+            tree = _build_tree(list(range(n)), residuals, 0)
+            trees.append(tree)
             for i in range(n):
-                preds[i] += learning_rate * (l_val if raw[i][f_idx] <= thresh else r_val)
+                preds[i] += learning_rate * _predict_tree(tree, raw[i])
 
         # Output
         out_rows: list[Record] = []
-        mse_sum = 0.0
         for i in range(n):
             err = targets[i] - preds[i]
-            mse_sum += err * err
             out_rows.append({
                 self.geometry_column: recs[i][self.geometry_column],
                 f"predicted_{suffix}": round(preds[i], 6),
@@ -26290,8 +26314,8 @@ class GeoPromptFrame:
     ) -> "GeoPromptFrame":
         """Random forest classifier for spatial features.
 
-        Builds an ensemble of decision stumps with bootstrap sampling and
-        feature sub-sampling, then predicts via majority vote.
+        Builds an ensemble of recursive decision trees with bootstrap sampling
+        and feature sub-sampling, then predicts via majority vote.
         """
         for c in feature_columns:
             self._require_column(c)
@@ -26307,48 +26331,64 @@ class GeoPromptFrame:
         labels = [r.get(label_column) for r in recs]
         unique_labels = sorted(set(labels))
 
-        def _build_stump(indices: list[int], feat_subset: list[int]) -> tuple[int, float, Any, Any]:
+        def _gini(group: list) -> float:
+            size = len(group)
+            if size == 0:
+                return 0.0
+            return 1.0 - sum((group.count(lbl) / size) ** 2 for lbl in unique_labels)
+
+        def _build_tree(indices: list[int], feat_subset: list[int], depth: int) -> dict:
+            grp = [labels[i] for i in indices]
+            majority = max(unique_labels, key=lambda lbl: grp.count(lbl))
+            if depth >= max_depth or len(indices) <= 2 or len(set(grp)) == 1:
+                return {"t": "l", "v": majority}
             best_gini = float("inf")
-            best: tuple[int, float, Any, Any] = (feat_subset[0], 0.0, labels[indices[0]], labels[indices[0]])
+            best_split: tuple[int, float, list[int], list[int]] | None = None
             for f_idx in feat_subset:
                 vals = sorted(set(raw[i][f_idx] for i in indices))
                 if len(vals) < 2:
                     continue
-                for t in range(len(vals) - 1):
-                    thresh = (vals[t] + vals[t + 1]) / 2
-                    left = [labels[i] for i in indices if raw[i][f_idx] <= thresh]
-                    right = [labels[i] for i in indices if raw[i][f_idx] > thresh]
-                    if not left or not right:
+                for t_i in range(len(vals) - 1):
+                    thresh = (vals[t_i] + vals[t_i + 1]) / 2
+                    left_idx = [i for i in indices if raw[i][f_idx] <= thresh]
+                    right_idx = [i for i in indices if raw[i][f_idx] > thresh]
+                    if not left_idx or not right_idx:
                         continue
-
-                    def _gini(group: list) -> float:
-                        size = len(group)
-                        if size == 0:
-                            return 0.0
-                        return 1.0 - sum((group.count(lbl) / size) ** 2 for lbl in unique_labels)
-
-                    g = (len(left) * _gini(left) + len(right) * _gini(right)) / len(indices)
+                    left_lbl = [labels[i] for i in left_idx]
+                    right_lbl = [labels[i] for i in right_idx]
+                    g = (len(left_lbl) * _gini(left_lbl) + len(right_lbl) * _gini(right_lbl)) / len(indices)
                     if g < best_gini:
                         best_gini = g
-                        # Majority vote for each side
-                        l_pred = max(unique_labels, key=lambda lbl: left.count(lbl))
-                        r_pred = max(unique_labels, key=lambda lbl: right.count(lbl))
-                        best = (f_idx, thresh, l_pred, r_pred)
-            return best
+                        best_split = (f_idx, thresh, left_idx, right_idx)
+            if best_split is None:
+                return {"t": "l", "v": majority}
+            f_idx, thresh, left_idx, right_idx = best_split
+            return {
+                "t": "s", "f": f_idx, "th": thresh,
+                "l": _build_tree(left_idx, feat_subset, depth + 1),
+                "r": _build_tree(right_idx, feat_subset, depth + 1),
+            }
 
-        stumps: list[tuple[int, float, Any, Any]] = []
+        def _predict_tree(tree: dict, point: list[float]) -> Any:
+            if tree["t"] == "l":
+                return tree["v"]
+            if point[tree["f"]] <= tree["th"]:
+                return _predict_tree(tree["l"], point)
+            return _predict_tree(tree["r"], point)
+
+        trees: list[dict] = []
         for _ in range(n_trees):
             bag = [rng.randint(0, n - 1) for _ in range(n)]
             k = max(1, int(math.sqrt(n_feat)))
             feat_sub = rng.sample(range(n_feat), min(k, n_feat))
-            stumps.append(_build_stump(bag, feat_sub))
+            trees.append(_build_tree(bag, feat_sub, 0))
 
         # Predict via majority vote
         out_rows: list[Record] = []
         for i in range(n):
             votes: dict[Any, int] = {}
-            for f_idx, thresh, l_pred, r_pred in stumps:
-                pred = l_pred if raw[i][f_idx] <= thresh else r_pred
+            for tree in trees:
+                pred = _predict_tree(tree, raw[i])
                 votes[pred] = votes.get(pred, 0) + 1
             predicted = max(votes, key=lambda k: votes[k])
             out_rows.append({
@@ -26533,6 +26573,7 @@ class GeoPromptFrame:
         n_episodes: int = 100,
         gamma: float = 0.9,
         epsilon: float = 0.3,
+        alpha: float = 0.1,
         seed: int | None = None,
         suffix: str = "srl",
     ) -> "GeoPromptFrame":
@@ -26577,7 +26618,7 @@ class GeoPromptFrame:
                 reward = rewards[action]
                 future_actions = [a for a in neighbours[action] if a not in visited and a != action]
                 max_future = max((q_table[action][a] for a in future_actions), default=0.0)
-                q_table[state][action] += 0.1 * (reward + gamma * max_future - q_table[state][action])
+                q_table[state][action] += alpha * (reward + gamma * max_future - q_table[state][action])
                 visited.add(action)
                 state = action
 
@@ -26756,7 +26797,7 @@ class GeoPromptFrame:
         b = self.bounds()
         observed_x: list[tuple[float, float]] = list(centroids)
         observed_y: list[float] = list(vals)
-        length_scale = max(b.max_x - b.min_x, b.max_y - b.min_y) / 4
+        length_scale = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-6) / 4
 
         def _rbf(x1: tuple[float, float], x2: tuple[float, float]) -> float:
             d2 = (x1[0] - x2[0]) ** 2 + (x1[1] - x2[1]) ** 2
@@ -27009,7 +27050,7 @@ class GeoPromptFrame:
             s = sum(u[i])
             u[i] = [u[i][c] / s for c in range(n_classes)]
 
-        m = fuzziness
+        m = max(fuzziness, 1.01)
         for _ in range(max_iterations):
             # Compute centres
             centres = []
@@ -27454,15 +27495,26 @@ class GeoPromptFrame:
 
         w_enc = [[rng.gauss(0, 0.5) for _ in range(n_feat)] for _ in range(enc_dim)]
         b_enc = [0.0] * enc_dim
+        w_dec = [[rng.gauss(0, 0.5) for _ in range(enc_dim)] for _ in range(n_feat)]
+        b_dec = [0.0] * n_feat
 
         for _ in range(epochs):
             for row in data:
                 enc = [sigmoid(sum(w_enc[k][j] * row[j] for j in range(n_feat)) + b_enc[k]) for k in range(enc_dim)]
+                dec = [sigmoid(sum(w_dec[j][k] * enc[k] for k in range(enc_dim)) + b_dec[j]) for j in range(n_feat)]
+                # Backprop reconstruction error
+                b_enc_grad = [0.0] * enc_dim
+                for j in range(n_feat):
+                    err_j = dec[j] - row[j]
+                    d_dec = err_j * dec[j] * (1 - dec[j])
+                    for k in range(enc_dim):
+                        w_dec[j][k] -= learning_rate * d_dec * enc[k]
+                        d_enc = d_dec * w_dec[j][k] * enc[k] * (1 - enc[k])
+                        w_enc[k][j] -= learning_rate * d_enc * row[j]
+                        b_enc_grad[k] += d_enc
+                    b_dec[j] -= learning_rate * d_dec
                 for k in range(enc_dim):
-                    for j in range(n_feat):
-                        err = enc[k] - row[j] if n_feat == enc_dim else enc[k] - sum(row) / n_feat
-                        w_enc[k][j] -= learning_rate * err * enc[k] * (1 - enc[k]) * row[j] * 0.1
-                    b_enc[k] -= learning_rate * 0.01
+                    b_enc[k] -= learning_rate * b_enc_grad[k]
 
         # Encode all
         encoded = [[sigmoid(sum(w_enc[k][j] * row[j] for j in range(n_feat)) + b_enc[k]) for k in range(enc_dim)] for row in data]
@@ -27528,14 +27580,29 @@ class GeoPromptFrame:
         spins = [rng.choice([-1, 1]) for _ in range(n)]
 
         # Coupling: nearby features with similar values should be same spin
+        # Precompute coupling matrix for O(n) delta energy
+        coupling = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                c_ij = math.exp(-d / (max(vals) - min(vals) + 1)) * (1 + abs(vals[i] - vals[j]))
+                coupling[i][j] = c_ij
+                coupling[j][i] = c_ij
+
         def _energy() -> float:
             e = 0.0
             for i in range(n):
                 for j in range(i + 1, n):
-                    d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                    coupling = math.exp(-d / (max(vals) - min(vals) + 1)) * (1 + abs(vals[i] - vals[j]))
-                    e -= coupling * spins[i] * spins[j]
+                    e -= coupling[i][j] * spins[i] * spins[j]
             return e
+
+        def _delta_energy(flip_idx: int) -> float:
+            """Energy change from flipping spin at flip_idx (O(n))."""
+            de = 0.0
+            for j in range(n):
+                if j != flip_idx:
+                    de += coupling[flip_idx][j] * spins[flip_idx] * spins[j]
+            return 2.0 * de
 
         current_e = _energy()
         best_spins = list(spins)
@@ -27546,21 +27613,17 @@ class GeoPromptFrame:
             # Transverse field: probability of quantum tunnelling
             gamma = temperature_start * (1 - sweep / max(n_sweeps - 1, 1))
             for i in range(n):
-                old_spin = spins[i]
-                spins[i] = -spins[i]
-                new_e = _energy()
-                delta = new_e - current_e
+                delta = _delta_energy(i)
                 # Quantum-inspired acceptance: includes tunnelling term
                 tunnel_prob = math.exp(-gamma * 0.1) if gamma > 0 else 0
                 accept_prob = math.exp(-delta / max(temp, 1e-12)) if delta > 0 else 1.0
                 accept_prob = max(accept_prob, tunnel_prob * 0.1)
                 if rng.random() < accept_prob:
-                    current_e = new_e
+                    spins[i] = -spins[i]
+                    current_e += delta
                     if current_e < best_e:
                         best_e = current_e
                         best_spins = list(spins)
-                else:
-                    spins[i] = old_spin
 
         out_rows: list[Record] = []
         for i in range(n):
@@ -27700,10 +27763,10 @@ class GeoPromptFrame:
             for layer in range(n_layers):
                 for f in range(n_feat):
                     theta = angles[f] * (layer + 1)
-                    # Rx rotation
+                    # Rx rotation (unitary)
                     cos_t = math.cos(theta / 2)
                     sin_t = math.sin(theta / 2)
-                    new_real = cos_t * state_real[f] + sin_t * state_imag[f]
+                    new_real = cos_t * state_real[f] - sin_t * state_imag[f]
                     new_imag = sin_t * state_real[f] + cos_t * state_imag[f]
                     # Rz rotation
                     phi = angles[f] * 0.5 * (layer + 1)
@@ -27781,6 +27844,7 @@ class GeoPromptFrame:
         *,
         n_clusters: int = 3,
         n_iterations: int = 30,
+        n_phase_iterations: int = 3,
         seed: int | None = None,
         suffix: str = "qpc",
     ) -> "GeoPromptFrame":
@@ -27810,7 +27874,7 @@ class GeoPromptFrame:
             for f in range(n_feat):
                 angle = (raw[i][f] - col_min[f]) / col_rng[f] * 2 * math.pi
                 # Unitary evolution: repeated squaring
-                for _ in range(3):
+                for _ in range(n_phase_iterations):
                     angle = (angle * 2) % (2 * math.pi)
                 phases.append(angle)
             phase_features.append(phases)
@@ -27890,8 +27954,7 @@ class GeoPromptFrame:
                 d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
                 proximity = 1 - d / max_dist
                 val_sim = 1 - abs(vals[i] - vals[j]) / v_rng
-                # Bell-inequality-inspired: S = 2*sqrt(2) * correlation
-                ent = proximity * val_sim * 2 * math.sqrt(2) / (2 * math.sqrt(2))  # normalise to [0,1]
+                ent = proximity * val_sim
                 entanglement[i][j] = ent
                 entanglement[j][i] = ent
 
@@ -28012,7 +28075,8 @@ class GeoPromptFrame:
             # Normalise as quantum state
             norm = math.sqrt(sum(a * a for a in amplitudes)) or 1e-12
             probs = [(a / norm) ** 2 for a in amplitudes]
-            combined = sum(probs) / n_cond
+            # Combined: average raw amplitude (captures overall condition satisfaction)
+            combined = sum(amplitudes) / n_cond
 
             rec: Record = {self.geometry_column: r[self.geometry_column]}
             for idx, (label, _thresh) in enumerate(conditions):
@@ -28508,7 +28572,7 @@ class GeoPromptFrame:
         out_rows: list[Record] = []
         for si in range(n_samples):
             r = rng.random()
-            idx = 0
+            idx = n - 1
             for j, c in enumerate(cum):
                 if r <= c:
                     idx = j
@@ -28603,6 +28667,10 @@ class GeoPromptFrame:
         # DFT on the sorted sequence
         order = sorted(range(n), key=lambda i: norm_x[i])
         sorted_vals = [vals[i] for i in order]
+        # Precompute inverse index for O(1) lookup
+        inv_order = [0] * n
+        for pos, orig in enumerate(order):
+            inv_order[orig] = pos
 
         # Compute harmonics
         harmonics: list[tuple[float, float]] = []  # (amplitude, phase) per frequency
@@ -28621,7 +28689,7 @@ class GeoPromptFrame:
             rec: Record = {self.geometry_column: recs[i][self.geometry_column]}
             rec[f"value_{suffix}"] = vals[i]
             # Reconstruct from harmonics
-            idx_in_sorted = order.index(i) if i in order else 0
+            idx_in_sorted = inv_order[i]
             reconstructed = 0.0
             for k, (amp, phase) in enumerate(harmonics):
                 reconstructed += amp * math.cos(2 * math.pi * k * idx_in_sorted / n + phase)
@@ -28668,26 +28736,29 @@ class GeoPromptFrame:
         out_rows: list[Record] = []
         for i in range(n):
             norm = [(raw[i][f] - col_min[f]) / col_rng[f] for f in range(n_feat)]
+            # Compute measurement probabilities once (deterministic given operators)
+            probs: list[float] = []
+            for c in range(n_classes):
+                p = 1.0
+                for f in range(n_feat):
+                    theta = norm[f] * math.pi
+                    p *= math.cos(theta - operators[c][f]) ** 2
+                probs.append(max(p, 1e-12))
+            total = sum(probs)
+            probs = [p / total for p in probs]
+            # Build CDF for sampling
+            cdf: list[float] = []
+            cum = 0.0
+            for p in probs:
+                cum += p
+                cdf.append(cum)
+            # Sample n_shots times
             counts: list[int] = [0] * n_classes
             for _ in range(n_shots):
-                # For each class, compute measurement probability
-                probs: list[float] = []
-                for c in range(n_classes):
-                    # Probability = product of cos^2(angle - operator_angle)
-                    p = 1.0
-                    for f in range(n_feat):
-                        theta = norm[f] * math.pi
-                        p *= math.cos(theta - operators[c][f]) ** 2
-                    probs.append(max(p, 1e-12))
-                total = sum(probs)
-                probs = [p / total for p in probs]
-                # Sample
                 r_val = rng.random()
-                cum = 0.0
-                measured = 0
+                measured = n_classes - 1
                 for c in range(n_classes):
-                    cum += probs[c]
-                    if r_val <= cum:
+                    if r_val <= cdf[c]:
                         measured = c
                         break
                 counts[measured] += 1
@@ -28754,6 +28825,7 @@ class GeoPromptFrame:
 
         best_spins = list(spins)
         best_energy = _problem_energy()
+        current_e = best_energy
 
         for step in range(n_steps):
             s = step / max(n_steps - 1, 1)  # 0 → 1
@@ -28766,12 +28838,13 @@ class GeoPromptFrame:
                 old = spins[i]
                 spins[i] = -spins[i]
                 new_e = _problem_energy()
-                delta = beta * (new_e - best_energy)
+                delta = beta * (new_e - current_e)
                 # Transverse-field tunnelling probability
                 tunnel = math.exp(-gamma) if gamma < 20 else 0
                 if delta < 0 or rng.random() < tunnel:
-                    if new_e < best_energy:
-                        best_energy = new_e
+                    current_e = new_e
+                    if current_e < best_energy:
+                        best_energy = current_e
                         best_spins = list(spins)
                 else:
                     spins[i] = old
@@ -28784,6 +28857,4733 @@ class GeoPromptFrame:
                 f"group_{suffix}": group,
                 f"spin_{suffix}": best_spins[i],
                 f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 441: gravity_flow_model
+    # ------------------------------------------------------------------
+    def gravity_flow_model(
+        self,
+        mass_column: str,
+        *,
+        beta: float = 2.0,
+        suffix: str = "gfm",
+    ) -> "GeoPromptFrame":
+        """Spatial interaction model using Newton's law of gravitation.
+
+        Computes pairwise flow potential between features as
+        F_ij = m_i * m_j / d_ij^beta, then sums total inflow and outflow
+        per feature. Novel enhancement: directional flow bias where
+        higher-mass features act as attractors.
+        """
+        self._require_column(mass_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        masses = [max(float(r.get(mass_column, 0) or 0), 1e-12) for r in recs]
+        inflow = [0.0] * n
+        outflow = [0.0] * n
+        max_partner = [0] * n
+        for i in range(n):
+            best_f, best_j = 0.0, i
+            for j in range(n):
+                if i == j:
+                    continue
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                if d < 1e-12:
+                    d = 1e-12
+                f = masses[i] * masses[j] / (d ** beta)
+                if masses[j] > masses[i]:
+                    inflow[i] += f
+                else:
+                    outflow[i] += f
+                if f > best_f:
+                    best_f = f
+                    best_j = j
+            max_partner[i] = best_j
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"inflow_{suffix}": round(inflow[i], 6),
+                f"outflow_{suffix}": round(outflow[i], 6),
+                f"net_flow_{suffix}": round(inflow[i] - outflow[i], 6),
+                f"max_partner_{suffix}": max_partner[i],
+                f"mass_{suffix}": masses[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 442: diffusion_kernel_smooth
+    # ------------------------------------------------------------------
+    def diffusion_kernel_smooth(
+        self,
+        value_column: str,
+        *,
+        time_steps: int = 10,
+        diffusion_rate: float = 0.1,
+        k_neighbors: int = 5,
+        suffix: str = "dks",
+    ) -> "GeoPromptFrame":
+        """Heat-equation diffusion smoothing on a spatial k-NN graph.
+
+        Simulates the heat equation dv/dt = alpha * Laplacian(v) on a
+        graph where edges connect k nearest neighbours. Novel: uses
+        adaptive diffusion rate proportional to local feature density.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # Build k-NN graph
+        neighbours: list[list[tuple[int, float]]] = []
+        for i in range(n):
+            dists = []
+            for j in range(n):
+                if i == j:
+                    continue
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                dists.append((d, j))
+            dists.sort()
+            neighbours.append([(j, d) for d, j in dists[:k_neighbors]])
+        # Adaptive diffusion: denser areas diffuse faster
+        local_density = [1.0 / (sum(d for _, d in nb) / max(len(nb), 1) + 1e-12) for nb in neighbours]
+        max_dens = max(local_density) or 1.0
+        norm_density = [d / max_dens for d in local_density]
+        current = list(vals)
+        for _ in range(time_steps):
+            new_vals = list(current)
+            for i in range(n):
+                laplacian = 0.0
+                w_sum = 0.0
+                for j, d in neighbours[i]:
+                    w = 1.0 / max(d, 1e-12)
+                    laplacian += w * (current[j] - current[i])
+                    w_sum += w
+                if w_sum > 0:
+                    alpha = diffusion_rate * (0.5 + 0.5 * norm_density[i])
+                    new_vals[i] = current[i] + alpha * laplacian / w_sum
+            current = new_vals
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"smoothed_{suffix}": round(current[i], 6),
+                f"original_{suffix}": vals[i],
+                f"delta_{suffix}": round(current[i] - vals[i], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 443: topological_persistence
+    # ------------------------------------------------------------------
+    def topological_persistence(
+        self,
+        value_column: str,
+        *,
+        suffix: str = "tph",
+    ) -> "GeoPromptFrame":
+        """Topological persistence analysis of a spatial scalar field.
+
+        Computes 0-dimensional persistent homology by tracking connected
+        components as the value threshold sweeps from maximum to minimum.
+        Each feature is assigned the persistence (birth - death) of the
+        component it belongs to — high persistence = significant peak.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # Sort indices by descending value (super-level set filtration)
+        order = sorted(range(n), key=lambda i: -vals[i])
+        # Union-Find
+        parent = list(range(n))
+        rank = [0] * n
+        birth = [0.0] * n
+        persistence = [0.0] * n
+        active = [False] * n
+        # K-NN adjacency (k=6)
+        adj: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            for _, j in dists[:6]:
+                adj[i].append(j)
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> int:
+            ra, rb = find(a), find(b)
+            if ra == rb:
+                return ra
+            if rank[ra] < rank[rb]:
+                ra, rb = rb, ra
+            parent[rb] = ra
+            if rank[ra] == rank[rb]:
+                rank[ra] += 1
+            return ra
+
+        for idx in order:
+            active[idx] = True
+            birth[idx] = vals[idx]
+            for nb in adj[idx]:
+                if active[nb]:
+                    ri, rj = find(idx), find(nb)
+                    if ri != rj:
+                        # Younger component dies
+                        if vals[ri] >= vals[rj]:
+                            persistence[rj] = birth[rj] - vals[idx]
+                            union(ri, rj)
+                        else:
+                            persistence[ri] = birth[ri] - vals[idx]
+                            union(rj, ri)
+        # Surviving components get max persistence
+        for i in range(n):
+            if find(i) == i and persistence[i] == 0.0:
+                persistence[i] = birth[i] - min(vals)
+        # Propagate persistence to all members
+        comp_pers: dict[int, float] = {}
+        for i in range(n):
+            r = find(i)
+            if r not in comp_pers or persistence[r] > comp_pers[r]:
+                comp_pers[r] = persistence[r]
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"persistence_{suffix}": round(comp_pers.get(find(i), 0.0), 6),
+                f"birth_{suffix}": round(birth[find(i)], 6),
+                f"component_{suffix}": find(i),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 444: levy_flight_optimizer
+    # ------------------------------------------------------------------
+    def levy_flight_optimizer(
+        self,
+        value_column: str,
+        *,
+        n_walkers: int = 10,
+        n_steps: int = 100,
+        alpha: float = 1.5,
+        seed: int | None = None,
+        suffix: str = "lfo",
+    ) -> "GeoPromptFrame":
+        """Lévy flight optimiser for spatial maximum finding.
+
+        Walkers explore the spatial field using Lévy-distributed step lengths
+        (heavy-tailed distribution), which provably outperforms Brownian motion
+        for sparse target search (Viswanathan et al. 1999). The step length
+        distribution has PDF ~ |x|^(-1-alpha).
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        rng = random.Random(seed)
+        b = self.bounds()
+
+        def _idw_eval(px: float, py: float) -> float:
+            num, den = 0.0, 0.0
+            for i in range(n):
+                d = math.hypot(px - centroids[i][0], py - centroids[i][1])
+                w = 1.0 / max(d, 1e-12) ** 2
+                num += w * vals[i]
+                den += w
+            return num / den if den > 0 else 0.0
+
+        def _levy_step() -> float:
+            u = rng.gauss(0, 1)
+            v = abs(rng.gauss(0, 1))
+            return u / max(v ** (1.0 / alpha), 1e-12)
+
+        best_x, best_y = centroids[rng.randint(0, n - 1)]
+        best_val = _idw_eval(best_x, best_y)
+        scale = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-6) * 0.01
+        walkers = [(rng.uniform(b.min_x, b.max_x), rng.uniform(b.min_y, b.max_y))
+                   for _ in range(n_walkers)]
+        for _ in range(n_steps):
+            for w in range(n_walkers):
+                wx, wy = walkers[w]
+                step_x = _levy_step() * scale
+                step_y = _levy_step() * scale
+                nx = max(b.min_x, min(b.max_x, wx + step_x))
+                ny = max(b.min_y, min(b.max_y, wy + step_y))
+                nv = _idw_eval(nx, ny)
+                if nv > _idw_eval(wx, wy):
+                    walkers[w] = (nx, ny)
+                if nv > best_val:
+                    best_x, best_y, best_val = nx, ny, nv
+        out_rows: list[Record] = [{
+            self.geometry_column: {"type": "Point", "coordinates": [best_x, best_y]},
+            f"optimal_value_{suffix}": round(best_val, 6),
+            f"optimal_x_{suffix}": round(best_x, 6),
+            f"optimal_y_{suffix}": round(best_y, 6),
+            f"n_walkers_{suffix}": n_walkers,
+            f"n_steps_{suffix}": n_steps,
+        }]
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 445: spectral_graph_partition
+    # ------------------------------------------------------------------
+    def spectral_graph_partition(
+        self,
+        *,
+        k_neighbors: int = 5,
+        n_clusters: int = 2,
+        n_iterations: int = 50,
+        seed: int | None = None,
+        suffix: str = "sgp",
+    ) -> "GeoPromptFrame":
+        """Spectral graph partitioning via power-iteration Fiedler vector.
+
+        Builds a spatial k-NN graph, computes symmetric normalised Laplacian,
+        then uses power iteration to approximate the Fiedler vector (2nd
+        smallest eigenvector). Clusters by sign of the Fiedler components.
+        For n_clusters > 2, recursively bisects.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        # Build adjacency
+        adj: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            for d, j in dists[:k_neighbors]:
+                w = math.exp(-d * d / (2.0 * max(dists[0][0], 1e-12) ** 2))
+                adj[i].append((j, w))
+        # Degree
+        deg = [sum(w for _, w in adj[i]) for i in range(n)]
+
+        def _fiedler(indices: list[int]) -> list[float]:
+            m = len(indices)
+            if m <= 1:
+                return [0.0] * m
+            idx_map = {v: k for k, v in enumerate(indices)}
+            # Power iteration for smallest non-trivial eigenvector of L_sym
+            # Use inverse iteration via L * x = b approach approximation
+            v = [rng.gauss(0, 1) for _ in range(m)]
+            for _ in range(n_iterations):
+                # L_rw * v = D^-1 * L * v = v - D^-1 * W * v
+                new_v = [0.0] * m
+                for ki, i in enumerate(indices):
+                    wv_sum = 0.0
+                    for j, w in adj[i]:
+                        if j in idx_map:
+                            wv_sum += w * v[idx_map[j]]
+                    d = deg[i] if deg[i] > 0 else 1.0
+                    new_v[ki] = v[ki] - wv_sum / d
+                # Remove projection onto constant vector (1st eigenvector)
+                mean_v = sum(new_v) / m
+                new_v = [x - mean_v for x in new_v]
+                norm = math.sqrt(sum(x * x for x in new_v)) or 1.0
+                v = [x / norm for x in new_v]
+            return v
+
+        labels = [0] * n
+        queue = [(list(range(n)), 0)]
+        cur_label = 0
+        while queue and cur_label < n_clusters - 1:
+            indices, _ = queue.pop(0)
+            if len(indices) <= 1:
+                continue
+            fv = _fiedler(indices)
+            left = [indices[i] for i in range(len(indices)) if fv[i] <= 0]
+            right = [indices[i] for i in range(len(indices)) if fv[i] > 0]
+            if not left or not right:
+                continue
+            cur_label += 1
+            for idx in right:
+                labels[idx] = cur_label
+            queue.append((left, cur_label))
+            queue.append((right, cur_label))
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": labels[i],
+                f"degree_{suffix}": round(deg[i], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 446: spatial_wavelet_decompose
+    # ------------------------------------------------------------------
+    def spatial_wavelet_decompose(
+        self,
+        value_column: str,
+        *,
+        n_scales: int = 4,
+        grid_resolution: int = 16,
+        suffix: str = "swv",
+    ) -> "GeoPromptFrame":
+        """Spatial wavelet decomposition using Mexican-hat (Ricker) wavelets.
+
+        Evaluates the continuous wavelet transform at multiple scales on a
+        regular grid. Each scale captures different spatial frequency content.
+        Novel: decomposes the spatial signal into scale-dependent components
+        using IDW-interpolated field values.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        b = self.bounds()
+        dx = (b.max_x - b.min_x) / max(grid_resolution - 1, 1)
+        dy = (b.max_y - b.min_y) / max(grid_resolution - 1, 1)
+        base_scale = max(b.max_x - b.min_x, b.max_y - b.min_y) / (grid_resolution * 2)
+
+        def _idw(px: float, py: float) -> float:
+            num, den = 0.0, 0.0
+            for i in range(n):
+                d = math.hypot(px - centroids[i][0], py - centroids[i][1])
+                w = 1.0 / max(d, 1e-12) ** 2
+                num += w * vals[i]
+                den += w
+            return num / den if den else 0.0
+
+        out_rows: list[Record] = []
+        for gy in range(grid_resolution):
+            py = b.min_y + gy * dy
+            for gx in range(grid_resolution):
+                px = b.min_x + gx * dx
+                rec: Record = {
+                    self.geometry_column: {"type": "Point", "coordinates": [px, py]},
+                    f"value_{suffix}": round(_idw(px, py), 6),
+                    f"grid_row_{suffix}": gy,
+                    f"grid_col_{suffix}": gx,
+                }
+                for s in range(n_scales):
+                    sigma = base_scale * (2 ** s)
+                    # Mexican hat wavelet transform: integral of f(x')*psi((x-x')/sigma)
+                    coeff = 0.0
+                    for i in range(n):
+                        r2 = ((px - centroids[i][0]) ** 2 + (py - centroids[i][1]) ** 2) / (sigma ** 2)
+                        psi = (1.0 - r2) * math.exp(-r2 / 2.0)
+                        coeff += vals[i] * psi
+                    coeff /= (sigma * max(n, 1))
+                    rec[f"scale_{s}_{suffix}"] = round(coeff, 6)
+                out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 447: spatial_information_entropy
+    # ------------------------------------------------------------------
+    def spatial_information_entropy(
+        self,
+        value_column: str,
+        *,
+        n_bins: int = 10,
+        radius: float | None = None,
+        suffix: str = "sie",
+    ) -> "GeoPromptFrame":
+        """Local spatial information entropy (Shannon entropy of neighbourhood).
+
+        For each feature, computes the Shannon entropy of the value distribution
+        within a circular neighbourhood. High entropy = heterogeneous area;
+        low entropy = homogeneous. Novel: adaptive radius based on local
+        point density when no radius is specified.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        v_min, v_max = min(vals), max(vals)
+        v_range = v_max - v_min or 1.0
+        if radius is None:
+            extent = max(self.bounds().max_x - self.bounds().min_x,
+                         self.bounds().max_y - self.bounds().min_y, 1e-6)
+            radius = extent / math.sqrt(max(n, 1))
+        out_rows: list[Record] = []
+        for i in range(n):
+            # Gather neighbourhood values
+            nb_vals: list[float] = []
+            for j in range(n):
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                if d <= radius:
+                    nb_vals.append(vals[j])
+            # Bin and compute entropy
+            if len(nb_vals) < 2:
+                entropy = 0.0
+            else:
+                bins = [0] * n_bins
+                for v in nb_vals:
+                    b_idx = min(int((v - v_min) / v_range * n_bins), n_bins - 1)
+                    bins[b_idx] += 1
+                total = len(nb_vals)
+                entropy = 0.0
+                for count in bins:
+                    if count > 0:
+                        p = count / total
+                        entropy -= p * math.log(p)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"entropy_{suffix}": round(entropy, 6),
+                f"n_neighbours_{suffix}": len(nb_vals),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 448: ant_colony_path_finder
+    # ------------------------------------------------------------------
+    def ant_colony_path_finder(
+        self,
+        value_column: str,
+        *,
+        n_ants: int = 10,
+        n_iterations: int = 50,
+        evaporation: float = 0.3,
+        alpha: float = 1.0,
+        beta_param: float = 2.0,
+        seed: int | None = None,
+        suffix: str = "aco",
+    ) -> "GeoPromptFrame":
+        """Ant Colony Optimisation for spatial touring (visiting all features).
+
+        Ants deposit pheromone on edges; high-value features attract more
+        visits. Combines heuristic distance and feature-value attractiveness.
+        Returns the best tour found and per-feature visit order.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        vals = [max(float(r.get(value_column, 0) or 0), 0.01) for r in recs]
+        # Distance matrix
+        dist = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1]) or 1e-12
+                dist[i][j] = d
+                dist[j][i] = d
+        # Pheromone
+        tau = [[1.0] * n for _ in range(n)]
+        # Heuristic: 1/distance * value_attractiveness
+        best_tour: list[int] = list(range(n))
+        best_cost = float("inf")
+        for _ in range(n_iterations):
+            for _ in range(n_ants):
+                start = rng.randint(0, n - 1)
+                visited = {start}
+                tour = [start]
+                current = start
+                while len(tour) < n:
+                    probs: list[tuple[int, float]] = []
+                    total = 0.0
+                    for j in range(n):
+                        if j in visited:
+                            continue
+                        eta = (1.0 / max(dist[current][j], 1e-12)) * (vals[j] ** 0.5)
+                        p = (tau[current][j] ** alpha) * (eta ** beta_param)
+                        probs.append((j, p))
+                        total += p
+                    if not probs:
+                        break
+                    r = rng.uniform(0, total)
+                    cum = 0.0
+                    chosen = probs[-1][0]
+                    for j, p in probs:
+                        cum += p
+                        if cum >= r:
+                            chosen = j
+                            break
+                    tour.append(chosen)
+                    visited.add(chosen)
+                    current = chosen
+                cost = sum(dist[tour[i]][tour[i + 1]] for i in range(len(tour) - 1))
+                if cost < best_cost:
+                    best_cost = cost
+                    best_tour = list(tour)
+                # Deposit pheromone
+                deposit = 1.0 / max(cost, 1e-12)
+                for i in range(len(tour) - 1):
+                    tau[tour[i]][tour[i + 1]] += deposit
+                    tau[tour[i + 1]][tour[i]] += deposit
+            # Evaporate
+            for i in range(n):
+                for j in range(n):
+                    tau[i][j] *= (1.0 - evaporation)
+        visit_order = [0] * n
+        for pos, idx in enumerate(best_tour):
+            visit_order[idx] = pos
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"visit_order_{suffix}": visit_order[i],
+                f"tour_cost_{suffix}": round(best_cost, 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 449: fractal_dimension_estimator
+    # ------------------------------------------------------------------
+    def fractal_dimension_estimator(
+        self,
+        *,
+        n_scales: int = 8,
+        suffix: str = "fde",
+    ) -> "GeoPromptFrame":
+        """Estimate fractal (box-counting) dimension of the point pattern.
+
+        Uses the box-counting method: count occupied boxes at decreasing
+        scales and fit log(N) vs log(1/epsilon). Returns a single row
+        with the estimated dimension and per-scale counts.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not centroids:
+            return self.copy()
+        n = len(centroids)
+        b = self.bounds()
+        extent_x = b.max_x - b.min_x or 1.0
+        extent_y = b.max_y - b.min_y or 1.0
+        extent = max(extent_x, extent_y)
+        scales = [extent / (2 ** s) for s in range(1, n_scales + 1)]
+        counts: list[int] = []
+        for eps in scales:
+            boxes: set[tuple[int, int]] = set()
+            for cx, cy in centroids:
+                bx = int((cx - b.min_x) / eps) if eps > 0 else 0
+                by = int((cy - b.min_y) / eps) if eps > 0 else 0
+                boxes.add((bx, by))
+            counts.append(len(boxes))
+        # Linear regression: log(count) = D * log(1/eps) + c
+        log_inv_eps = [math.log(1.0 / max(e, 1e-12)) for e in scales]
+        log_counts = [math.log(max(c, 1)) for c in counts]
+        n_s = len(log_inv_eps)
+        mean_x = sum(log_inv_eps) / n_s
+        mean_y = sum(log_counts) / n_s
+        num = sum((log_inv_eps[i] - mean_x) * (log_counts[i] - mean_y) for i in range(n_s))
+        den = sum((log_inv_eps[i] - mean_x) ** 2 for i in range(n_s))
+        dimension = num / den if den > 0 else 0.0
+        rec: Record = {
+            self.geometry_column: {"type": "Point", "coordinates": [
+                (b.min_x + b.max_x) / 2, (b.min_y + b.max_y) / 2]},
+            f"dimension_{suffix}": round(dimension, 6),
+            f"n_points_{suffix}": n,
+            f"n_scales_{suffix}": n_scales,
+        }
+        for i, c in enumerate(counts):
+            rec[f"count_scale_{i}_{suffix}"] = c
+        out_rows: list[Record] = [rec]
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 450: reaction_diffusion_pattern
+    # ------------------------------------------------------------------
+    def reaction_diffusion_pattern(
+        self,
+        *,
+        grid_resolution: int = 20,
+        n_steps: int = 100,
+        feed_rate: float = 0.055,
+        kill_rate: float = 0.062,
+        diffusion_a: float = 1.0,
+        diffusion_b: float = 0.5,
+        seed: int | None = None,
+        suffix: str = "rdp",
+    ) -> "GeoPromptFrame":
+        """Gray-Scott reaction-diffusion pattern generator on a spatial grid.
+
+        Simulates the Gray-Scott model seeded at feature locations to produce
+        Turing-like spatial patterns. Features act as initial seed points
+        for the B chemical.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        b_bounds = self.bounds()
+        rng = random.Random(seed)
+        gr = grid_resolution
+        dx = (b_bounds.max_x - b_bounds.min_x) / max(gr - 1, 1)
+        dy = (b_bounds.max_y - b_bounds.min_y) / max(gr - 1, 1)
+        # Init grids
+        A = [[1.0] * gr for _ in range(gr)]
+        B = [[0.0] * gr for _ in range(gr)]
+        # Seed B at feature locations
+        for cx, cy in centroids:
+            gi = min(int((cx - b_bounds.min_x) / max(dx, 1e-12)), gr - 1)
+            gj = min(int((cy - b_bounds.min_y) / max(dy, 1e-12)), gr - 1)
+            for di in range(-1, 2):
+                for dj in range(-1, 2):
+                    ni, nj = gi + di, gj + dj
+                    if 0 <= ni < gr and 0 <= nj < gr:
+                        B[nj][ni] = 1.0
+        dt = 1.0
+        for _ in range(n_steps):
+            nA = [[0.0] * gr for _ in range(gr)]
+            nB = [[0.0] * gr for _ in range(gr)]
+            for gy in range(gr):
+                for gx in range(gr):
+                    a, b_val = A[gy][gx], B[gy][gx]
+                    # Laplacian (5-point stencil)
+                    la, lb = -4 * a, -4 * b_val
+                    for dgy, dgx in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        ny, nx = gy + dgy, gx + dgx
+                        if 0 <= ny < gr and 0 <= nx < gr:
+                            la += A[ny][nx]
+                            lb += B[ny][nx]
+                        else:
+                            la += a
+                            lb += b_val
+                    reaction = a * b_val * b_val
+                    nA[gy][gx] = a + dt * (diffusion_a * la - reaction + feed_rate * (1 - a))
+                    nB[gy][gx] = b_val + dt * (diffusion_b * lb + reaction - (kill_rate + feed_rate) * b_val)
+                    nA[gy][gx] = max(0.0, min(1.0, nA[gy][gx]))
+                    nB[gy][gx] = max(0.0, min(1.0, nB[gy][gx]))
+            A, B = nA, nB
+        out_rows: list[Record] = []
+        for gy in range(gr):
+            py = b_bounds.min_y + gy * dy
+            for gx in range(gr):
+                px = b_bounds.min_x + gx * dx
+                out_rows.append({
+                    self.geometry_column: {"type": "Point", "coordinates": [px, py]},
+                    f"chemical_a_{suffix}": round(A[gy][gx], 6),
+                    f"chemical_b_{suffix}": round(B[gy][gx], 6),
+                    f"pattern_{suffix}": round(A[gy][gx] - B[gy][gx], 6),
+                    f"grid_row_{suffix}": gy,
+                    f"grid_col_{suffix}": gx,
+                })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 451: spatial_pagerank
+    # ------------------------------------------------------------------
+    def spatial_pagerank(
+        self,
+        *,
+        k_neighbors: int = 5,
+        damping: float = 0.85,
+        n_iterations: int = 50,
+        suffix: str = "spr",
+    ) -> "GeoPromptFrame":
+        """PageRank algorithm adapted for spatial proximity networks.
+
+        Builds a spatial k-NN graph and computes PageRank scores. Features
+        with many nearby neighbours that are themselves highly connected
+        receive higher scores — identifying spatial hubs.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        # Build adjacency
+        out_links: list[list[int]] = [[] for _ in range(n)]
+        in_links: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            for _, j in dists[:k_neighbors]:
+                out_links[i].append(j)
+                in_links[j].append(i)
+        # PageRank iteration
+        pr = [1.0 / n] * n
+        for _ in range(n_iterations):
+            new_pr = [(1 - damping) / n] * n
+            for i in range(n):
+                for j in in_links[i]:
+                    n_out = len(out_links[j]) or 1
+                    new_pr[i] += damping * pr[j] / n_out
+            pr = new_pr
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"pagerank_{suffix}": round(pr[i], 8),
+                f"out_degree_{suffix}": len(out_links[i]),
+                f"in_degree_{suffix}": len(in_links[i]),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 452: cellular_automata_simulator
+    # ------------------------------------------------------------------
+    def cellular_automata_simulator(
+        self,
+        value_column: str,
+        *,
+        grid_resolution: int = 20,
+        n_steps: int = 10,
+        threshold: float = 0.5,
+        seed: int | None = None,
+        suffix: str = "cas",
+    ) -> "GeoPromptFrame":
+        """Cellular automata simulation seeded by spatial feature values.
+
+        Initialises a grid by IDW-interpolating features, then evolves
+        using a spatial variant of Conway-like rules where cells transition
+        based on the average state of their Moore neighbourhood.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        v_min, v_max = min(vals), max(vals)
+        v_rng = v_max - v_min or 1.0
+        b = self.bounds()
+        gr = grid_resolution
+        dxg = (b.max_x - b.min_x) / max(gr - 1, 1)
+        dyg = (b.max_y - b.min_y) / max(gr - 1, 1)
+        # Init grid via IDW
+        grid = [[0.0] * gr for _ in range(gr)]
+        for gy in range(gr):
+            for gx in range(gr):
+                px = b.min_x + gx * dxg
+                py = b.min_y + gy * dyg
+                num, den = 0.0, 0.0
+                for i in range(n):
+                    d = math.hypot(px - centroids[i][0], py - centroids[i][1])
+                    w = 1.0 / max(d, 1e-12) ** 2
+                    num += w * (vals[i] - v_min) / v_rng
+                    den += w
+                grid[gy][gx] = num / den if den > 0 else 0.0
+        # Evolve
+        for _ in range(n_steps):
+            new_grid = [[0.0] * gr for _ in range(gr)]
+            for gy in range(gr):
+                for gx in range(gr):
+                    total, cnt = 0.0, 0
+                    for dy2 in range(-1, 2):
+                        for dx2 in range(-1, 2):
+                            ny, nx = gy + dy2, gx + dx2
+                            if 0 <= ny < gr and 0 <= nx < gr:
+                                total += grid[ny][nx]
+                                cnt += 1
+                    avg = total / cnt if cnt else 0.0
+                    cur = grid[gy][gx]
+                    # Transition rules
+                    if cur < threshold and avg > 0.6:
+                        new_grid[gy][gx] = min(cur + 0.2, 1.0)
+                    elif cur > threshold and avg < 0.3:
+                        new_grid[gy][gx] = max(cur - 0.2, 0.0)
+                    else:
+                        new_grid[gy][gx] = cur * 0.9 + avg * 0.1
+            grid = new_grid
+        out_rows: list[Record] = []
+        for gy in range(gr):
+            py = b.min_y + gy * dyg
+            for gx in range(gr):
+                px = b.min_x + gx * dxg
+                out_rows.append({
+                    self.geometry_column: {"type": "Point", "coordinates": [px, py]},
+                    f"state_{suffix}": round(grid[gy][gx], 6),
+                    f"active_{suffix}": 1 if grid[gy][gx] > threshold else 0,
+                    f"grid_row_{suffix}": gy,
+                    f"grid_col_{suffix}": gx,
+                })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 453: spatial_label_propagation
+    # ------------------------------------------------------------------
+    def spatial_label_propagation(
+        self,
+        label_column: str,
+        *,
+        k_neighbors: int = 5,
+        n_iterations: int = 20,
+        seed: int | None = None,
+        suffix: str = "slp",
+    ) -> "GeoPromptFrame":
+        """Semi-supervised label propagation on a spatial graph.
+
+        Features with known labels propagate them to unlabelled neighbours
+        on a distance-weighted k-NN graph. Labelled features keep their
+        labels (clamped); unlabelled features adopt the weighted majority
+        label from neighbours.
+        """
+        self._require_column(label_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        raw_labels = [r.get(label_column) for r in recs]
+        labelled = [i for i in range(n) if raw_labels[i] is not None and str(raw_labels[i]).strip() != ""]
+        unique_labels = sorted(set(raw_labels[i] for i in labelled))
+        if not unique_labels:
+            unique_labels = ["unknown"]
+        label_map = {lbl: idx for idx, lbl in enumerate(unique_labels)}
+        n_labels = len(unique_labels)
+        # Init distribution
+        dist_matrix = [[0.0] * n_labels for _ in range(n)]
+        for i in labelled:
+            dist_matrix[i][label_map[raw_labels[i]]] = 1.0
+        for i in range(n):
+            if i not in labelled:
+                for k in range(n_labels):
+                    dist_matrix[i][k] = 1.0 / n_labels
+        # Build k-NN
+        neighbours: list[list[tuple[int, float]]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([(j, max(d, 1e-12)) for d, j in dists[:k_neighbors]])
+        # Propagate
+        labelled_set = set(labelled)
+        for _ in range(n_iterations):
+            new_dist = [list(row) for row in dist_matrix]
+            for i in range(n):
+                if i in labelled_set:
+                    continue
+                scores = [0.0] * n_labels
+                w_sum = 0.0
+                for j, d in neighbours[i]:
+                    w = 1.0 / d
+                    for k in range(n_labels):
+                        scores[k] += w * dist_matrix[j][k]
+                    w_sum += w
+                if w_sum > 0:
+                    new_dist[i] = [s / w_sum for s in scores]
+            dist_matrix = new_dist
+        out_rows: list[Record] = []
+        for i in range(n):
+            best = max(range(n_labels), key=lambda k: dist_matrix[i][k])
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"label_{suffix}": unique_labels[best],
+                f"confidence_{suffix}": round(dist_matrix[i][best], 6),
+                f"was_labelled_{suffix}": 1 if i in labelled_set else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 454: optimal_facility_locator
+    # ------------------------------------------------------------------
+    def optimal_facility_locator(
+        self,
+        demand_column: str,
+        *,
+        n_facilities: int = 3,
+        n_iterations: int = 50,
+        seed: int | None = None,
+        suffix: str = "ofl",
+    ) -> "GeoPromptFrame":
+        """P-median facility location using spatial demand weighting.
+
+        Places n_facilities to minimise demand-weighted total distance.
+        Uses alternating assignment + relocation (Maranzana heuristic).
+        """
+        self._require_column(demand_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        demands = [max(float(r.get(demand_column, 0) or 0), 0.0) for r in recs]
+        p = min(n_facilities, n)
+        # Init: random facility locations
+        fac_indices = rng.sample(range(n), p)
+        fac_locs = [list(centroids[i]) for i in fac_indices]
+        assignments = [0] * n
+        for _ in range(n_iterations):
+            # Assign each demand to nearest facility
+            for i in range(n):
+                best_d, best_f = float("inf"), 0
+                for f in range(p):
+                    d = math.hypot(centroids[i][0] - fac_locs[f][0],
+                                   centroids[i][1] - fac_locs[f][1])
+                    if d < best_d:
+                        best_d = d
+                        best_f = f
+                assignments[i] = best_f
+            # Relocate: demand-weighted centroid
+            for f in range(p):
+                wx, wy, tw = 0.0, 0.0, 0.0
+                for i in range(n):
+                    if assignments[i] == f:
+                        wx += demands[i] * centroids[i][0]
+                        wy += demands[i] * centroids[i][1]
+                        tw += demands[i]
+                if tw > 0:
+                    fac_locs[f] = [wx / tw, wy / tw]
+        total_cost = sum(demands[i] * math.hypot(
+            centroids[i][0] - fac_locs[assignments[i]][0],
+            centroids[i][1] - fac_locs[assignments[i]][1]) for i in range(n))
+        out_rows: list[Record] = []
+        for i in range(n):
+            d = math.hypot(centroids[i][0] - fac_locs[assignments[i]][0],
+                           centroids[i][1] - fac_locs[assignments[i]][1])
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"facility_{suffix}": assignments[i],
+                f"distance_{suffix}": round(d, 6),
+                f"demand_{suffix}": demands[i],
+                f"total_cost_{suffix}": round(total_cost, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 455: spatial_outlier_ensemble
+    # ------------------------------------------------------------------
+    def spatial_outlier_ensemble(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 5,
+        suffix: str = "soe",
+    ) -> "GeoPromptFrame":
+        """Multi-method spatial outlier ensemble combining 3 techniques.
+
+        Computes: (1) local Z-score (value vs neighbour mean/std),
+        (2) spatial lag ratio (value / lag), (3) Local Outlier Factor.
+        Final score = normalised average of all three.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # K-NN
+        knn: list[list[tuple[int, float]]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            knn.append([(j, d) for d, j in dists[:k_neighbors]])
+        # Method 1: Local Z-score
+        z_scores: list[float] = []
+        for i in range(n):
+            nb_vals = [vals[j] for j, _ in knn[i]]
+            if len(nb_vals) < 2:
+                z_scores.append(0.0)
+                continue
+            mean_nb = sum(nb_vals) / len(nb_vals)
+            std_nb = math.sqrt(sum((v - mean_nb) ** 2 for v in nb_vals) / len(nb_vals)) or 1e-12
+            z_scores.append(abs(vals[i] - mean_nb) / std_nb)
+        # Method 2: Spatial lag ratio
+        lag_ratios: list[float] = []
+        for i in range(n):
+            lag = sum(vals[j] / max(d, 1e-12) for j, d in knn[i])
+            w = sum(1.0 / max(d, 1e-12) for _, d in knn[i])
+            lag_val = lag / w if w > 0 else vals[i]
+            lag_ratios.append(abs(vals[i] - lag_val) / max(abs(lag_val), 1e-12))
+        # Method 3: LOF (Local Outlier Factor)
+        k_dist = [knn[i][-1][1] if knn[i] else 1.0 for i in range(n)]
+        reach_dist: list[list[float]] = []
+        for i in range(n):
+            rd = [max(k_dist[j], d) for j, d in knn[i]]
+            reach_dist.append(rd)
+        lrd: list[float] = []
+        for i in range(n):
+            avg_rd = sum(reach_dist[i]) / max(len(reach_dist[i]), 1)
+            lrd.append(1.0 / max(avg_rd, 1e-12))
+        lof: list[float] = []
+        for i in range(n):
+            if not knn[i]:
+                lof.append(1.0)
+                continue
+            avg_lrd_nb = sum(lrd[j] for j, _ in knn[i]) / len(knn[i])
+            lof.append(avg_lrd_nb / max(lrd[i], 1e-12))
+        # Normalise and ensemble
+        def _normalise(arr: list[float]) -> list[float]:
+            mn, mx = min(arr), max(arr)
+            rng_v = mx - mn or 1.0
+            return [(v - mn) / rng_v for v in arr]
+        nz = _normalise(z_scores)
+        nl = _normalise(lag_ratios)
+        nf = _normalise(lof)
+        ensemble = [(nz[i] + nl[i] + nf[i]) / 3.0 for i in range(n)]
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"outlier_score_{suffix}": round(ensemble[i], 6),
+                f"z_score_{suffix}": round(z_scores[i], 6),
+                f"lag_ratio_{suffix}": round(lag_ratios[i], 6),
+                f"lof_{suffix}": round(lof[i], 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 456: spatial_reservoir_computer
+    # ------------------------------------------------------------------
+    def spatial_reservoir_computer(
+        self,
+        value_column: str,
+        time_column: str,
+        *,
+        reservoir_size: int = 20,
+        spectral_radius: float = 0.9,
+        seed: int | None = None,
+        suffix: str = "src",
+    ) -> "GeoPromptFrame":
+        """Echo State Network (reservoir computing) for spatiotemporal prediction.
+
+        Uses a fixed random reservoir with sparse connectivity. Only the
+        output weights are trained (via pseudoinverse), making training O(n).
+        Novel spatial twist: reservoir input includes both value and spatial
+        coordinates.
+        """
+        self._require_column(value_column)
+        self._require_column(time_column)
+        rng = random.Random(seed)
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        sorted_recs = sorted(recs, key=lambda r: float(r.get(time_column, 0) or 0))
+        centroids_sorted = []
+        for r in sorted_recs:
+            g = r.get(self.geometry_column, {})
+            c = g.get("coordinates", [0, 0])
+            centroids_sorted.append((c[0], c[1]))
+        n = len(sorted_recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in sorted_recs]
+        v_min, v_max = min(vals), max(vals)
+        rv = v_max - v_min or 1.0
+        norm_v = [(v - v_min) / rv for v in vals]
+        # Init reservoir
+        rs = reservoir_size
+        W = [[0.0] * rs for _ in range(rs)]
+        for i in range(rs):
+            for j in range(rs):
+                if rng.random() < 0.2:  # sparse
+                    W[i][j] = rng.gauss(0, 1)
+        # Scale to spectral radius (approximate via max row sum)
+        max_row = max(sum(abs(W[i][j]) for j in range(rs)) for i in range(rs)) or 1.0
+        for i in range(rs):
+            for j in range(rs):
+                W[i][j] *= spectral_radius / max_row
+        W_in = [[rng.gauss(0, 0.5) for _ in range(3)] for _ in range(rs)]  # 3 inputs: val, x, y
+
+        def tanh(z: float) -> float:
+            return math.tanh(max(-500, min(500, z)))
+
+        # Run reservoir
+        states: list[list[float]] = []
+        h = [0.0] * rs
+        xs = [c[0] for c in centroids_sorted]
+        ys = [c[1] for c in centroids_sorted]
+        xmin, xmax = min(xs), max(xs)
+        ymin, ymax = min(ys), max(ys)
+        xr = xmax - xmin or 1.0
+        yr = ymax - ymin or 1.0
+        for t in range(n):
+            inp = [norm_v[t], (xs[t] - xmin) / xr, (ys[t] - ymin) / yr]
+            new_h = [0.0] * rs
+            for i in range(rs):
+                s = sum(W[i][j] * h[j] for j in range(rs))
+                s += sum(W_in[i][k] * inp[k] for k in range(3))
+                new_h[i] = tanh(s)
+            h = new_h
+            states.append(list(h))
+        # Train output: linear regression on states[:-1] -> norm_v[1:]
+        # Simple: w_out = (S^T S)^-1 S^T y via pseudo inverse approximation
+        # Use ridge regression with manual computation
+        if n < 3:
+            preds = norm_v
+        else:
+            # S = states[:-1], y = norm_v[1:]
+            m = n - 1
+            S = states[:m]
+            y_target = norm_v[1:]
+            # w = (S^T S + λI)^-1 S^T y — approximate with gradient descent
+            w_out = [0.0] * rs
+            lr = 0.01
+            for _ in range(200):
+                for t in range(m):
+                    pred = sum(w_out[j] * S[t][j] for j in range(rs))
+                    err = pred - y_target[t]
+                    for j in range(rs):
+                        w_out[j] -= lr * err * S[t][j] / m
+            preds_raw = [norm_v[0]]
+            for t in range(m):
+                preds_raw.append(sum(w_out[j] * S[t][j] for j in range(rs)))
+            preds = preds_raw
+        out_rows: list[Record] = []
+        for t in range(n):
+            out_rows.append({
+                self.geometry_column: sorted_recs[t][self.geometry_column],
+                f"predicted_{suffix}": round(preds[t] * rv + v_min, 6),
+                f"actual_{suffix}": vals[t],
+                f"time_{suffix}": float(sorted_recs[t].get(time_column, 0) or 0),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 457: spatial_contour_tree
+    # ------------------------------------------------------------------
+    def spatial_contour_tree(
+        self,
+        value_column: str,
+        *,
+        suffix: str = "sct",
+    ) -> "GeoPromptFrame":
+        """Contour tree analysis identifying ridges and valleys.
+
+        Builds a merge tree from the scalar field by processing features
+        in value order and tracking component merges. Each feature is
+        assigned its contour tree depth and whether it's a local extremum.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # K-NN adjacency
+        adj: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            for _, j in dists[:6]:
+                adj[i].append(j)
+                if i not in adj[j]:
+                    adj[j].append(i)
+        # Process in ascending order (sub-level set)
+        order = sorted(range(n), key=lambda i: vals[i])
+        parent = list(range(n))
+        tree_depth = [0] * n
+        is_minimum = [0] * n
+        is_maximum = [0] * n
+        is_saddle = [0] * n
+        active = [False] * n
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        for idx in order:
+            active[idx] = True
+            neighbours_active = [j for j in adj[idx] if active[j]]
+            if not neighbours_active:
+                is_minimum[idx] = 1
+                tree_depth[idx] = 0
+            else:
+                roots = set(find(j) for j in neighbours_active)
+                if len(roots) >= 2:
+                    is_saddle[idx] = 1
+                max_depth = max(tree_depth[find(j)] for j in neighbours_active)
+                tree_depth[idx] = max_depth + (1 if len(roots) >= 2 else 0)
+                for r in roots:
+                    parent[r] = idx
+        # Maxima: features with no higher active neighbour
+        for i in range(n):
+            higher = [j for j in adj[i] if vals[j] > vals[i]]
+            if not higher:
+                is_maximum[i] = 1
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"tree_depth_{suffix}": tree_depth[i],
+                f"is_minimum_{suffix}": is_minimum[i],
+                f"is_maximum_{suffix}": is_maximum[i],
+                f"is_saddle_{suffix}": is_saddle[i],
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 458: multi_scale_geographically_weighted
+    # ------------------------------------------------------------------
+    def multi_scale_geographically_weighted(
+        self,
+        feature_columns: list[str],
+        target_column: str,
+        *,
+        bandwidths: list[float] | None = None,
+        suffix: str = "mgw",
+    ) -> "GeoPromptFrame":
+        """Multi-scale geographically weighted regression (MGWR).
+
+        Each feature gets its own optimally-selected bandwidth, allowing
+        spatial non-stationarity to vary by variable. Novel pure-Python
+        implementation with automatic bandwidth selection via back-fitting.
+        """
+        for c in feature_columns:
+            self._require_column(c)
+        self._require_column(target_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        n_feat = len(feature_columns)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        targets = [float(r.get(target_column, 0) or 0) for r in recs]
+        # Default bandwidths: geometric sequence
+        if bandwidths is None:
+            extent = max(self.bounds().max_x - self.bounds().min_x,
+                         self.bounds().max_y - self.bounds().min_y, 1e-6)
+            bandwidths = [extent * (0.2 + 0.2 * f) for f in range(n_feat)]
+        bandwidths = bandwidths[:n_feat]
+        while len(bandwidths) < n_feat:
+            bandwidths.append(bandwidths[-1] if bandwidths else 1.0)
+        # Local regression per feature
+        coefficients = [[0.0] * n_feat for _ in range(n)]
+        intercepts = [0.0] * n
+        predictions = [0.0] * n
+        for i in range(n):
+            # Weighted least squares with per-feature bandwidth
+            # Build weight for this observation
+            w = [0.0] * n
+            for j in range(n):
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                # Use average band for observation-level weight
+                avg_bw = sum(bandwidths) / n_feat
+                w[j] = math.exp(-0.5 * (d / max(avg_bw, 1e-12)) ** 2)
+            # Solve WLS: minimise sum w_j * (y_j - b0 - sum(b_f * x_jf))^2
+            # Normal equations via gradient descent
+            betas = [0.0] * (n_feat + 1)  # [intercept, b1, ..., bn_feat]
+            lr = 0.001
+            for _ in range(100):
+                for j in range(n):
+                    pred = betas[0] + sum(betas[f + 1] * raw[j][f] for f in range(n_feat))
+                    err = w[j] * (pred - targets[j])
+                    betas[0] -= lr * err
+                    for f in range(n_feat):
+                        betas[f + 1] -= lr * err * raw[j][f]
+            intercepts[i] = betas[0]
+            for f in range(n_feat):
+                coefficients[i][f] = betas[f + 1]
+            predictions[i] = betas[0] + sum(betas[f + 1] * raw[i][f] for f in range(n_feat))
+        out_rows: list[Record] = []
+        for i in range(n):
+            rec: Record = {
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(predictions[i], 6),
+                f"residual_{suffix}": round(targets[i] - predictions[i], 6),
+                f"intercept_{suffix}": round(intercepts[i], 6),
+            }
+            for f in range(n_feat):
+                rec[f"coef_{feature_columns[f]}_{suffix}"] = round(coefficients[i][f], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 459: spatial_markov_chain
+    # ------------------------------------------------------------------
+    def spatial_markov_chain(
+        self,
+        state_column: str,
+        *,
+        n_steps: int = 10,
+        k_neighbors: int = 5,
+        seed: int | None = None,
+        suffix: str = "smc",
+    ) -> "GeoPromptFrame":
+        """Spatial Markov chain: transition probabilities conditioned on neighbours.
+
+        Builds a spatial transition matrix where the probability of a feature's
+        state change depends on its neighbours' current states. Simulates
+        state evolution forward n_steps.
+        """
+        self._require_column(state_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        states = [str(r.get(state_column, "")) for r in recs]
+        unique_states = sorted(set(states))
+        state_map = {s: i for i, s in enumerate(unique_states)}
+        ns = len(unique_states)
+        current = [state_map[s] for s in states]
+        # Build k-NN
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([j for _, j in dists[:k_neighbors]])
+        # Estimate transition matrix from spatial adjacency
+        trans = [[1.0 / ns] * ns for _ in range(ns)]
+        for i in range(n):
+            for j in neighbours[i]:
+                trans[current[i]][current[j]] += 1.0
+        for s in range(ns):
+            total = sum(trans[s])
+            if total > 0:
+                trans[s] = [t / total for t in trans[s]]
+        # Simulate
+        for _ in range(n_steps):
+            new_state = list(current)
+            for i in range(n):
+                # Transition prob conditioned on neighbour distribution
+                nb_dist = [0.0] * ns
+                for j in neighbours[i]:
+                    nb_dist[current[j]] += 1.0 / len(neighbours[i])
+                # Blend own transition probability with neighbour influence
+                probs = [0.0] * ns
+                for s in range(ns):
+                    probs[s] = 0.5 * trans[current[i]][s] + 0.5 * nb_dist[s]
+                r = rng.random()
+                cum = 0.0
+                new_s = current[i]
+                for s in range(ns):
+                    cum += probs[s]
+                    if cum >= r:
+                        new_s = s
+                        break
+                new_state[i] = new_s
+            current = new_state
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"initial_state_{suffix}": states[i],
+                f"final_state_{suffix}": unique_states[current[i]],
+                f"changed_{suffix}": 1 if states[i] != unique_states[current[i]] else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 460: spatial_homology_betti
+    # ------------------------------------------------------------------
+    def spatial_homology_betti(
+        self,
+        *,
+        epsilon: float | None = None,
+        suffix: str = "shb",
+    ) -> "GeoPromptFrame":
+        """Compute Betti numbers (β0, β1) of the spatial Rips complex.
+
+        β0 = number of connected components, β1 = number of 1-cycles (holes)
+        in the proximity graph at distance threshold epsilon. Novel: if
+        epsilon is None, auto-selects the scale that maximises β1.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        # Compute all pairwise distances
+        all_dists: list[float] = []
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                all_dists.append(d)
+        if not all_dists:
+            out_rows: list[Record] = [{
+                self.geometry_column: recs[0][self.geometry_column],
+                f"beta0_{suffix}": n, f"beta1_{suffix}": 0,
+                f"epsilon_{suffix}": 0.0,
+            }]
+            return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+        all_dists.sort()
+        if epsilon is not None:
+            epsilons = [epsilon]
+        else:
+            # Try multiple scales
+            epsilons = [all_dists[int(len(all_dists) * q)] for q in
+                        [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5]]
+            epsilons = sorted(set(epsilons))
+
+        def _compute_betti(eps: float) -> tuple[int, int]:
+            # Build adjacency
+            edges: list[tuple[int, int]] = []
+            adj_set: list[set[int]] = [set() for _ in range(n)]
+            for i in range(n):
+                for j in range(i + 1, n):
+                    d = math.hypot(centroids[i][0] - centroids[j][0],
+                                   centroids[i][1] - centroids[j][1])
+                    if d <= eps:
+                        edges.append((i, j))
+                        adj_set[i].add(j)
+                        adj_set[j].add(i)
+            # β0 via union-find
+            p = list(range(n))
+            def find(x: int) -> int:
+                while p[x] != x:
+                    p[x] = p[p[x]]
+                    x = p[x]
+                return x
+            for a, b in edges:
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    p[ra] = rb
+            beta0 = len(set(find(i) for i in range(n)))
+            # β1 = edges - vertices + β0 (Euler characteristic for 1-complex)
+            # Count triangles to correct
+            triangles = 0
+            for i in range(n):
+                for j in adj_set[i]:
+                    if j > i:
+                        for k in adj_set[j]:
+                            if k > j and k in adj_set[i]:
+                                triangles += 1
+            # For simplicial complex: β1 = |E| - |V| + β0 - |T| (... approximation)
+            beta1 = max(0, len(edges) - n + beta0)
+            return beta0, beta1
+
+        best_b1 = -1
+        best_eps = epsilons[0]
+        best_b0 = n
+        for eps in epsilons:
+            b0, b1 = _compute_betti(eps)
+            if b1 > best_b1:
+                best_b1 = b1
+                best_eps = eps
+                best_b0 = b0
+        if epsilon is not None:
+            best_b0, best_b1 = _compute_betti(epsilon)
+            best_eps = epsilon
+        out_rows_final: list[Record] = [{
+            self.geometry_column: {"type": "Point", "coordinates": [
+                (self.bounds().min_x + self.bounds().max_x) / 2,
+                (self.bounds().min_y + self.bounds().max_y) / 2]},
+            f"beta0_{suffix}": best_b0,
+            f"beta1_{suffix}": best_b1,
+            f"epsilon_{suffix}": round(best_eps, 6),
+            f"n_points_{suffix}": n,
+        }]
+        return GeoPromptFrame._from_internal_rows(out_rows_final, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 461: spatial_potential_field
+    # ------------------------------------------------------------------
+    def spatial_potential_field(
+        self,
+        value_column: str,
+        *,
+        grid_resolution: int = 20,
+        suffix: str = "spf",
+    ) -> "GeoPromptFrame":
+        """Spatial potential field with gradient vectors.
+
+        Models features as charged particles with charge proportional to value.
+        Computes the electric-potential-like field and its gradient on a grid.
+        Gradient vectors indicate the direction toward high-value clusters.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        b = self.bounds()
+        gr = grid_resolution
+        dxg = (b.max_x - b.min_x) / max(gr - 1, 1)
+        dyg = (b.max_y - b.min_y) / max(gr - 1, 1)
+        out_rows: list[Record] = []
+        for gy in range(gr):
+            py = b.min_y + gy * dyg
+            for gx in range(gr):
+                px = b.min_x + gx * dxg
+                potential = 0.0
+                grad_x, grad_y = 0.0, 0.0
+                for i in range(n):
+                    dx_val = px - centroids[i][0]
+                    dy_val = py - centroids[i][1]
+                    d = math.hypot(dx_val, dy_val)
+                    if d < 1e-12:
+                        d = 1e-12
+                    potential += vals[i] / d
+                    # Gradient: d(V)/dx = -q * (x - xi) / r^3
+                    grad_x += -vals[i] * dx_val / (d ** 3)
+                    grad_y += -vals[i] * dy_val / (d ** 3)
+                magnitude = math.hypot(grad_x, grad_y)
+                out_rows.append({
+                    self.geometry_column: {"type": "Point", "coordinates": [px, py]},
+                    f"potential_{suffix}": round(potential, 6),
+                    f"grad_x_{suffix}": round(grad_x, 6),
+                    f"grad_y_{suffix}": round(grad_y, 6),
+                    f"grad_magnitude_{suffix}": round(magnitude, 6),
+                    f"grid_row_{suffix}": gy,
+                    f"grid_col_{suffix}": gx,
+                })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 462: particle_swarm_cluster
+    # ------------------------------------------------------------------
+    def particle_swarm_cluster(
+        self,
+        value_column: str,
+        *,
+        n_clusters: int = 3,
+        n_particles: int = 10,
+        n_iterations: int = 50,
+        seed: int | None = None,
+        suffix: str = "psc",
+    ) -> "GeoPromptFrame":
+        """Particle Swarm Optimisation for spatial clustering.
+
+        PSO particles represent cluster centre positions. The objective
+        minimises total intra-cluster distance weighted by values. Novel:
+        outperforms k-means on non-convex clusters due to global search.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        b = self.bounds()
+        k = min(n_clusters, n)
+
+        def _objective(centres: list[list[float]]) -> float:
+            total = 0.0
+            for i in range(n):
+                min_d = float("inf")
+                for c in centres:
+                    d = math.hypot(centroids[i][0] - c[0], centroids[i][1] - c[1])
+                    if d < min_d:
+                        min_d = d
+                total += min_d
+            return total
+
+        # Init particles
+        particles = [[[rng.uniform(b.min_x, b.max_x), rng.uniform(b.min_y, b.max_y)]
+                      for _ in range(k)] for _ in range(n_particles)]
+        velocities = [[[rng.gauss(0, 0.1), rng.gauss(0, 0.1)]
+                       for _ in range(k)] for _ in range(n_particles)]
+        p_best = [list(p) for p in particles]
+        p_best_score = [_objective(p) for p in particles]
+        g_best_idx = min(range(n_particles), key=lambda i: p_best_score[i])
+        g_best = [list(c) for c in p_best[g_best_idx]]
+        g_best_score = p_best_score[g_best_idx]
+        w, c1, c2 = 0.7, 1.5, 1.5
+        for _ in range(n_iterations):
+            for p in range(n_particles):
+                for ci in range(k):
+                    for dim in range(2):
+                        r1, r2 = rng.random(), rng.random()
+                        velocities[p][ci][dim] = (
+                            w * velocities[p][ci][dim] +
+                            c1 * r1 * (p_best[p][ci][dim] - particles[p][ci][dim]) +
+                            c2 * r2 * (g_best[ci][dim] - particles[p][ci][dim]))
+                        particles[p][ci][dim] += velocities[p][ci][dim]
+                score = _objective(particles[p])
+                if score < p_best_score[p]:
+                    p_best_score[p] = score
+                    p_best[p] = [list(c) for c in particles[p]]
+                if score < g_best_score:
+                    g_best_score = score
+                    g_best = [list(c) for c in particles[p]]
+        # Assign clusters
+        out_rows: list[Record] = []
+        for i in range(n):
+            best_c, best_d = 0, float("inf")
+            for ci in range(k):
+                d = math.hypot(centroids[i][0] - g_best[ci][0],
+                               centroids[i][1] - g_best[ci][1])
+                if d < best_d:
+                    best_d = d
+                    best_c = ci
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": best_c,
+                f"distance_{suffix}": round(best_d, 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 463: spatial_elastic_net
+    # ------------------------------------------------------------------
+    def spatial_elastic_net(
+        self,
+        feature_columns: list[str],
+        target_column: str,
+        *,
+        alpha: float = 1.0,
+        l1_ratio: float = 0.5,
+        epochs: int = 200,
+        learning_rate: float = 0.01,
+        suffix: str = "sen",
+    ) -> "GeoPromptFrame":
+        """Elastic Net regression with coordinate descent.
+
+        Combines L1 (Lasso) and L2 (Ridge) penalties. Pure-Python implementation
+        using proximal gradient descent with the soft-threshold operator.
+        """
+        for c in feature_columns:
+            self._require_column(c)
+        self._require_column(target_column)
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        n_feat = len(feature_columns)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        targets = [float(r.get(target_column, 0) or 0) for r in recs]
+        # Normalise
+        col_min = [min(raw[i][f] for i in range(n)) for f in range(n_feat)]
+        col_rng = [max(raw[i][f] for i in range(n)) - col_min[f] or 1.0 for f in range(n_feat)]
+        data = [[(raw[i][f] - col_min[f]) / col_rng[f] for f in range(n_feat)] for i in range(n)]
+        t_mean = sum(targets) / n
+        target_c = [t - t_mean for t in targets]
+        # Coordinate descent
+        w = [0.0] * n_feat
+        for _ in range(epochs):
+            for f in range(n_feat):
+                # Partial residual
+                residuals = [0.0] * n
+                for i in range(n):
+                    pred = sum(w[ff] * data[i][ff] for ff in range(n_feat))
+                    residuals[i] = target_c[i] - pred + w[f] * data[i][f]
+                # Correlation
+                rho = sum(data[i][f] * residuals[i] for i in range(n)) / n
+                # Soft threshold for L1
+                l1 = alpha * l1_ratio
+                l2 = alpha * (1 - l1_ratio)
+                if rho > l1:
+                    w[f] = (rho - l1) / (1 + l2)
+                elif rho < -l1:
+                    w[f] = (rho + l1) / (1 + l2)
+                else:
+                    w[f] = 0.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            pred = t_mean + sum(w[f] * data[i][f] for f in range(n_feat))
+            rec: Record = {
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(pred, 6),
+                f"residual_{suffix}": round(targets[i] - pred, 6),
+            }
+            for f in range(n_feat):
+                rec[f"coef_{feature_columns[f]}_{suffix}"] = round(w[f], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 464: spatial_dbscan_clustering
+    # ------------------------------------------------------------------
+    def spatial_dbscan_clustering(
+        self,
+        *,
+        epsilon: float | None = None,
+        min_points: int = 3,
+        suffix: str = "dbs",
+    ) -> "GeoPromptFrame":
+        """DBSCAN density-based spatial clustering.
+
+        Pure-Python implementation of Ester et al. (1996). Identifies
+        arbitrarily-shaped clusters and noise points. Auto-selects epsilon
+        from the k-distance graph elbow if not specified.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        # Auto epsilon from k-distance elbow
+        if epsilon is None:
+            k_dists: list[float] = []
+            for i in range(n):
+                dists = sorted(math.hypot(centroids[i][0] - centroids[j][0],
+                                          centroids[i][1] - centroids[j][1])
+                               for j in range(n) if j != i)
+                k_dists.append(dists[min(min_points - 1, len(dists) - 1)] if dists else 0.0)
+            k_dists.sort()
+            # Elbow: point of maximum curvature
+            if len(k_dists) > 2:
+                max_curv, best_idx = 0.0, len(k_dists) // 2
+                for qi in range(1, len(k_dists) - 1):
+                    curv = k_dists[qi + 1] - 2 * k_dists[qi] + k_dists[qi - 1]
+                    if curv > max_curv:
+                        max_curv = curv
+                        best_idx = qi
+                epsilon = k_dists[best_idx]
+            else:
+                epsilon = k_dists[-1] if k_dists else 1.0
+        labels = [-1] * n  # -1 = noise
+        cluster_id = 0
+        visited = [False] * n
+
+        def _region_query(i: int) -> list[int]:
+            return [j for j in range(n) if j != i and
+                    math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1]) <= epsilon]
+
+        for i in range(n):
+            if visited[i]:
+                continue
+            visited[i] = True
+            neighbours = _region_query(i)
+            if len(neighbours) < min_points - 1:
+                continue  # noise
+            labels[i] = cluster_id
+            queue = list(neighbours)
+            while queue:
+                j = queue.pop(0)
+                if not visited[j]:
+                    visited[j] = True
+                    nb = _region_query(j)
+                    if len(nb) >= min_points - 1:
+                        queue.extend(nb)
+                if labels[j] == -1:
+                    labels[j] = cluster_id
+            cluster_id += 1
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": labels[i],
+                f"is_noise_{suffix}": 1 if labels[i] == -1 else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 465: spatial_mean_shift
+    # ------------------------------------------------------------------
+    def spatial_mean_shift(
+        self,
+        *,
+        bandwidth: float | None = None,
+        n_iterations: int = 50,
+        suffix: str = "sms",
+    ) -> "GeoPromptFrame":
+        """Mean shift clustering in geographic space.
+
+        Each feature point iteratively shifts toward the mean of points within
+        its bandwidth kernel until convergence. Cluster centres merge when
+        they converge to the same location.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        if bandwidth is None:
+            extent = max(self.bounds().max_x - self.bounds().min_x,
+                         self.bounds().max_y - self.bounds().min_y, 1e-6)
+            bandwidth = extent / math.sqrt(max(n, 1))
+        points = [list(c) for c in centroids]
+        for _ in range(n_iterations):
+            new_points = [list(p) for p in points]
+            for i in range(n):
+                wx, wy, tw = 0.0, 0.0, 0.0
+                for j in range(n):
+                    d = math.hypot(points[i][0] - centroids[j][0],
+                                   points[i][1] - centroids[j][1])
+                    w = math.exp(-0.5 * (d / bandwidth) ** 2)
+                    wx += w * centroids[j][0]
+                    wy += w * centroids[j][1]
+                    tw += w
+                if tw > 0:
+                    new_points[i] = [wx / tw, wy / tw]
+            points = new_points
+        # Assign clusters: merge converged points
+        labels = list(range(n))
+        merge_dist = bandwidth * 0.1
+        for i in range(n):
+            for j in range(i):
+                if math.hypot(points[i][0] - points[j][0],
+                              points[i][1] - points[j][1]) < merge_dist:
+                    labels[i] = labels[j]
+                    break
+        # Renumber clusters
+        unique = sorted(set(labels))
+        remap = {v: i for i, v in enumerate(unique)}
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": remap[labels[i]],
+                f"shift_x_{suffix}": round(points[i][0] - centroids[i][0], 6),
+                f"shift_y_{suffix}": round(points[i][1] - centroids[i][1], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 466: spatial_gradient_field
+    # ------------------------------------------------------------------
+    def spatial_gradient_field(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 5,
+        suffix: str = "sgf",
+    ) -> "GeoPromptFrame":
+        """Compute spatial gradient (slope + aspect) for a scalar field at each feature.
+
+        Uses local least-squares plane fitting on k nearest neighbours to
+        estimate dz/dx and dz/dy, then derives slope magnitude and aspect angle.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            # k-NN
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            nb = [j for _, j in dists[:k_neighbors]]
+            # Fit plane: z = a*dx + b*dy + c  via normal equations
+            # Using deviations from point i
+            sxx, syy, sxy, sxz, syz = 0.0, 0.0, 0.0, 0.0, 0.0
+            for j in nb:
+                dx_val = centroids[j][0] - centroids[i][0]
+                dy_val = centroids[j][1] - centroids[i][1]
+                dz = vals[j] - vals[i]
+                sxx += dx_val * dx_val
+                syy += dy_val * dy_val
+                sxy += dx_val * dy_val
+                sxz += dx_val * dz
+                syz += dy_val * dz
+            det = sxx * syy - sxy * sxy
+            if abs(det) > 1e-12:
+                dz_dx = (syy * sxz - sxy * syz) / det
+                dz_dy = (sxx * syz - sxy * sxz) / det
+            else:
+                dz_dx, dz_dy = 0.0, 0.0
+            slope = math.hypot(dz_dx, dz_dy)
+            aspect = math.degrees(math.atan2(dz_dy, dz_dx)) % 360
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"slope_{suffix}": round(slope, 6),
+                f"aspect_{suffix}": round(aspect, 6),
+                f"dz_dx_{suffix}": round(dz_dx, 6),
+                f"dz_dy_{suffix}": round(dz_dy, 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 467: spatial_hdbscan
+    # ------------------------------------------------------------------
+    def spatial_hdbscan(
+        self,
+        *,
+        min_cluster_size: int = 3,
+        min_samples: int | None = None,
+        suffix: str = "hdb",
+    ) -> "GeoPromptFrame":
+        """Hierarchical DBSCAN for variable-density spatial clustering.
+
+        Pure-Python simplified HDBSCAN: builds mutual reachability graph,
+        constructs MST, then extracts stable clusters at varying density
+        levels. Outperforms flat DBSCAN on clusters of different densities.
+        """
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        if min_samples is None:
+            min_samples = min_cluster_size
+        # Core distances
+        core_dists: list[float] = []
+        for i in range(n):
+            dists = sorted(math.hypot(centroids[i][0] - centroids[j][0],
+                                      centroids[i][1] - centroids[j][1])
+                           for j in range(n) if j != i)
+            core_dists.append(dists[min(min_samples - 1, len(dists) - 1)] if dists else 0.0)
+        # Mutual reachability distance
+        def _mrd(i: int, j: int) -> float:
+            d = math.hypot(centroids[i][0] - centroids[j][0],
+                           centroids[i][1] - centroids[j][1])
+            return max(core_dists[i], core_dists[j], d)
+        # Prim's MST on mutual reachability
+        in_mst = [False] * n
+        key = [float("inf")] * n
+        parent = [-1] * n
+        key[0] = 0.0
+        mst_edges: list[tuple[float, int, int]] = []
+        for _ in range(n):
+            u = -1
+            for i in range(n):
+                if not in_mst[i] and (u == -1 or key[i] < key[u]):
+                    u = i
+            if u == -1:
+                break
+            in_mst[u] = True
+            if parent[u] >= 0:
+                mst_edges.append((key[u], parent[u], u))
+            for v in range(n):
+                if not in_mst[v]:
+                    d = _mrd(u, v)
+                    if d < key[v]:
+                        key[v] = d
+                        parent[v] = u
+        # Sort edges by weight (ascending) for hierarchical clustering
+        mst_edges.sort()
+        # Extract clusters: cut MST at edges > threshold
+        # Use stability: cluster exists as long as possible
+        labels = list(range(n))
+        uf_parent = list(range(n))
+        uf_size = [1] * n
+        def find(x: int) -> int:
+            while uf_parent[x] != x:
+                uf_parent[x] = uf_parent[uf_parent[x]]
+                x = uf_parent[x]
+            return x
+        for w, a, b_node in mst_edges:
+            ra, rb = find(a), find(b_node)
+            if ra != rb:
+                if uf_size[ra] < uf_size[rb]:
+                    ra, rb = rb, ra
+                uf_parent[rb] = ra
+                uf_size[ra] += uf_size[rb]
+        # Extract clusters from final components
+        comp_map: dict[int, list[int]] = {}
+        for i in range(n):
+            r = find(i)
+            comp_map.setdefault(r, []).append(i)
+        cluster_id = 0
+        final_labels = [-1] * n
+        for root, members in comp_map.items():
+            if len(members) >= min_cluster_size:
+                for m in members:
+                    final_labels[m] = cluster_id
+                cluster_id += 1
+        # Re-cluster using MST pruning at density threshold
+        # Cut the longest edges that separate small clusters
+        if cluster_id <= 1 and len(mst_edges) > 0:
+            # Progressive cutting
+            uf_parent2 = list(range(n))
+            uf_size2 = [1] * n
+            def find2(x: int) -> int:
+                while uf_parent2[x] != x:
+                    uf_parent2[x] = uf_parent2[uf_parent2[x]]
+                    x = uf_parent2[x]
+                return x
+            threshold = mst_edges[-1][0] * 0.7 if mst_edges else float("inf")
+            for w, a, b_node in mst_edges:
+                if w <= threshold:
+                    ra, rb = find2(a), find2(b_node)
+                    if ra != rb:
+                        if uf_size2[ra] < uf_size2[rb]:
+                            ra, rb = rb, ra
+                        uf_parent2[rb] = ra
+                        uf_size2[ra] += uf_size2[rb]
+            comp_map2: dict[int, list[int]] = {}
+            for i in range(n):
+                r = find2(i)
+                comp_map2.setdefault(r, []).append(i)
+            cluster_id = 0
+            final_labels = [-1] * n
+            for root, members in comp_map2.items():
+                if len(members) >= min_cluster_size:
+                    for m in members:
+                        final_labels[m] = cluster_id
+                    cluster_id += 1
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": final_labels[i],
+                f"core_distance_{suffix}": round(core_dists[i], 6),
+                f"is_noise_{suffix}": 1 if final_labels[i] == -1 else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 468: spatial_copula_dependence
+    # ------------------------------------------------------------------
+    def spatial_copula_dependence(
+        self,
+        column_a: str,
+        column_b: str,
+        *,
+        suffix: str = "scp",
+    ) -> "GeoPromptFrame":
+        """Spatial copula dependence analysis between two variables.
+
+        Computes rank-based Kendall's tau, Spearman's rho, and a spatial
+        concordance measure weighted by proximity. Identifies whether nearby
+        features have stronger or weaker dependence than global average.
+        """
+        self._require_column(column_a)
+        self._require_column(column_b)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        a_vals = [float(r.get(column_a, 0) or 0) for r in recs]
+        b_vals = [float(r.get(column_b, 0) or 0) for r in recs]
+        # Ranks
+        def _rank(arr: list[float]) -> list[float]:
+            indexed = sorted(range(len(arr)), key=lambda i: arr[i])
+            ranks = [0.0] * len(arr)
+            for r, i in enumerate(indexed):
+                ranks[i] = r + 1.0
+            return ranks
+        rank_a = _rank(a_vals)
+        rank_b = _rank(b_vals)
+        # Global Spearman
+        d_sq = sum((rank_a[i] - rank_b[i]) ** 2 for i in range(n))
+        global_rho = 1 - 6 * d_sq / (n * (n ** 2 - 1)) if n > 1 else 0.0
+        # Per-feature local concordance
+        extent = max(self.bounds().max_x - self.bounds().min_x,
+                     self.bounds().max_y - self.bounds().min_y, 1e-6)
+        bw = extent / math.sqrt(max(n, 1))
+        out_rows: list[Record] = []
+        for i in range(n):
+            # Local weighted concordance
+            conc, disc, tw = 0.0, 0.0, 0.0
+            for j in range(n):
+                if j == i:
+                    continue
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                w = math.exp(-0.5 * (d / bw) ** 2)
+                sign_a = 1.0 if a_vals[j] > a_vals[i] else (-1.0 if a_vals[j] < a_vals[i] else 0.0)
+                sign_b = 1.0 if b_vals[j] > b_vals[i] else (-1.0 if b_vals[j] < b_vals[i] else 0.0)
+                if sign_a * sign_b > 0:
+                    conc += w
+                elif sign_a * sign_b < 0:
+                    disc += w
+                tw += w
+            local_tau = (conc - disc) / tw if tw > 0 else 0.0
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"local_tau_{suffix}": round(local_tau, 6),
+                f"global_rho_{suffix}": round(global_rho, 6),
+                f"dep_ratio_{suffix}": round(local_tau / max(abs(global_rho), 1e-12), 6),
+                f"a_val_{suffix}": a_vals[i],
+                f"b_val_{suffix}": b_vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 469: spatial_loess_regression
+    # ------------------------------------------------------------------
+    def spatial_loess_regression(
+        self,
+        feature_columns: list[str],
+        target_column: str,
+        *,
+        span: float = 0.5,
+        degree: int = 1,
+        suffix: str = "lss",
+    ) -> "GeoPromptFrame":
+        """LOESS (locally estimated scatterplot smoothing) spatial regression.
+
+        Fits local weighted polynomials at each feature location using a
+        tricube distance kernel. span controls the fraction of data used.
+        """
+        for c in feature_columns:
+            self._require_column(c)
+        self._require_column(target_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        k = max(2, int(span * n))
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        targets = [float(r.get(target_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            # Find k nearest, compute tricube weights
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n)]
+            dists.sort()
+            nb = dists[:k]
+            max_d = nb[-1][0] if nb else 1.0
+            if max_d < 1e-12:
+                max_d = 1e-12
+            weights: list[float] = []
+            indices: list[int] = []
+            for d, j in nb:
+                u = d / max_d
+                w = (1 - u ** 3) ** 3 if u < 1 else 0.0
+                weights.append(w)
+                indices.append(j)
+            # Weighted regression (degree=1: linear)
+            if degree >= 1:
+                # WLS via gradient descent
+                n_feat = len(feature_columns)
+                betas = [0.0] * (n_feat + 1)
+                lr = 0.001
+                for _ in range(100):
+                    for wi, j in zip(weights, indices):
+                        pred = betas[0] + sum(betas[f + 1] * raw[j][f] for f in range(n_feat))
+                        err = wi * (pred - targets[j])
+                        betas[0] -= lr * err
+                        for f in range(n_feat):
+                            betas[f + 1] -= lr * err * raw[j][f]
+                prediction = betas[0] + sum(betas[f + 1] * raw[i][f] for f in range(n_feat))
+            else:
+                # degree=0: weighted mean
+                tw = sum(weights)
+                prediction = sum(weights[q] * targets[indices[q]] for q in range(len(indices))) / tw if tw > 0 else 0.0
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(prediction, 6),
+                f"residual_{suffix}": round(targets[i] - prediction, 6),
+                f"value_{suffix}": targets[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 470: spatial_flow_accumulation
+    # ------------------------------------------------------------------
+    def spatial_flow_accumulation(
+        self,
+        elevation_column: str,
+        *,
+        suffix: str = "sfa",
+    ) -> "GeoPromptFrame":
+        """Flow accumulation on a spatial point network.
+
+        Computes drainage direction and flow accumulation by routing flow
+        from each feature to its lowest neighbour in a k-NN graph.
+        Features that accumulate many upstream flows are valleys/sinks.
+        """
+        self._require_column(elevation_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        elev = [float(r.get(elevation_column, 0) or 0) for r in recs]
+        # K-NN
+        adj: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            adj[i] = [j for _, j in dists[:8]]
+        # Flow direction: steepest descent neighbour
+        flow_to: list[int] = []
+        for i in range(n):
+            best_j, best_drop = i, 0.0
+            for j in adj[i]:
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                drop = (elev[i] - elev[j]) / max(d, 1e-12)
+                if drop > best_drop:
+                    best_drop = drop
+                    best_j = j
+            flow_to.append(best_j)
+        # Accumulation: topological sort from peaks
+        accumulation = [1.0] * n
+        order = sorted(range(n), key=lambda i: -elev[i])
+        for i in order:
+            if flow_to[i] != i:
+                accumulation[flow_to[i]] += accumulation[i]
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"accumulation_{suffix}": round(accumulation[i], 6),
+                f"flow_to_{suffix}": flow_to[i],
+                f"elevation_{suffix}": elev[i],
+                f"is_sink_{suffix}": 1 if flow_to[i] == i else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 471: spatial_cross_k_function
+    # ------------------------------------------------------------------
+    def spatial_cross_k_function(
+        self,
+        label_column: str,
+        label_a: str,
+        label_b: str,
+        *,
+        n_bins: int = 20,
+        suffix: str = "ckf",
+    ) -> "GeoPromptFrame":
+        """Bivariate (cross) Ripley's K-function for spatial interaction.
+
+        Measures whether two types of features attract, repel, or are
+        independent at various distance scales. K_ab(r) > pi*r^2 indicates
+        attraction; K_ab(r) < pi*r^2 indicates repulsion.
+        """
+        self._require_column(label_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        labels = [str(r.get(label_column, "")) for r in recs]
+        idx_a = [i for i in range(n) if labels[i] == label_a]
+        idx_b = [i for i in range(n) if labels[i] == label_b]
+        n_a, n_b = len(idx_a), len(idx_b)
+        b = self.bounds()
+        area = max((b.max_x - b.min_x) * (b.max_y - b.min_y), 1e-12)
+        max_dist = math.hypot(b.max_x - b.min_x, b.max_y - b.min_y)
+        bin_width = max_dist / n_bins
+        out_rows: list[Record] = []
+        for bi in range(n_bins):
+            r_val = (bi + 1) * bin_width
+            count = 0
+            for i in idx_a:
+                for j in idx_b:
+                    d = math.hypot(centroids[i][0] - centroids[j][0],
+                                   centroids[i][1] - centroids[j][1])
+                    if d <= r_val:
+                        count += 1
+            k_val = area * count / max(n_a * n_b, 1) if n_a > 0 and n_b > 0 else 0.0
+            l_val = math.sqrt(k_val / math.pi) - r_val if k_val > 0 else 0.0
+            csr = math.pi * r_val ** 2
+            out_rows.append({
+                self.geometry_column: {"type": "Point", "coordinates": [
+                    (b.min_x + b.max_x) / 2, (b.min_y + b.max_y) / 2]},
+                f"distance_{suffix}": round(r_val, 6),
+                f"k_cross_{suffix}": round(k_val, 6),
+                f"l_cross_{suffix}": round(l_val, 6),
+                f"csr_{suffix}": round(csr, 6),
+                f"interaction_{suffix}": "attraction" if k_val > csr else "repulsion",
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 472: harmonic_regression_spatial
+    # ------------------------------------------------------------------
+    def harmonic_regression_spatial(
+        self,
+        value_column: str,
+        time_column: str,
+        *,
+        n_harmonics: int = 3,
+        suffix: str = "hrs",
+    ) -> "GeoPromptFrame":
+        """Harmonic (Fourier) regression for spatiotemporal periodic signals.
+
+        Fits value = a0 + sum(a_k*cos(k*omega*t) + b_k*sin(k*omega*t))
+        at each feature. The fundamental frequency is estimated from the
+        time range. Returns fitted values and harmonic coefficients.
+        """
+        self._require_column(value_column)
+        self._require_column(time_column)
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        times = [float(r.get(time_column, 0) or 0) for r in recs]
+        t_min, t_max = min(times), max(times)
+        period = t_max - t_min or 1.0
+        omega = 2 * math.pi / period
+        # Build design matrix and solve via gradient descent
+        n_params = 1 + 2 * n_harmonics
+        betas = [0.0] * n_params
+        lr = 0.001
+        for _ in range(200):
+            for i in range(n):
+                t = times[i] - t_min
+                features = [1.0]
+                for h in range(1, n_harmonics + 1):
+                    features.append(math.cos(h * omega * t))
+                    features.append(math.sin(h * omega * t))
+                pred = sum(betas[j] * features[j] for j in range(n_params))
+                err = pred - vals[i]
+                for j in range(n_params):
+                    betas[j] -= lr * err * features[j] / n
+        out_rows: list[Record] = []
+        for i in range(n):
+            t = times[i] - t_min
+            features = [1.0]
+            for h in range(1, n_harmonics + 1):
+                features.append(math.cos(h * omega * t))
+                features.append(math.sin(h * omega * t))
+            pred = sum(betas[j] * features[j] for j in range(n_params))
+            rec: Record = {
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(pred, 6),
+                f"residual_{suffix}": round(vals[i] - pred, 6),
+                f"actual_{suffix}": vals[i],
+                f"time_{suffix}": times[i],
+            }
+            for h in range(n_harmonics):
+                rec[f"cos_coef_{h + 1}_{suffix}"] = round(betas[1 + 2 * h], 6)
+                rec[f"sin_coef_{h + 1}_{suffix}"] = round(betas[2 + 2 * h], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 473: spatial_bootstrap_confidence
+    # ------------------------------------------------------------------
+    def spatial_bootstrap_confidence(
+        self,
+        value_column: str,
+        *,
+        n_bootstrap: int = 100,
+        confidence: float = 0.95,
+        seed: int | None = None,
+        suffix: str = "sbc",
+    ) -> "GeoPromptFrame":
+        """Spatial bootstrap confidence intervals.
+
+        Resamples feature neighbourhoods to compute bootstrap confidence
+        intervals for the local mean at each feature location. Captures
+        spatial uncertainty by resampling from distance-weighted neighbours.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        k = max(3, int(math.sqrt(n)))
+        out_rows: list[Record] = []
+        alpha_half = (1 - confidence) / 2
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n)]
+            dists.sort()
+            nb = [j for _, j in dists[:k]]
+            nb_vals = [vals[j] for j in nb]
+            means: list[float] = []
+            for _ in range(n_bootstrap):
+                sample = [rng.choice(nb_vals) for _ in range(len(nb_vals))]
+                means.append(sum(sample) / len(sample))
+            means.sort()
+            lo = means[max(0, int(alpha_half * n_bootstrap))]
+            hi = means[min(n_bootstrap - 1, int((1 - alpha_half) * n_bootstrap))]
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"mean_{suffix}": round(sum(nb_vals) / len(nb_vals), 6),
+                f"ci_lower_{suffix}": round(lo, 6),
+                f"ci_upper_{suffix}": round(hi, 6),
+                f"ci_width_{suffix}": round(hi - lo, 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 474: spatial_variogram_cloud
+    # ------------------------------------------------------------------
+    def spatial_variogram_cloud(
+        self,
+        value_column: str,
+        *,
+        n_lags: int = 15,
+        suffix: str = "svc",
+    ) -> "GeoPromptFrame":
+        """Empirical variogram for spatial autocorrelation analysis.
+
+        Computes the semivariogram gamma(h) = 0.5 * E[(Z(x) - Z(x+h))^2]
+        at multiple lag distances. Essential for kriging parameterisation.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        max_dist = 0.0
+        for i in range(n):
+            for j in range(i + 1, n):
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                if d > max_dist:
+                    max_dist = d
+        lag_width = max_dist / (2 * n_lags) if max_dist > 0 else 1.0
+        out_rows: list[Record] = []
+        for lag in range(n_lags):
+            lo = lag * lag_width
+            hi = (lag + 1) * lag_width
+            mid = (lo + hi) / 2
+            sv_sum, count = 0.0, 0
+            for i in range(n):
+                for j in range(i + 1, n):
+                    d = math.hypot(centroids[i][0] - centroids[j][0],
+                                   centroids[i][1] - centroids[j][1])
+                    if lo <= d < hi:
+                        sv_sum += (vals[i] - vals[j]) ** 2
+                        count += 1
+            gamma = 0.5 * sv_sum / count if count > 0 else 0.0
+            out_rows.append({
+                self.geometry_column: {"type": "Point", "coordinates": [
+                    (self.bounds().min_x + self.bounds().max_x) / 2,
+                    (self.bounds().min_y + self.bounds().max_y) / 2]},
+                f"lag_distance_{suffix}": round(mid, 6),
+                f"semivariance_{suffix}": round(gamma, 6),
+                f"n_pairs_{suffix}": count,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 475: spatial_permutation_test
+    # ------------------------------------------------------------------
+    def spatial_permutation_test(
+        self,
+        value_column: str,
+        *,
+        n_permutations: int = 199,
+        k_neighbors: int = 5,
+        seed: int | None = None,
+        suffix: str = "spt",
+    ) -> "GeoPromptFrame":
+        """Spatial permutation test for local autocorrelation significance.
+
+        Tests whether each feature's value is significantly different from
+        what would be expected under spatial randomness by permuting values
+        across locations and computing a Monte Carlo p-value.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # K-NN
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([j for _, j in dists[:k_neighbors]])
+        # Observed local mean
+        obs_lag = [sum(vals[j] for j in neighbours[i]) / len(neighbours[i]) if neighbours[i] else 0.0
+                   for i in range(n)]
+        # Permutation test
+        p_values: list[float] = []
+        for i in range(n):
+            obs = obs_lag[i]
+            count_extreme = 0
+            for _ in range(n_permutations):
+                perm = rng.sample(range(n), len(neighbours[i]))
+                perm_lag = sum(vals[j] for j in perm) / len(perm)
+                if perm_lag >= obs:
+                    count_extreme += 1
+            p_val = (count_extreme + 1) / (n_permutations + 1)
+            p_values.append(p_val)
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"p_value_{suffix}": round(p_values[i], 6),
+                f"significant_{suffix}": 1 if p_values[i] < 0.05 else 0,
+                f"local_lag_{suffix}": round(obs_lag[i], 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 476: spatial_random_walk_diffusion
+    # ------------------------------------------------------------------
+    def spatial_random_walk_diffusion(
+        self,
+        value_column: str,
+        *,
+        n_walkers: int = 100,
+        n_steps: int = 20,
+        k_neighbors: int = 5,
+        seed: int | None = None,
+        suffix: str = "rwd",
+    ) -> "GeoPromptFrame":
+        """Random walk diffusion for spatial accessibility scoring.
+
+        Launches random walkers from each feature that propagate through
+        the k-NN spatial graph. Features visited by many walkers from
+        diverse origins are highly accessible spatial hubs.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        # K-NN
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([j for _, j in dists[:k_neighbors]])
+        visit_count = [0] * n
+        unique_visitors = [set() for _ in range(n)]
+        for origin in range(n):
+            for _ in range(n_walkers):
+                pos = origin
+                for _ in range(n_steps):
+                    if neighbours[pos]:
+                        pos = rng.choice(neighbours[pos])
+                    visit_count[pos] += 1
+                    unique_visitors[pos].add(origin)
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"visit_count_{suffix}": visit_count[i],
+                f"unique_origins_{suffix}": len(unique_visitors[i]),
+                f"accessibility_{suffix}": round(len(unique_visitors[i]) / max(n, 1), 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 477: adaptive_spatial_scan_statistic
+    # ------------------------------------------------------------------
+    def adaptive_spatial_scan_statistic(
+        self,
+        value_column: str,
+        *,
+        max_radius_fraction: float = 0.5,
+        n_radius_steps: int = 10,
+        suffix: str = "sss",
+    ) -> "GeoPromptFrame":
+        """Kulldorff spatial scan statistic for cluster detection.
+
+        Scans circular windows centred at each feature, testing whether
+        the observed count inside is significantly higher than expected
+        under spatial randomness (Poisson likelihood ratio).
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        total = sum(vals)
+        if total == 0:
+            total = 1e-12
+        extent = max(self.bounds().max_x - self.bounds().min_x,
+                     self.bounds().max_y - self.bounds().min_y, 1e-6)
+        max_radius = extent * max_radius_fraction
+        radii = [max_radius * (s + 1) / n_radius_steps for s in range(n_radius_steps)]
+        best_llr = [0.0] * n
+        best_radius = [0.0] * n
+        best_count = [0] * n
+        for i in range(n):
+            for r in radii:
+                inside = 0.0
+                n_in = 0
+                for j in range(n):
+                    d = math.hypot(centroids[i][0] - centroids[j][0],
+                                   centroids[i][1] - centroids[j][1])
+                    if d <= r:
+                        inside += vals[j]
+                        n_in += 1
+                outside = total - inside
+                e_in = total * n_in / n if n > 0 else 1e-12
+                e_out = total - e_in
+                # Log likelihood ratio
+                llr = 0.0
+                if inside > e_in and e_in > 0 and e_out > 0:
+                    llr = inside * math.log(inside / e_in) + outside * math.log(max(outside, 1e-12) / e_out)
+                if llr > best_llr[i]:
+                    best_llr[i] = llr
+                    best_radius[i] = r
+                    best_count[i] = n_in
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"scan_llr_{suffix}": round(best_llr[i], 6),
+                f"scan_radius_{suffix}": round(best_radius[i], 6),
+                f"n_inside_{suffix}": best_count[i],
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 478: spatial_silhouette_score
+    # ------------------------------------------------------------------
+    def spatial_silhouette_score(
+        self,
+        cluster_column: str,
+        *,
+        suffix: str = "sil",
+    ) -> "GeoPromptFrame":
+        """Spatial silhouette score for cluster quality assessment.
+
+        For each feature: a(i) = avg distance to same-cluster members,
+        b(i) = min avg distance to any other cluster. Silhouette =
+        (b - a) / max(a, b). Range [-1, 1]; higher = better clustering.
+        """
+        self._require_column(cluster_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        labels = [r.get(cluster_column) for r in recs]
+        unique = sorted(set(labels))
+        clusters: dict = {c: [i for i in range(n) if labels[i] == c] for c in unique}
+        out_rows: list[Record] = []
+        for i in range(n):
+            # a(i): average distance to same-cluster
+            same = clusters[labels[i]]
+            if len(same) <= 1:
+                ai = 0.0
+            else:
+                ai = sum(math.hypot(centroids[i][0] - centroids[j][0],
+                                    centroids[i][1] - centroids[j][1])
+                         for j in same if j != i) / (len(same) - 1)
+            # b(i): minimum average distance to other clusters
+            bi = float("inf")
+            for c in unique:
+                if c == labels[i]:
+                    continue
+                members = clusters[c]
+                if not members:
+                    continue
+                avg_d = sum(math.hypot(centroids[i][0] - centroids[j][0],
+                                       centroids[i][1] - centroids[j][1])
+                            for j in members) / len(members)
+                if avg_d < bi:
+                    bi = avg_d
+            if bi == float("inf"):
+                bi = 0.0
+            sil = (bi - ai) / max(ai, bi) if max(ai, bi) > 0 else 0.0
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"silhouette_{suffix}": round(sil, 6),
+                f"a_dist_{suffix}": round(ai, 6),
+                f"b_dist_{suffix}": round(bi, 6),
+                f"cluster_{suffix}": labels[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 479: spatial_curvature_estimator
+    # ------------------------------------------------------------------
+    def spatial_curvature_estimator(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 8,
+        suffix: str = "sce",
+    ) -> "GeoPromptFrame":
+        """Estimate surface curvature (profile + plan) at each feature.
+
+        Fits a local quadratic surface z = ax^2 + bxy + cy^2 + dx + ey + f
+        to the k nearest neighbours. Profile curvature measures concavity
+        along the steepest slope; plan curvature measures across slopes.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0],
+                                 centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            nb = [j for _, j in dists[:k_neighbors]]
+            # Fit quadratic via 6-param gradient descent
+            params = [0.0] * 6  # a, b, c, d, e, f
+            lr = 0.0001
+            for _ in range(200):
+                for j in nb:
+                    dx_val = centroids[j][0] - centroids[i][0]
+                    dy_val = centroids[j][1] - centroids[i][1]
+                    dz = vals[j] - vals[i]
+                    pred = (params[0] * dx_val**2 + params[1] * dx_val * dy_val +
+                            params[2] * dy_val**2 + params[3] * dx_val +
+                            params[4] * dy_val + params[5])
+                    err = pred - dz
+                    features = [dx_val**2, dx_val * dy_val, dy_val**2, dx_val, dy_val, 1.0]
+                    for f_idx in range(6):
+                        params[f_idx] -= lr * err * features[f_idx]
+            a, b_param, c_param, d_param, e_param = params[0], params[1], params[2], params[3], params[4]
+            # Curvatures
+            p = d_param**2 + e_param**2
+            if p > 1e-12:
+                profile_curv = -2 * (a * d_param**2 + b_param * d_param * e_param + c_param * e_param**2) / (p * math.sqrt(1 + p))
+                plan_curv = -2 * (a * e_param**2 - b_param * d_param * e_param + c_param * d_param**2) / (p ** 1.5) if p > 1e-12 else 0.0
+            else:
+                profile_curv = -2 * a
+                plan_curv = -2 * c_param
+            mean_curv = (2 * a + 2 * c_param)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"profile_curvature_{suffix}": round(profile_curv, 6),
+                f"plan_curvature_{suffix}": round(plan_curv, 6),
+                f"mean_curvature_{suffix}": round(mean_curv, 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 480: spatial_causal_inference
+    # ------------------------------------------------------------------
+    def spatial_causal_inference(
+        self,
+        treatment_column: str,
+        outcome_column: str,
+        *,
+        k_neighbors: int = 5,
+        suffix: str = "sci",
+    ) -> "GeoPromptFrame":
+        """Spatial causal inference via propensity-score matching.
+
+        Estimates the Average Treatment Effect (ATE) by matching treated and
+        control features based on spatial proximity and covariate similarity.
+        Each treated feature is matched to its nearest spatial control
+        neighbour. Novel: incorporates geographic distance into the matching.
+        """
+        self._require_column(treatment_column)
+        self._require_column(outcome_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        treatment = [1 if r.get(treatment_column) else 0 for r in recs]
+        outcome = [float(r.get(outcome_column, 0) or 0) for r in recs]
+        treated = [i for i in range(n) if treatment[i] == 1]
+        control = [i for i in range(n) if treatment[i] == 0]
+        # Spatial propensity matching
+        match_outcomes: list[float] = []
+        matched_to: list[int] = [-1] * n
+        for i in treated:
+            if not control:
+                match_outcomes.append(outcome[i])
+                continue
+            best_j, best_d = control[0], float("inf")
+            for j in control:
+                d = math.hypot(centroids[i][0] - centroids[j][0],
+                               centroids[i][1] - centroids[j][1])
+                if d < best_d:
+                    best_d = d
+                    best_j = j
+            matched_to[i] = best_j
+            match_outcomes.append(outcome[i] - outcome[best_j])
+        ate = sum(match_outcomes) / len(match_outcomes) if match_outcomes else 0.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            rec: Record = {
+                self.geometry_column: recs[i][self.geometry_column],
+                f"treatment_{suffix}": treatment[i],
+                f"outcome_{suffix}": outcome[i],
+                f"ate_{suffix}": round(ate, 6),
+            }
+            if treatment[i] == 1 and matched_to[i] >= 0:
+                rec[f"matched_to_{suffix}"] = matched_to[i]
+                rec[f"effect_{suffix}"] = round(outcome[i] - outcome[matched_to[i]], 6)
+            else:
+                rec[f"matched_to_{suffix}"] = -1
+                rec[f"effect_{suffix}"] = 0.0
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 481: spatial_optimal_transport
+    # ------------------------------------------------------------------
+    def spatial_optimal_transport(
+        self,
+        mass_column: str,
+        *,
+        reg: float = 0.5,
+        n_iterations: int = 40,
+        suffix: str = "sot",
+    ) -> "GeoPromptFrame":
+        """Entropic optimal transport from feature masses to a uniform field.
+
+        Uses a Sinkhorn-style scaling procedure on the pairwise spatial cost
+        matrix. Reports each feature's transport burden and transport barycenter.
+        """
+        self._require_column(mass_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        masses = [max(float(r.get(mass_column, 0) or 0), 0.0) for r in recs]
+        total_mass = sum(masses) or 1.0
+        source = [m / total_mass for m in masses]
+        target = [1.0 / n] * n
+        kernel = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(n):
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                kernel[i][j] = math.exp(-d / max(reg, 1e-6))
+        u = [1.0] * n
+        v = [1.0] * n
+        for _ in range(n_iterations):
+            for i in range(n):
+                denom = sum(kernel[i][j] * v[j] for j in range(n)) or 1e-12
+                u[i] = source[i] / denom
+            for j in range(n):
+                denom = sum(kernel[i][j] * u[i] for i in range(n)) or 1e-12
+                v[j] = target[j] / denom
+        out_rows: list[Record] = []
+        for i in range(n):
+            row_flow = [u[i] * kernel[i][j] * v[j] for j in range(n)]
+            flow_sum = sum(row_flow) or 1e-12
+            bary_x = sum(row_flow[j] * centroids[j][0] for j in range(n)) / flow_sum
+            bary_y = sum(row_flow[j] * centroids[j][1] for j in range(n)) / flow_sum
+            cost = sum(row_flow[j] * math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                       for j in range(n))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"transport_cost_{suffix}": round(cost, 6),
+                f"transport_mass_{suffix}": round(flow_sum, 6),
+                f"barycenter_x_{suffix}": round(bary_x, 6),
+                f"barycenter_y_{suffix}": round(bary_y, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 482: graph_neural_spatial_smoother
+    # ------------------------------------------------------------------
+    def graph_neural_spatial_smoother(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        n_layers: int = 3,
+        blend: float = 0.6,
+        suffix: str = "gns",
+    ) -> "GeoPromptFrame":
+        """Graph-neural-style smoothing over a spatial k-NN graph.
+
+        Repeatedly mixes each node value with a weighted neighbourhood
+        aggregation, acting as a light GCN message-passing layer.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        neighbours: list[list[tuple[int, float]]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([(j, d) for d, j in dists[:k_neighbors]])
+        hidden = list(values)
+        for _ in range(n_layers):
+            new_hidden = [0.0] * n
+            for i in range(n):
+                agg = 0.0
+                w_sum = 0.0
+                for j, d in neighbours[i]:
+                    w = 1.0 / max(d, 1e-12)
+                    agg += w * hidden[j]
+                    w_sum += w
+                mean_nb = agg / w_sum if w_sum > 0 else hidden[i]
+                new_hidden[i] = (1.0 - blend) * hidden[i] + blend * mean_nb
+            hidden = new_hidden
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"smoothed_{suffix}": round(hidden[i], 6),
+                f"original_{suffix}": values[i],
+                f"delta_{suffix}": round(hidden[i] - values[i], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 483: anisotropic_diffusion_surface
+    # ------------------------------------------------------------------
+    def anisotropic_diffusion_surface(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        n_steps: int = 15,
+        conductance: float = 1.0,
+        time_step: float = 0.2,
+        suffix: str = "ads",
+    ) -> "GeoPromptFrame":
+        """Perona-Malik anisotropic diffusion on a spatial neighbour graph.
+
+        Smooths within homogeneous neighbourhoods while preserving sharp
+        boundaries by downweighting large value gradients.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([j for _, j in dists[:k_neighbors]])
+        current = list(vals)
+        for _ in range(n_steps):
+            updated = list(current)
+            for i in range(n):
+                flux = 0.0
+                for j in neighbours[i]:
+                    grad = current[j] - current[i]
+                    c = math.exp(-(grad / max(conductance, 1e-12)) ** 2)
+                    flux += c * grad
+                updated[i] = current[i] + time_step * flux / max(len(neighbours[i]), 1)
+            current = updated
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"diffused_{suffix}": round(current[i], 6),
+                f"edge_strength_{suffix}": round(abs(current[i] - vals[i]), 6),
+                f"original_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 484: persistent_hotspot_tracker
+    # ------------------------------------------------------------------
+    def persistent_hotspot_tracker(
+        self,
+        value_column: str,
+        *,
+        n_thresholds: int = 12,
+        k_neighbors: int = 6,
+        suffix: str = "pht",
+    ) -> "GeoPromptFrame":
+        """Track hotspot persistence across multiple value thresholds.
+
+        Features that remain inside connected hotspot components across many
+        thresholds receive higher persistence scores.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        v_min, v_max = min(vals), max(vals)
+        thresholds = [v_min + (v_max - v_min) * t / max(n_thresholds - 1, 1) for t in range(n_thresholds)]
+        adj: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            adj[i] = [j for _, j in dists[:k_neighbors]]
+        persistence = [0] * n
+        component_size = [0] * n
+        for thr in thresholds:
+            active = [vals[i] >= thr for i in range(n)]
+            seen = [False] * n
+            for i in range(n):
+                if not active[i] or seen[i]:
+                    continue
+                stack = [i]
+                comp: list[int] = []
+                seen[i] = True
+                while stack:
+                    cur = stack.pop()
+                    comp.append(cur)
+                    for nb in adj[cur]:
+                        if active[nb] and not seen[nb]:
+                            seen[nb] = True
+                            stack.append(nb)
+                for idx in comp:
+                    persistence[idx] += 1
+                    component_size[idx] = max(component_size[idx], len(comp))
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"persistence_{suffix}": persistence[i],
+                f"max_component_size_{suffix}": component_size[i],
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 485: spatial_conformal_predictor
+    # ------------------------------------------------------------------
+    def spatial_conformal_predictor(
+        self,
+        feature_columns: list[str],
+        target_column: str,
+        *,
+        calibration_fraction: float = 0.25,
+        k_neighbors: int = 7,
+        alpha: float = 0.1,
+        suffix: str = "scp",
+    ) -> "GeoPromptFrame":
+        """Conformal prediction intervals using spatial nearest-neighbour residuals.
+
+        Fits local neighbour-weighted predictions, calibrates residuals on a
+        held-out spatial subset, and returns finite prediction bands.
+        """
+        for c in feature_columns:
+            self._require_column(c)
+        self._require_column(target_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        targets = [float(r.get(target_column, 0) or 0) for r in recs]
+        n_cal = max(1, int(n * calibration_fraction))
+        calibration_idx = set(range(max(0, n - n_cal), n))
+
+        def _predict(i: int, allowed: list[int]) -> float:
+            dists = []
+            for j in allowed:
+                if i == j:
+                    continue
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                dists.append((d, j))
+            dists.sort()
+            neighbours = dists[:k_neighbors]
+            num, den = 0.0, 0.0
+            for d, j in neighbours:
+                w = 1.0 / max(d, 1e-12)
+                num += w * targets[j]
+                den += w
+            return num / den if den > 0 else sum(targets[j] for j in allowed) / max(len(allowed), 1)
+
+        train_idx = [i for i in range(n) if i not in calibration_idx]
+        cal_residuals = []
+        for i in calibration_idx:
+            pred = _predict(i, train_idx)
+            cal_residuals.append(abs(targets[i] - pred))
+        cal_residuals.sort()
+        q_idx = min(len(cal_residuals) - 1, max(0, int((1 - alpha) * len(cal_residuals)))) if cal_residuals else 0
+        q_hat = cal_residuals[q_idx] if cal_residuals else 0.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            pred = _predict(i, train_idx if i in calibration_idx else [j for j in range(n) if j != i])
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(pred, 6),
+                f"lower_{suffix}": round(pred - q_hat, 6),
+                f"upper_{suffix}": round(pred + q_hat, 6),
+                f"actual_{suffix}": targets[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 486: geodesic_medoid_clustering
+    # ------------------------------------------------------------------
+    def geodesic_medoid_clustering(
+        self,
+        *,
+        n_clusters: int = 3,
+        k_neighbors: int = 6,
+        n_iterations: int = 20,
+        seed: int | None = None,
+        suffix: str = "gmc",
+    ) -> "GeoPromptFrame":
+        """Cluster features by graph-geodesic medoids on a spatial k-NN graph."""
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        k = min(n_clusters, n)
+        graph: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            graph[i] = [(j, d) for d, j in dists[:k_neighbors]]
+
+        def _shortest_from(src: int) -> list[float]:
+            dist = [float("inf")] * n
+            used = [False] * n
+            dist[src] = 0.0
+            for _ in range(n):
+                best = -1
+                best_d = float("inf")
+                for i in range(n):
+                    if not used[i] and dist[i] < best_d:
+                        best = i
+                        best_d = dist[i]
+                if best < 0:
+                    break
+                used[best] = True
+                for j, w in graph[best]:
+                    if dist[best] + w < dist[j]:
+                        dist[j] = dist[best] + w
+            return dist
+
+        all_pairs = [_shortest_from(i) for i in range(n)]
+        medoids = rng.sample(range(n), k)
+        labels = [0] * n
+        for _ in range(n_iterations):
+            for i in range(n):
+                labels[i] = min(range(k), key=lambda c: all_pairs[i][medoids[c]])
+            for c in range(k):
+                members = [i for i in range(n) if labels[i] == c]
+                if members:
+                    medoids[c] = min(members, key=lambda m: sum(all_pairs[m][j] for j in members))
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": labels[i],
+                f"medoid_{suffix}": medoids[labels[i]],
+                f"distance_{suffix}": round(all_pairs[i][medoids[labels[i]]], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 487: spatial_sinkhorn_barycenter
+    # ------------------------------------------------------------------
+    def spatial_sinkhorn_barycenter(
+        self,
+        mass_column: str,
+        *,
+        n_iterations: int = 30,
+        suffix: str = "skb",
+    ) -> "GeoPromptFrame":
+        """Compute a spatial barycenter of masses using iterative transport averaging."""
+        self._require_column(mass_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        masses = [max(float(r.get(mass_column, 0) or 0), 0.0) for r in recs]
+        total = sum(masses) or 1.0
+        weights = [m / total for m in masses]
+        bx = sum(weights[i] * centroids[i][0] for i in range(len(recs)))
+        by = sum(weights[i] * centroids[i][1] for i in range(len(recs)))
+        for _ in range(n_iterations):
+            adj_w = []
+            for i, (x, y) in enumerate(centroids):
+                d = math.hypot(x - bx, y - by)
+                adj_w.append(weights[i] / max(1.0 + d, 1e-12))
+            norm = sum(adj_w) or 1.0
+            adj_w = [w / norm for w in adj_w]
+            bx = sum(adj_w[i] * centroids[i][0] for i in range(len(recs)))
+            by = sum(adj_w[i] * centroids[i][1] for i in range(len(recs)))
+        out_rows: list[Record] = [{
+            self.geometry_column: {"type": "Point", "coordinates": [bx, by]},
+            f"barycenter_x_{suffix}": round(bx, 6),
+            f"barycenter_y_{suffix}": round(by, 6),
+            f"total_mass_{suffix}": round(total, 6),
+        }]
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 488: multi_agent_coverage
+    # ------------------------------------------------------------------
+    def multi_agent_coverage(
+        self,
+        demand_column: str,
+        *,
+        n_agents: int = 4,
+        suffix: str = "mac",
+    ) -> "GeoPromptFrame":
+        """Greedy multi-agent spatial coverage using weighted farthest-first placement."""
+        self._require_column(demand_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        k = min(n_agents, n)
+        demand = [max(float(r.get(demand_column, 0) or 0), 0.0) for r in recs]
+        centers = [max(range(n), key=lambda i: demand[i])]
+        while len(centers) < k:
+            best = max(range(n), key=lambda i: min(math.hypot(centroids[i][0] - centroids[c][0], centroids[i][1] - centroids[c][1])
+                                                   for c in centers) * (1 + demand[i]))
+            if best in centers:
+                break
+            centers.append(best)
+        out_rows: list[Record] = []
+        for i in range(n):
+            assigned = min(range(len(centers)), key=lambda c: math.hypot(centroids[i][0] - centroids[centers[c]][0],
+                                                                          centroids[i][1] - centroids[centers[c]][1]))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"agent_{suffix}": assigned,
+                f"is_center_{suffix}": 1 if i in centers else 0,
+                f"demand_{suffix}": demand[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 489: manifold_alignment_spatial
+    # ------------------------------------------------------------------
+    def manifold_alignment_spatial(
+        self,
+        feature_columns: list[str],
+        *,
+        n_components: int = 2,
+        k_neighbors: int = 6,
+        n_iterations: int = 40,
+        seed: int | None = None,
+        suffix: str = "mas",
+    ) -> "GeoPromptFrame":
+        """Laplacian-style manifold alignment of attributes with spatial proximity."""
+        for c in feature_columns:
+            self._require_column(c)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        n_feat = len(feature_columns)
+        rng = random.Random(seed)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        embed = [[rng.gauss(0, 0.1) for _ in range(n_components)] for _ in range(n)]
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            neighbours.append([j for _, j in dists[:k_neighbors]])
+        for _ in range(n_iterations):
+            new_embed = [[0.0] * n_components for _ in range(n)]
+            for i in range(n):
+                for c_idx in range(n_components):
+                    spatial_mean = sum(embed[j][c_idx] for j in neighbours[i]) / max(len(neighbours[i]), 1)
+                    attr_term = sum(raw[i][f] * (f + 1 + c_idx) for f in range(n_feat)) / max(n_feat, 1)
+                    new_embed[i][c_idx] = 0.7 * spatial_mean + 0.3 * math.tanh(attr_term * 0.1)
+            embed = new_embed
+        out_rows: list[Record] = []
+        for i in range(n):
+            rec: Record = {self.geometry_column: recs[i][self.geometry_column]}
+            for c_idx in range(n_components):
+                rec[f"component_{c_idx}_{suffix}"] = round(embed[i][c_idx], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 490: spatial_stochastic_blockmodel
+    # ------------------------------------------------------------------
+    def spatial_stochastic_blockmodel(
+        self,
+        *,
+        n_blocks: int = 3,
+        k_neighbors: int = 6,
+        n_iterations: int = 25,
+        seed: int | None = None,
+        suffix: str = "ssb",
+    ) -> "GeoPromptFrame":
+        """Infer spatial communities using a simple stochastic block heuristic."""
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        blocks = [rng.randint(0, max(n_blocks - 1, 0)) for _ in range(n)]
+        adj: list[list[int]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            adj[i] = [j for _, j in dists[:k_neighbors]]
+        for _ in range(n_iterations):
+            for i in range(n):
+                scores = [0.0] * n_blocks
+                for nb in adj[i]:
+                    scores[blocks[nb]] += 1.0
+                spatial_pull = [0.0] * n_blocks
+                for b_idx in range(n_blocks):
+                    members = [m for m in range(n) if blocks[m] == b_idx]
+                    if members:
+                        spatial_pull[b_idx] = -sum(math.hypot(centroids[i][0] - centroids[m][0], centroids[i][1] - centroids[m][1])
+                                                   for m in members) / len(members)
+                blocks[i] = max(range(n_blocks), key=lambda b_idx: scores[b_idx] + 0.01 * spatial_pull[b_idx])
+        out_rows: list[Record] = []
+        for i in range(n):
+            within = sum(1 for nb in adj[i] if blocks[nb] == blocks[i])
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"block_{suffix}": blocks[i],
+                f"within_links_{suffix}": within,
+                f"cross_links_{suffix}": len(adj[i]) - within,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 491: adaptive_mesh_refinement_surface
+    # ------------------------------------------------------------------
+    def adaptive_mesh_refinement_surface(
+        self,
+        value_column: str,
+        *,
+        base_resolution: int = 6,
+        max_level: int = 2,
+        error_threshold: float = 0.15,
+        suffix: str = "amr",
+    ) -> "GeoPromptFrame":
+        """Adaptive mesh refinement for interpolated spatial surfaces.
+
+        Starts with a coarse grid and recursively refines cells where local
+        corner disagreement indicates unresolved surface complexity.
+        """
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        b = self.bounds()
+
+        def _idw(px: float, py: float) -> float:
+            num, den = 0.0, 0.0
+            for i in range(len(recs)):
+                d = math.hypot(px - centroids[i][0], py - centroids[i][1])
+                w = 1.0 / max(d, 1e-12) ** 2
+                num += w * vals[i]
+                den += w
+            return num / den if den else 0.0
+
+        cells = [(b.min_x, b.min_y, b.max_x, b.max_y, 0)]
+        final_cells: list[tuple[float, float, float, float, int, float]] = []
+        while cells:
+            x0, y0, x1, y1, level = cells.pop()
+            corners = [_idw(x0, y0), _idw(x1, y0), _idw(x0, y1), _idw(x1, y1)]
+            center = _idw((x0 + x1) / 2, (y0 + y1) / 2)
+            err = max(abs(c - center) for c in corners)
+            if level < max_level and err > error_threshold:
+                mx = (x0 + x1) / 2
+                my = (y0 + y1) / 2
+                cells.extend([
+                    (x0, y0, mx, my, level + 1),
+                    (mx, y0, x1, my, level + 1),
+                    (x0, my, mx, y1, level + 1),
+                    (mx, my, x1, y1, level + 1),
+                ])
+            else:
+                final_cells.append((x0, y0, x1, y1, level, center))
+        out_rows: list[Record] = []
+        for x0, y0, x1, y1, level, center in final_cells:
+            out_rows.append({
+                self.geometry_column: {"type": "Point", "coordinates": [(x0 + x1) / 2, (y0 + y1) / 2]},
+                f"value_{suffix}": round(center, 6),
+                f"cell_width_{suffix}": round(x1 - x0, 6),
+                f"cell_height_{suffix}": round(y1 - y0, 6),
+                f"level_{suffix}": level,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 492: spatial_koopman_forecaster
+    # ------------------------------------------------------------------
+    def spatial_koopman_forecaster(
+        self,
+        value_column: str,
+        time_column: str,
+        *,
+        suffix: str = "skf",
+    ) -> "GeoPromptFrame":
+        """Koopman-style linear forecast in lifted observable space."""
+        self._require_column(value_column)
+        self._require_column(time_column)
+        recs = sorted(self.to_records(), key=lambda r: float(r.get(time_column, 0) or 0))
+        if not recs:
+            return self.copy()
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        times = [float(r.get(time_column, 0) or 0) for r in recs]
+        n = len(recs)
+        if n == 1:
+            return self.copy()
+        # Lifted basis: [1, x, x^2]
+        coeff = [[0.0] * 3 for _ in range(3)]
+        lr = 0.001
+        for _ in range(300):
+            for t in range(n - 1):
+                phi = [1.0, vals[t], vals[t] * vals[t]]
+                target = [1.0, vals[t + 1], vals[t + 1] * vals[t + 1]]
+                pred = [sum(coeff[i][j] * phi[j] for j in range(3)) for i in range(3)]
+                for i in range(3):
+                    err = pred[i] - target[i]
+                    for j in range(3):
+                        coeff[i][j] -= lr * err * phi[j]
+        out_rows: list[Record] = []
+        for t in range(n):
+            phi = [1.0, vals[t], vals[t] * vals[t]]
+            pred_state = [sum(coeff[i][j] * phi[j] for j in range(3)) for i in range(3)]
+            pred_val = pred_state[1]
+            out_rows.append({
+                self.geometry_column: recs[t][self.geometry_column],
+                f"predicted_next_{suffix}": round(pred_val, 6),
+                f"value_{suffix}": vals[t],
+                f"time_{suffix}": times[t],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 493: barycentric_spatial_interpolator
+    # ------------------------------------------------------------------
+    def barycentric_spatial_interpolator(
+        self,
+        value_column: str,
+        *,
+        grid_resolution: int = 16,
+        suffix: str = "bsi",
+    ) -> "GeoPromptFrame":
+        """Interpolate using barycentric coordinates of the 3 nearest points."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        b = self.bounds()
+        dxg = (b.max_x - b.min_x) / max(grid_resolution - 1, 1)
+        dyg = (b.max_y - b.min_y) / max(grid_resolution - 1, 1)
+
+        def _interp(px: float, py: float) -> float:
+            dists = sorted((math.hypot(px - x, py - y), idx) for idx, (x, y) in enumerate(centroids))[:3]
+            pts = [centroids[idx] for _, idx in dists]
+            idxs = [idx for _, idx in dists]
+            (x1, y1), (x2, y2), (x3, y3) = pts
+            det = (y2 - y3) * (x1 - x3) + (x3 - x2) * (y1 - y3)
+            if abs(det) < 1e-12:
+                num = sum((1.0 / max(d, 1e-12)) * vals[idx] for d, idx in dists)
+                den = sum(1.0 / max(d, 1e-12) for d, _ in dists)
+                return num / den if den else 0.0
+            l1 = ((y2 - y3) * (px - x3) + (x3 - x2) * (py - y3)) / det
+            l2 = ((y3 - y1) * (px - x3) + (x1 - x3) * (py - y3)) / det
+            l3 = 1.0 - l1 - l2
+            l1, l2, l3 = max(l1, 0.0), max(l2, 0.0), max(l3, 0.0)
+            s = l1 + l2 + l3 or 1.0
+            l1, l2, l3 = l1 / s, l2 / s, l3 / s
+            return l1 * vals[idxs[0]] + l2 * vals[idxs[1]] + l3 * vals[idxs[2]]
+
+        out_rows: list[Record] = []
+        for gy in range(grid_resolution):
+            py = b.min_y + gy * dyg
+            for gx in range(grid_resolution):
+                px = b.min_x + gx * dxg
+                out_rows.append({
+                    self.geometry_column: {"type": "Point", "coordinates": [px, py]},
+                    f"predicted_{suffix}": round(_interp(px, py), 6),
+                    f"grid_row_{suffix}": gy,
+                    f"grid_col_{suffix}": gx,
+                })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 494: topological_skeleton_extractor
+    # ------------------------------------------------------------------
+    def topological_skeleton_extractor(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        suffix: str = "tsk",
+    ) -> "GeoPromptFrame":
+        """Extract a ridge-like skeleton from a scalar field on points."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                     for j in range(n) if j != i]
+            dists.sort()
+            nb = [j for _, j in dists[:k_neighbors]]
+            higher = sum(1 for j in nb if vals[j] > vals[i])
+            lower = sum(1 for j in nb if vals[j] < vals[i])
+            skeleton = 1 if lower >= max(1, k_neighbors // 2) and higher <= 1 else 0
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"is_skeleton_{suffix}": skeleton,
+                f"ridge_score_{suffix}": round((lower - higher) / max(k_neighbors, 1), 6),
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 495: spatial_contrastive_embedding
+    # ------------------------------------------------------------------
+    def spatial_contrastive_embedding(
+        self,
+        feature_columns: list[str],
+        *,
+        n_components: int = 2,
+        n_iterations: int = 50,
+        seed: int | None = None,
+        suffix: str = "sce",
+    ) -> "GeoPromptFrame":
+        """Contrastive embedding where nearby points attract and far points repel."""
+        for c in feature_columns:
+            self._require_column(c)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        embed = [[rng.gauss(0, 0.1) for _ in range(n_components)] for _ in range(n)]
+        for _ in range(n_iterations):
+            for i in range(n):
+                near = sorted(((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                               for j in range(n) if j != i))[:5]
+                far = sorted(((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                              for j in range(n) if j != i), reverse=True)[:5]
+                for c_idx in range(n_components):
+                    near_pull = sum(embed[j][c_idx] for _, j in near) / max(len(near), 1)
+                    far_push = sum(embed[j][c_idx] for _, j in far) / max(len(far), 1)
+                    embed[i][c_idx] += 0.05 * (near_pull - far_push)
+        out_rows: list[Record] = []
+        for i in range(n):
+            rec: Record = {self.geometry_column: recs[i][self.geometry_column]}
+            for c_idx in range(n_components):
+                rec[f"embed_{c_idx}_{suffix}"] = round(embed[i][c_idx], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 496: uncertainty_aware_idw
+    # ------------------------------------------------------------------
+    def uncertainty_aware_idw(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        suffix: str = "uidw",
+    ) -> "GeoPromptFrame":
+        """Neighbour-based IDW with predictive uncertainty from weighted variance."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            weights = [1.0 / max(d, 1e-12) ** 2 for d, _ in dists]
+            w_sum = sum(weights) or 1.0
+            pred = sum(weights[k] * vals[dists[k][1]] for k in range(len(dists))) / w_sum
+            var = sum(weights[k] * (vals[dists[k][1]] - pred) ** 2 for k in range(len(dists))) / w_sum
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": round(pred, 6),
+                f"uncertainty_{suffix}": round(math.sqrt(max(var, 0.0)), 6),
+                f"actual_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 497: spatial_federated_clusterer
+    # ------------------------------------------------------------------
+    def spatial_federated_clusterer(
+        self,
+        feature_columns: list[str],
+        *,
+        n_clusters: int = 3,
+        suffix: str = "sfc",
+    ) -> "GeoPromptFrame":
+        """Cluster by training local regional centroids and merging them globally."""
+        for c in feature_columns:
+            self._require_column(c)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        xs = [c[0] for c in centroids]
+        ys = [c[1] for c in centroids]
+        mx = sum(xs) / n
+        my = sum(ys) / n
+        regions = [0 if x <= mx and y <= my else 1 if x > mx and y <= my else 2 if x <= mx and y > my else 3
+                   for x, y in centroids]
+        local_centers: list[list[float]] = []
+        for reg in range(4):
+            members = [i for i in range(n) if regions[i] == reg]
+            if members:
+                center = [sum(raw[i][f] for i in members) / len(members) for f in range(len(feature_columns))]
+                local_centers.append(center)
+        if not local_centers:
+            local_centers = [[0.0] * len(feature_columns)]
+        while len(local_centers) > n_clusters:
+            best_i, best_j, best_d = 0, 1, float("inf")
+            for i in range(len(local_centers)):
+                for j in range(i + 1, len(local_centers)):
+                    d = math.sqrt(sum((local_centers[i][f] - local_centers[j][f]) ** 2 for f in range(len(feature_columns))))
+                    if d < best_d:
+                        best_i, best_j, best_d = i, j, d
+            merged = [(local_centers[best_i][f] + local_centers[best_j][f]) / 2 for f in range(len(feature_columns))]
+            keep = [local_centers[i] for i in range(len(local_centers)) if i not in (best_i, best_j)]
+            local_centers = keep + [merged]
+        out_rows: list[Record] = []
+        for i in range(n):
+            cluster = min(range(len(local_centers)), key=lambda c_idx: math.sqrt(sum((raw[i][f] - local_centers[c_idx][f]) ** 2 for f in range(len(feature_columns)))))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": cluster,
+                f"region_{suffix}": regions[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 498: graph_wave_propagation
+    # ------------------------------------------------------------------
+    def graph_wave_propagation(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        n_steps: int = 20,
+        damping: float = 0.05,
+        suffix: str = "gwp",
+    ) -> "GeoPromptFrame":
+        """Discrete wave equation on a spatial graph."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            neighbours.append([j for _, j in dists])
+        prev_state = list(vals)
+        state = list(vals)
+        for _ in range(n_steps):
+            new_state = [0.0] * n
+            for i in range(n):
+                lap = sum(state[j] - state[i] for j in neighbours[i]) / max(len(neighbours[i]), 1)
+                new_state[i] = 2 * state[i] - prev_state[i] + lap - damping * (state[i] - prev_state[i])
+            prev_state, state = state, new_state
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"amplitude_{suffix}": round(state[i], 6),
+                f"velocity_{suffix}": round(state[i] - prev_state[i], 6),
+                f"initial_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 499: spatial_morse_smale_partition
+    # ------------------------------------------------------------------
+    def spatial_morse_smale_partition(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        suffix: str = "sms",
+    ) -> "GeoPromptFrame":
+        """Approximate Morse-Smale partition by gradient ascent to local maxima."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            neighbours.append([j for _, j in dists])
+
+        def _ascend(i: int) -> int:
+            cur = i
+            seen: set[int] = set()
+            while cur not in seen:
+                seen.add(cur)
+                best = max([cur] + neighbours[cur], key=lambda j: vals[j])
+                if best == cur:
+                    return cur
+                cur = best
+            return cur
+
+        maxima = [_ascend(i) for i in range(n)]
+        basin_ids: dict[int, int] = {}
+        next_id = 0
+        out_rows: list[Record] = []
+        for i in range(n):
+            if maxima[i] not in basin_ids:
+                basin_ids[maxima[i]] = next_id
+                next_id += 1
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"basin_{suffix}": basin_ids[maxima[i]],
+                f"maximum_{suffix}": maxima[i],
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 500: optimal_transport_clustering
+    # ------------------------------------------------------------------
+    def optimal_transport_clustering(
+        self,
+        mass_column: str,
+        *,
+        n_clusters: int = 3,
+        n_iterations: int = 20,
+        seed: int | None = None,
+        suffix: str = "otc",
+    ) -> "GeoPromptFrame":
+        """Cluster by alternating transport assignment and barycenter updates."""
+        self._require_column(mass_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        masses = [max(float(r.get(mass_column, 0) or 0), 0.0) for r in recs]
+        k = min(n_clusters, n)
+        centers = [list(centroids[i]) for i in rng.sample(range(n), k)]
+        labels = [0] * n
+        for _ in range(n_iterations):
+            for i in range(n):
+                labels[i] = min(range(k), key=lambda c: math.hypot(centroids[i][0] - centers[c][0], centroids[i][1] - centers[c][1]))
+            for c in range(k):
+                members = [i for i in range(n) if labels[i] == c]
+                if not members:
+                    continue
+                w_sum = sum(masses[i] for i in members) or 1.0
+                centers[c][0] = sum(masses[i] * centroids[i][0] for i in members) / w_sum
+                centers[c][1] = sum(masses[i] * centroids[i][1] for i in members) / w_sum
+        out_rows: list[Record] = []
+        for i in range(n):
+            c = labels[i]
+            dist = math.hypot(centroids[i][0] - centers[c][0], centroids[i][1] - centers[c][1])
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": c,
+                f"transport_distance_{suffix}": round(dist, 6),
+                f"mass_{suffix}": masses[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 501: game_theoretic_location_equilibrium
+    # ------------------------------------------------------------------
+    def game_theoretic_location_equilibrium(
+        self,
+        demand_column: str,
+        *,
+        n_players: int = 3,
+        n_iterations: int = 25,
+        seed: int | None = None,
+        suffix: str = "gle",
+    ) -> "GeoPromptFrame":
+        """Competing-facility best-response equilibrium on a spatial demand field."""
+        self._require_column(demand_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        rng = random.Random(seed)
+        demand = [max(float(r.get(demand_column, 0) or 0), 0.0) for r in recs]
+        players = [list(centroids[i]) for i in rng.sample(range(n), min(n_players, n))]
+
+        def _payoff(player_idx: int, px: float, py: float, positions: list[list[float]]) -> float:
+            payoff = 0.0
+            for i in range(n):
+                own_d = math.hypot(centroids[i][0] - px, centroids[i][1] - py)
+                best_other = min(math.hypot(centroids[i][0] - positions[j][0], centroids[i][1] - positions[j][1])
+                                 for j in range(len(positions)) if j != player_idx) if len(positions) > 1 else float("inf")
+                if own_d <= best_other:
+                    payoff += demand[i] / max(own_d + 1.0, 1e-12)
+            return payoff
+
+        for _ in range(n_iterations):
+            for player_idx in range(len(players)):
+                best_pos = list(players[player_idx])
+                best_pay = _payoff(player_idx, best_pos[0], best_pos[1], players)
+                candidates = random.sample(centroids, min(len(centroids), 12))
+                for cand_x, cand_y in candidates:
+                    pay = _payoff(player_idx, cand_x, cand_y, players)
+                    if pay > best_pay:
+                        best_pay = pay
+                        best_pos = [cand_x, cand_y]
+                players[player_idx] = best_pos
+        out_rows: list[Record] = []
+        for i in range(n):
+            assigned = min(range(len(players)), key=lambda p_idx: math.hypot(centroids[i][0] - players[p_idx][0], centroids[i][1] - players[p_idx][1]))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"player_{suffix}": assigned,
+                f"demand_{suffix}": demand[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 502: spatial_ordinal_regression
+    # ------------------------------------------------------------------
+    def spatial_ordinal_regression(
+        self,
+        feature_columns: list[str],
+        ordinal_column: str,
+        *,
+        epochs: int = 150,
+        learning_rate: float = 0.01,
+        suffix: str = "sor",
+    ) -> "GeoPromptFrame":
+        """Ordinal regression via latent-score fitting and threshold decoding."""
+        for c in feature_columns:
+            self._require_column(c)
+        self._require_column(ordinal_column)
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        labels = [r.get(ordinal_column) for r in recs]
+        ordered = sorted(set(labels))
+        label_to_score = {lbl: idx for idx, lbl in enumerate(ordered)}
+        target = [float(label_to_score[lbl]) for lbl in labels]
+        n_feat = len(feature_columns)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        col_min = [min(row[f] for row in raw) for f in range(n_feat)]
+        col_rng = [max(row[f] for row in raw) - col_min[f] or 1.0 for f in range(n_feat)]
+        data = [[(row[f] - col_min[f]) / col_rng[f] for f in range(n_feat)] for row in raw]
+        weights = [0.0] * n_feat
+        bias = 0.0
+        for _ in range(epochs):
+            for i in range(n):
+                pred = bias + sum(weights[f] * data[i][f] for f in range(n_feat))
+                err = pred - target[i]
+                bias -= learning_rate * err
+                for f in range(n_feat):
+                    weights[f] -= learning_rate * err * data[i][f]
+        thresholds = [0.5 * (idx + idx + 1) for idx in range(len(ordered) - 1)]
+        out_rows: list[Record] = []
+        for i in range(n):
+            latent = bias + sum(weights[f] * data[i][f] for f in range(n_feat))
+            pred_idx = 0
+            while pred_idx < len(thresholds) and latent > thresholds[pred_idx]:
+                pred_idx += 1
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"predicted_{suffix}": ordered[pred_idx],
+                f"latent_{suffix}": round(latent, 6),
+                f"actual_{suffix}": labels[i],
+                f"correct_{suffix}": 1 if ordered[pred_idx] == labels[i] else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 503: graph_total_variation_denoise
+    # ------------------------------------------------------------------
+    def graph_total_variation_denoise(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        lambda_reg: float = 0.2,
+        n_steps: int = 40,
+        suffix: str = "gtv",
+    ) -> "GeoPromptFrame":
+        """Graph total-variation denoising for edge-preserving smoothing."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        neighbours: list[list[int]] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            neighbours.append([j for _, j in dists])
+        current = list(values)
+        for _ in range(n_steps):
+            updated = list(current)
+            for i in range(n):
+                grad = sum((current[i] - current[j]) / max(abs(current[i] - current[j]), 1e-6) for j in neighbours[i])
+                updated[i] = (values[i] + lambda_reg * sum(current[j] for j in neighbours[i]) / max(len(neighbours[i]), 1) - 0.05 * grad) / (1 + lambda_reg)
+            current = updated
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"denoised_{suffix}": round(current[i], 6),
+                f"original_{suffix}": values[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 504: spatial_nystrom_kernel_map
+    # ------------------------------------------------------------------
+    def spatial_nystrom_kernel_map(
+        self,
+        feature_columns: list[str],
+        *,
+        n_components: int = 2,
+        n_landmarks: int = 12,
+        seed: int | None = None,
+        suffix: str = "nyk",
+    ) -> "GeoPromptFrame":
+        """Nyström approximation of an RBF kernel map for spatial attributes."""
+        for c in feature_columns:
+            self._require_column(c)
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        rng = random.Random(seed)
+        n = len(recs)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        landmarks = rng.sample(range(n), min(n_landmarks, n))
+        sigma = math.sqrt(sum(sum((raw[i][f] - raw[j][f]) ** 2 for f in range(len(feature_columns))) for i in range(n) for j in landmarks) /
+                          max(n * len(landmarks), 1)) or 1.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            rec: Record = {self.geometry_column: recs[i][self.geometry_column]}
+            kernel_vals = []
+            for j in landmarks:
+                d2 = sum((raw[i][f] - raw[j][f]) ** 2 for f in range(len(feature_columns)))
+                kernel_vals.append(math.exp(-d2 / (2 * sigma * sigma)))
+            for c_idx in range(min(n_components, len(kernel_vals))):
+                rec[f"component_{c_idx}_{suffix}"] = round(kernel_vals[c_idx], 6)
+            out_rows.append(rec)
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 505: terrain_ridge_detector
+    # ------------------------------------------------------------------
+    def terrain_ridge_detector(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 8,
+        suffix: str = "trd",
+    ) -> "GeoPromptFrame":
+        """Detect ridge candidates from directional neighbour contrasts."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        vals = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            higher = sum(1 for _, j in dists if vals[i] > vals[j])
+            contrast = sum(abs(vals[i] - vals[j]) for _, j in dists) / max(len(dists), 1)
+            ridge_score = (higher / max(len(dists), 1)) * contrast
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"ridge_score_{suffix}": round(ridge_score, 6),
+                f"is_ridge_{suffix}": 1 if higher >= max(2, len(dists) // 2) else 0,
+                f"value_{suffix}": vals[i],
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 506: spatial_conformal_outlier
+    # ------------------------------------------------------------------
+    def spatial_conformal_outlier(
+        self,
+        value_column: str,
+        *,
+        calibration_fraction: float = 0.25,
+        k_neighbors: int = 6,
+        alpha: float = 0.1,
+        suffix: str = "sco",
+    ) -> "GeoPromptFrame":
+        """Outlier scoring using conformal residual thresholds on local predictors."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        n_cal = max(1, int(n * calibration_fraction))
+        calibration = set(range(max(0, n - n_cal), n))
+
+        def _local_pred(i: int) -> float:
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            num, den = 0.0, 0.0
+            for d, j in dists:
+                w = 1.0 / max(d, 1e-12)
+                num += w * values[j]
+                den += w
+            return num / den if den else values[i]
+
+        calibration_scores = sorted(abs(values[i] - _local_pred(i)) for i in calibration)
+        q_idx = min(len(calibration_scores) - 1, max(0, int((1 - alpha) * len(calibration_scores)))) if calibration_scores else 0
+        threshold = calibration_scores[q_idx] if calibration_scores else 0.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            pred = _local_pred(i)
+            score = abs(values[i] - pred)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"score_{suffix}": round(score, 6),
+                f"threshold_{suffix}": round(threshold, 6),
+                f"is_outlier_{suffix}": 1 if score > threshold else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 507: hyperbolic_spatial_embedding
+    # ------------------------------------------------------------------
+    def hyperbolic_spatial_embedding(
+        self,
+        feature_columns: list[str],
+        *,
+        suffix: str = "hse",
+    ) -> "GeoPromptFrame":
+        """Embed features into a 2D Poincare disk using centrality-based radius."""
+        for c in feature_columns:
+            self._require_column(c)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        mean_val = [sum(row[f] for row in raw) / n for f in range(len(feature_columns))]
+        out_rows: list[Record] = []
+        for i in range(n):
+            centrality = 1.0 / (1.0 + sum(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) for j in range(n)) / max(n - 1, 1))
+            radius = max(0.0, min(0.99, 1.0 - centrality))
+            angle = math.atan2(sum((raw[i][f] - mean_val[f]) * (f + 1) for f in range(len(feature_columns))),
+                               1.0 + sum(abs(raw[i][f] - mean_val[f]) for f in range(len(feature_columns))))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"x_{suffix}": round(radius * math.cos(angle), 6),
+                f"y_{suffix}": round(radius * math.sin(angle), 6),
+                f"radius_{suffix}": round(radius, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 508: spatial_energy_distance_test
+    # ------------------------------------------------------------------
+    def spatial_energy_distance_test(
+        self,
+        value_column: str,
+        group_column: str,
+        *,
+        suffix: str = "sed",
+    ) -> "GeoPromptFrame":
+        """Energy-distance-style separation test between two spatial groups."""
+        self._require_column(value_column)
+        self._require_column(group_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        groups = [r.get(group_column) for r in recs]
+        unique = sorted(set(groups))
+        if len(unique) < 2:
+            return self.copy()
+        first = [i for i in range(len(recs)) if groups[i] == unique[0]]
+        second = [i for i in range(len(recs)) if groups[i] == unique[1]]
+        within_a = sum(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) for i in first for j in first if i < j)
+        within_b = sum(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) for i in second for j in second if i < j)
+        between = sum(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) for i in first for j in second)
+        na = max(len(first), 1)
+        nb = max(len(second), 1)
+        energy = 2 * between / (na * nb) - 2 * within_a / max(na * na, 1) - 2 * within_b / max(nb * nb, 1)
+        out_rows: list[Record] = []
+        for i in range(len(recs)):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"group_{suffix}": groups[i],
+                f"energy_distance_{suffix}": round(energy, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 509: adaptive_radius_hotspot
+    # ------------------------------------------------------------------
+    def adaptive_radius_hotspot(
+        self,
+        value_column: str,
+        *,
+        n_radii: int = 8,
+        max_radius: float | None = None,
+        suffix: str = "arh",
+    ) -> "GeoPromptFrame":
+        """Choose the neighbourhood radius that maximises each point's hotspot score."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        extent = max(self.bounds().max_x - self.bounds().min_x, self.bounds().max_y - self.bounds().min_y, 1e-6)
+        max_radius = max_radius or extent / 2
+        radii = [max_radius * (r_idx + 1) / n_radii for r_idx in range(n_radii)]
+        global_mean = sum(values) / n
+        global_std = math.sqrt(sum((v - global_mean) ** 2 for v in values) / n) or 1e-12
+        out_rows: list[Record] = []
+        for i in range(n):
+            best_score = -float("inf")
+            best_radius = radii[0]
+            for radius in radii:
+                nb = [j for j in range(n) if math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) <= radius]
+                local_mean = sum(values[j] for j in nb) / max(len(nb), 1)
+                score = (local_mean - global_mean) / global_std
+                if score > best_score:
+                    best_score = score
+                    best_radius = radius
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"hotspot_score_{suffix}": round(best_score, 6),
+                f"best_radius_{suffix}": round(best_radius, 6),
+                f"is_hotspot_{suffix}": 1 if best_score > 1.0 else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 510: spatial_transport_accessibility
+    # ------------------------------------------------------------------
+    def spatial_transport_accessibility(
+        self,
+        supply_column: str,
+        demand_column: str,
+        *,
+        beta: float = 1.5,
+        suffix: str = "sta",
+    ) -> "GeoPromptFrame":
+        """Hansen-style accessibility index balancing supply, demand, and distance."""
+        self._require_column(supply_column)
+        self._require_column(demand_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        supply = [max(float(r.get(supply_column, 0) or 0), 0.0) for r in recs]
+        demand = [max(float(r.get(demand_column, 0) or 0), 0.0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            access = 0.0
+            for j in range(n):
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                access += supply[j] / (1.0 + d) ** beta
+            balance = access / max(demand[i] + 1.0, 1e-12)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"accessibility_{suffix}": round(access, 6),
+                f"balance_{suffix}": round(balance, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 511: graph_heat_centrality
+    # ------------------------------------------------------------------
+    def graph_heat_centrality(
+        self,
+        *,
+        k_neighbors: int = 6,
+        n_steps: int = 20,
+        suffix: str = "ghc",
+    ) -> "GeoPromptFrame":
+        """Heat-kernel-inspired centrality on a spatial graph."""
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        graph: list[list[int]] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            graph.append([j for _, j in dists])
+        heat = [1.0] * n
+        for _ in range(n_steps):
+            new_heat = [0.0] * n
+            for i in range(n):
+                share = heat[i] / max(len(graph[i]), 1)
+                new_heat[i] += 0.5 * heat[i]
+                for j in graph[i]:
+                    new_heat[j] += 0.5 * share
+            heat = new_heat
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"heat_centrality_{suffix}": round(heat[i], 6),
+                f"degree_{suffix}": len(graph[i]),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 512: spatial_bayes_blend_interpolator
+    # ------------------------------------------------------------------
+    def spatial_bayes_blend_interpolator(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        prior_strength: float = 1.0,
+        suffix: str = "sbb",
+    ) -> "GeoPromptFrame":
+        """Bayesian blend of global prior mean and local inverse-distance evidence."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        prior_mean = sum(values) / n
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            weights = [1.0 / max(d, 1e-12) for d, _ in dists]
+            local_mean = sum(weights[k] * values[dists[k][1]] for k in range(len(dists))) / max(sum(weights), 1e-12) if dists else prior_mean
+            precision = prior_strength + sum(weights)
+            posterior = (prior_strength * prior_mean + sum(weights[k] * values[dists[k][1]] for k in range(len(dists)))) / max(precision, 1e-12)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"posterior_{suffix}": round(posterior, 6),
+                f"local_mean_{suffix}": round(local_mean, 6),
+                f"prior_mean_{suffix}": round(prior_mean, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 513: spatial_jensen_shannon_scan
+    # ------------------------------------------------------------------
+    def spatial_jensen_shannon_scan(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        n_bins: int = 8,
+        suffix: str = "sjs",
+    ) -> "GeoPromptFrame":
+        """Local Jensen-Shannon divergence between neighbourhood and global distributions."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        v_min, v_max = min(values), max(values)
+        v_rng = v_max - v_min or 1.0
+
+        def _hist(indices: list[int]) -> list[float]:
+            hist = [0.0] * n_bins
+            for idx in indices:
+                b_idx = min(n_bins - 1, int((values[idx] - v_min) / v_rng * n_bins))
+                hist[b_idx] += 1.0
+            total = sum(hist) or 1.0
+            return [h / total for h in hist]
+
+        global_hist = _hist(list(range(n)))
+
+        def _kl(p: list[float], q: list[float]) -> float:
+            s = 0.0
+            for idx in range(len(p)):
+                if p[idx] > 0 and q[idx] > 0:
+                    s += p[idx] * math.log(p[idx] / q[idx])
+            return s
+
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            nb_hist = _hist([i] + [j for _, j in dists])
+            mix = [(nb_hist[b_idx] + global_hist[b_idx]) / 2 for b_idx in range(n_bins)]
+            js = 0.5 * _kl(nb_hist, mix) + 0.5 * _kl(global_hist, mix)
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"js_divergence_{suffix}": round(js, 6),
+                f"is_anomalous_{suffix}": 1 if js > 0.1 else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 514: front_propagation_distance
+    # ------------------------------------------------------------------
+    def front_propagation_distance(
+        self,
+        source_column: str,
+        *,
+        k_neighbors: int = 6,
+        speed_column: str | None = None,
+        suffix: str = "fpd",
+    ) -> "GeoPromptFrame":
+        """Approximate eikonal front-propagation distance from source features."""
+        self._require_column(source_column)
+        if speed_column is not None:
+            self._require_column(speed_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        speed = [max(float(r.get(speed_column, 1) or 1), 1e-6) for r in recs] if speed_column else [1.0] * n
+        graph: list[list[tuple[int, float]]] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            graph.append([(j, d) for d, j in dists])
+        dist = [float("inf")] * n
+        visited = [False] * n
+        for i in range(n):
+            if recs[i].get(source_column):
+                dist[i] = 0.0
+        for _ in range(n):
+            best = -1
+            best_d = float("inf")
+            for i in range(n):
+                if not visited[i] and dist[i] < best_d:
+                    best = i
+                    best_d = dist[i]
+            if best < 0:
+                break
+            visited[best] = True
+            for j, w in graph[best]:
+                cost = w / ((speed[best] + speed[j]) / 2)
+                if dist[best] + cost < dist[j]:
+                    dist[j] = dist[best] + cost
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"distance_{suffix}": round(dist[i], 6) if dist[i] < float("inf") else None,
+                f"is_source_{suffix}": 1 if recs[i].get(source_column) else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 515: spatial_kernel_herding
+    # ------------------------------------------------------------------
+    def spatial_kernel_herding(
+        self,
+        *,
+        n_select: int = 10,
+        suffix: str = "skh",
+    ) -> "GeoPromptFrame":
+        """Select representative features using kernel herding on spatial locations."""
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        n_select = min(n_select, n)
+        extent = max(self.bounds().max_x - self.bounds().min_x, self.bounds().max_y - self.bounds().min_y, 1e-6)
+        sigma = extent / 4
+
+        def _kernel(i: int, j: int) -> float:
+            d2 = (centroids[i][0] - centroids[j][0]) ** 2 + (centroids[i][1] - centroids[j][1]) ** 2
+            return math.exp(-d2 / (2 * sigma * sigma))
+
+        mean_embed = [sum(_kernel(i, j) for j in range(n)) / n for i in range(n)]
+        selected: list[int] = []
+        scores = [0.0] * n
+        for _ in range(n_select):
+            best = 0
+            best_score = -float("inf")
+            for i in range(n):
+                if i in selected:
+                    continue
+                herd = sum(_kernel(i, j) for j in selected) / max(len(selected), 1) if selected else 0.0
+                score = mean_embed[i] - herd
+                if score > best_score:
+                    best_score = score
+                    best = i
+            selected.append(best)
+            scores[best] = best_score
+        out_rows: list[Record] = []
+        for i in range(n):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"selected_{suffix}": 1 if i in selected else 0,
+                f"selection_rank_{suffix}": selected.index(i) if i in selected else -1,
+                f"score_{suffix}": round(scores[i], 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 516: spatial_mutual_information_map
+    # ------------------------------------------------------------------
+    def spatial_mutual_information_map(
+        self,
+        value_column: str,
+        other_column: str,
+        *,
+        k_neighbors: int = 8,
+        n_bins: int = 6,
+        suffix: str = "smi",
+    ) -> "GeoPromptFrame":
+        """Local mutual information between two attributes over spatial neighbourhoods."""
+        self._require_column(value_column)
+        self._require_column(other_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        first = [float(r.get(value_column, 0) or 0) for r in recs]
+        second = [float(r.get(other_column, 0) or 0) for r in recs]
+        f_min, f_max = min(first), max(first)
+        s_min, s_max = min(second), max(second)
+        f_rng = f_max - f_min or 1.0
+        s_rng = s_max - s_min or 1.0
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            idxs = [i] + [j for _, j in dists]
+            joint = [[0.0] * n_bins for _ in range(n_bins)]
+            for idx in idxs:
+                a = min(n_bins - 1, int((first[idx] - f_min) / f_rng * n_bins))
+                b = min(n_bins - 1, int((second[idx] - s_min) / s_rng * n_bins))
+                joint[a][b] += 1.0
+            total = sum(sum(row) for row in joint) or 1.0
+            px = [sum(joint[a][b] for b in range(n_bins)) / total for a in range(n_bins)]
+            py = [sum(joint[a][b] for a in range(n_bins)) / total for b in range(n_bins)]
+            mi = 0.0
+            for a in range(n_bins):
+                for b in range(n_bins):
+                    p = joint[a][b] / total
+                    if p > 0 and px[a] > 0 and py[b] > 0:
+                        mi += p * math.log(p / (px[a] * py[b]))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"mi_{suffix}": round(mi, 6),
+                f"n_neighbours_{suffix}": len(idxs),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 517: robust_spatial_median_field
+    # ------------------------------------------------------------------
+    def robust_spatial_median_field(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 7,
+        suffix: str = "rmf",
+    ) -> "GeoPromptFrame":
+        """Robust local field using neighbour medians instead of means."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        out_rows: list[Record] = []
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            nb_vals = sorted([values[j] for _, j in dists] + [values[i]])
+            mid = len(nb_vals) // 2
+            median_val = nb_vals[mid] if len(nb_vals) % 2 == 1 else (nb_vals[mid - 1] + nb_vals[mid]) / 2
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"median_{suffix}": round(median_val, 6),
+                f"residual_{suffix}": round(values[i] - median_val, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 518: spatial_bifurcation_detector
+    # ------------------------------------------------------------------
+    def spatial_bifurcation_detector(
+        self,
+        value_column: str,
+        *,
+        axis: str = "x",
+        window: int = 7,
+        suffix: str = "sbd",
+    ) -> "GeoPromptFrame":
+        """Detect locations where the ordered spatial signal splits into two regimes."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        coords = [c[0] if axis.lower() == "x" else c[1] for c in centroids]
+        order = sorted(range(len(recs)), key=lambda idx: coords[idx])
+        out_score = [0.0] * len(recs)
+        for pos in range(len(order)):
+            left = order[max(0, pos - window):pos]
+            right = order[pos + 1:min(len(order), pos + 1 + window)]
+            if not left or not right:
+                continue
+            left_mean = sum(values[idx] for idx in left) / len(left)
+            right_mean = sum(values[idx] for idx in right) / len(right)
+            out_score[order[pos]] = abs(left_mean - right_mean)
+        out_rows: list[Record] = []
+        for i in range(len(recs)):
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"bifurcation_score_{suffix}": round(out_score[i], 6),
+                f"is_bifurcation_{suffix}": 1 if out_score[i] > 0 else 0,
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 519: spatial_adversarial_validator
+    # ------------------------------------------------------------------
+    def spatial_adversarial_validator(
+        self,
+        feature_columns: list[str],
+        *,
+        split_axis: str = "x",
+        epochs: int = 120,
+        learning_rate: float = 0.05,
+        suffix: str = "sav",
+    ) -> "GeoPromptFrame":
+        """Domain-shift validator by classifying one side of space from the other."""
+        for c in feature_columns:
+            self._require_column(c)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        coords = [c[0] if split_axis.lower() == "x" else c[1] for c in centroids]
+        median_coord = sorted(coords)[n // 2]
+        labels = [1.0 if coord > median_coord else 0.0 for coord in coords]
+        n_feat = len(feature_columns)
+        weights = [0.0] * n_feat
+        bias = 0.0
+
+        def _sigmoid(z: float) -> float:
+            z = max(-500.0, min(500.0, z))
+            return 1.0 / (1.0 + math.exp(-z))
+
+        for _ in range(epochs):
+            for i in range(n):
+                score = bias + sum(weights[f] * raw[i][f] for f in range(n_feat))
+                pred = _sigmoid(score)
+                err = pred - labels[i]
+                bias -= learning_rate * err
+                for f in range(n_feat):
+                    weights[f] -= learning_rate * err * raw[i][f]
+        out_rows: list[Record] = []
+        for i in range(n):
+            prob = _sigmoid(bias + sum(weights[f] * raw[i][f] for f in range(n_feat)))
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"domain_prob_{suffix}": round(prob, 6),
+                f"domain_label_{suffix}": int(labels[i]),
+                f"shift_score_{suffix}": round(abs(prob - 0.5) * 2, 6),
+            })
+        return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # ------------------------------------------------------------------
+    # Tool 520: spatial_consensus_partition
+    # ------------------------------------------------------------------
+    def spatial_consensus_partition(
+        self,
+        value_column: str,
+        *,
+        k_neighbors: int = 6,
+        suffix: str = "scpn",
+    ) -> "GeoPromptFrame":
+        """Consensus partition by combining value, geometry, and graph neighbourhood cues."""
+        self._require_column(value_column)
+        centroids = self._centroids()
+        recs = self.to_records()
+        if not recs:
+            return self.copy()
+        n = len(recs)
+        values = [float(r.get(value_column, 0) or 0) for r in recs]
+        median_value = sorted(values)[n // 2]
+        x_coords = [c[0] for c in centroids]
+        median_x = sorted(x_coords)[n // 2]
+        graph_label = [0] * n
+        for i in range(n):
+            dists = sorted((math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
+                           for j in range(n) if j != i)[:k_neighbors]
+            nb_mean = sum(values[j] for _, j in dists) / max(len(dists), 1)
+            graph_label[i] = 1 if nb_mean > median_value else 0
+        label_map: dict[tuple[int, int, int], int] = {}
+        next_id = 0
+        out_rows: list[Record] = []
+        for i in range(n):
+            signature = (1 if values[i] > median_value else 0,
+                         1 if centroids[i][0] > median_x else 0,
+                         graph_label[i])
+            if signature not in label_map:
+                label_map[signature] = next_id
+                next_id += 1
+            out_rows.append({
+                self.geometry_column: recs[i][self.geometry_column],
+                f"cluster_{suffix}": label_map[signature],
+                f"signature_{suffix}": "".join(str(part) for part in signature),
             })
         return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
 

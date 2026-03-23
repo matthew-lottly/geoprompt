@@ -2,6 +2,88 @@
 
 ## Unreleased
 
+### New Tools (441–520): Novel Spatial Algorithms
+- **441 `gravity_flow_model`** — gravity-style spatial interaction flows
+- **442 `diffusion_kernel_smooth`** — heat-equation smoothing on a k-NN graph
+- **443 `topological_persistence`** — persistence scores for hotspot components
+- **444 `levy_flight_optimizer`** — Levy-flight search for spatial maxima
+- **445 `spectral_graph_partition`** — graph Laplacian partitioning
+- **446 `spatial_wavelet_decompose`** — multi-scale Mexican-hat wavelet decomposition
+- **447 `spatial_information_entropy`** — local Shannon entropy of spatial neighbourhoods
+- **448 `ant_colony_path_finder`** — ant-colony touring on spatial graphs
+- **449 `fractal_dimension_estimator`** — box-counting dimension of point patterns
+- **450 `reaction_diffusion_pattern`** — Gray-Scott spatial pattern simulation
+- **451 `spatial_pagerank`** — PageRank on spatial proximity networks
+- **452 `cellular_automata_simulator`** — cellular automata on interpolated grids
+- **453 `spatial_label_propagation`** — semi-supervised neighbour label diffusion
+- **454 `optimal_facility_locator`** — p-median style facility siting
+- **455 `spatial_outlier_ensemble`** — ensemble outlier scoring from z-score, lag, and LOF
+- **456 `spatial_reservoir_computer`** — reservoir computing for spatiotemporal prediction
+- **457 `spatial_contour_tree`** — contour-tree-inspired critical point analysis
+- **458 `multi_scale_geographically_weighted`** — multi-scale local regression coefficients
+- **459 `spatial_markov_chain`** — neighbour-conditioned state transitions
+- **460 `spatial_homology_betti`** — Betti-number summaries of spatial complexes
+- **461 `spatial_potential_field`** — potential and gradient-field analysis
+- **462 `particle_swarm_cluster`** — PSO-based clustering
+- **463 `spatial_elastic_net`** — elastic-net regression
+- **464 `spatial_dbscan_clustering`** — pure-Python DBSCAN for spatial points
+- **465 `spatial_mean_shift`** — geographic mean-shift clustering
+- **466 `spatial_gradient_field`** — local slope and aspect estimates
+- **467 `spatial_hdbscan`** — simplified HDBSCAN for variable-density clusters
+- **468 `spatial_copula_dependence`** — local copula-style dependence diagnostics
+- **469 `spatial_loess_regression`** — locally weighted spatial regression
+- **470 `spatial_flow_accumulation`** — flow routing and accumulation on point graphs
+- **471 `spatial_cross_k_function`** — bivariate Ripley cross-K analysis
+- **472 `harmonic_regression_spatial`** — Fourier-style temporal harmonic regression
+- **473 `spatial_bootstrap_confidence`** — local bootstrap confidence intervals
+- **474 `spatial_variogram_cloud`** — empirical semivariance clouds
+- **475 `spatial_permutation_test`** — Monte Carlo significance for local lags
+- **476 `spatial_random_walk_diffusion`** — accessibility from random-walk visitation
+- **477 `adaptive_spatial_scan_statistic`** — adaptive-window scan clusters
+- **478 `spatial_silhouette_score`** — cluster quality diagnostics in geographic space
+- **479 `spatial_curvature_estimator`** — profile, plan, and mean curvature estimates
+- **480 `spatial_causal_inference`** — spatial nearest-match treatment effects
+- **481 `spatial_optimal_transport`** — entropic transport burdens and barycenters
+- **482 `graph_neural_spatial_smoother`** — graph message-passing smoother
+- **483 `anisotropic_diffusion_surface`** — edge-preserving diffusion smoothing
+- **484 `persistent_hotspot_tracker`** — multi-threshold hotspot persistence
+- **485 `spatial_conformal_predictor`** — conformal intervals from local residuals
+- **486 `geodesic_medoid_clustering`** — graph-geodesic medoid clustering
+- **487 `spatial_sinkhorn_barycenter`** — iterative transport barycenters
+- **488 `multi_agent_coverage`** — weighted farthest-first agent placement
+- **489 `manifold_alignment_spatial`** — spatial manifold alignment embeddings
+- **490 `spatial_stochastic_blockmodel`** — community inference on proximity graphs
+- **491 `adaptive_mesh_refinement_surface`** — recursive spatial mesh refinement
+- **492 `spatial_koopman_forecaster`** — Koopman-style lifted linear forecasting
+- **493 `barycentric_spatial_interpolator`** — three-point barycentric interpolation
+- **494 `topological_skeleton_extractor`** — ridge-like skeleton extraction
+- **495 `spatial_contrastive_embedding`** — near/far contrastive embeddings
+- **496 `uncertainty_aware_idw`** — IDW predictions with uncertainty estimates
+- **497 `spatial_federated_clusterer`** — region-first federated clustering
+- **498 `graph_wave_propagation`** — discrete wave propagation on graphs
+- **499 `spatial_morse_smale_partition`** — basin partitioning by gradient ascent
+- **500 `optimal_transport_clustering`** — transport-style barycentric clustering
+- **501 `game_theoretic_location_equilibrium`** — competitive facility equilibrium search
+- **502 `spatial_ordinal_regression`** — latent-score ordinal prediction
+- **503 `graph_total_variation_denoise`** — TV denoising on spatial graphs
+- **504 `spatial_nystrom_kernel_map`** — Nyström kernel feature approximation
+- **505 `terrain_ridge_detector`** — ridge scoring from directional contrasts
+- **506 `spatial_conformal_outlier`** — conformal outlier detection
+- **507 `hyperbolic_spatial_embedding`** — Poincare-disk style embeddings
+- **508 `spatial_energy_distance_test`** — energy-distance separation diagnostics
+- **509 `adaptive_radius_hotspot`** — radius-selection for hotspot detection
+- **510 `spatial_transport_accessibility`** — supply-demand accessibility balancing
+- **511 `graph_heat_centrality`** — heat-kernel centrality on spatial graphs
+- **512 `spatial_bayes_blend_interpolator`** — Bayesian prior/local interpolation blend
+- **513 `spatial_jensen_shannon_scan`** — local JS-divergence anomaly scoring
+- **514 `front_propagation_distance`** — wavefront travel distance over k-NN graphs
+- **515 `spatial_kernel_herding`** — representative point selection by kernel herding
+- **516 `spatial_mutual_information_map`** — neighbourhood mutual-information surfaces
+- **517 `robust_spatial_median_field`** — local median smoothing field
+- **518 `spatial_bifurcation_detector`** — ordered-signal bifurcation scoring
+- **519 `spatial_adversarial_validator`** — domain-shift validation across space
+- **520 `spatial_consensus_partition`** — consensus clustering from multiple weak partitions
+
 ### New Tools (401–440): AI-Powered & Pseudo-Quantum
 - **401 `neural_spatial_interpolation`** — MLP-based surface interpolation via backpropagation
 - **402 `spatial_autoencoder`** — autoencoder dimensionality reduction for spatial attributes
