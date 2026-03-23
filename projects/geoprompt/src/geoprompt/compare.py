@@ -776,6 +776,11 @@ def _dataset_report(case: CorpusCase, tolerance: float, benchmark_filter: Callab
         (f"{case.name}.geoprompt.trajectory_simplify", lambda: analysis_trajectory.trajectory_simplify(tolerance=max((compare_bounds.max_x - compare_bounds.min_x) / 1000.0, 1e-6)), 5),
         (f"{case.name}.geoprompt.spatiotemporal_cube", lambda: analysis_points.spatiotemporal_cube(time_column="time", value_column="value", time_intervals=3, grid_resolution=4, aggregation="count"), 3),
         (f"{case.name}.geoprompt.geohash_encode", lambda: analysis_points.geohash_encode(precision=6), 5),
+        (f"{case.name}.geoprompt.spatial_elastic_net", lambda: analysis_points.spatial_elastic_net(["demand_index", "capacity_index", "priority_index"], "value", alpha=0.05, l1_ratio=0.4, epochs=120), 3),
+        (f"{case.name}.geoprompt.spatial_dbscan_clustering", lambda: analysis_points.spatial_dbscan_clustering(min_points=4), 3),
+        (f"{case.name}.geoprompt.spatial_hdbscan", lambda: analysis_points.spatial_hdbscan(min_cluster_size=4, min_samples=3), 3),
+        (f"{case.name}.geoprompt.spatial_optimal_transport", lambda: analysis_points.spatial_optimal_transport("weight", reg=0.25, n_iterations=20), 3),
+        (f"{case.name}.geoprompt.spatial_conformal_predictor", lambda: analysis_points.spatial_conformal_predictor(["demand_index", "capacity_index", "priority_index"], "value", calibration_fraction=0.25, k_neighbors=5, alpha=0.2), 3),
     ]
     for operation, func, repeats in benchmark_inputs:
         _run_selected_benchmark(benchmarks, operation, func, repeats=repeats, benchmark_filter=benchmark_filter)
