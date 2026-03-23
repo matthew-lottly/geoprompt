@@ -30570,42 +30570,48 @@ class GeoPromptFrame:
         n_feat = len(feature_columns)
         raw = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
         targets = [float(r.get(target_column, 0) or 0) for r in recs]
-        # Normalise
-        col_min = [min(raw[i][f] for i in range(n)) for f in range(n_feat)]
-        col_rng = [max(raw[i][f] for i in range(n)) - col_min[f] or 1.0 for f in range(n_feat)]
-        data = [[(raw[i][f] - col_min[f]) / col_rng[f] for f in range(n_feat)] for i in range(n)]
+        # Standardise features so the elastic-net penalties act comparably.
+        col_mean = [sum(raw[i][f] for i in range(n)) / n for f in range(n_feat)]
+        col_scale = [math.sqrt(sum((raw[i][f] - col_mean[f]) ** 2 for i in range(n)) / n) or 1.0 for f in range(n_feat)]
+        data = [[(raw[i][f] - col_mean[f]) / col_scale[f] for f in range(n_feat)] for i in range(n)]
         t_mean = sum(targets) / n
         target_c = [t - t_mean for t in targets]
-        # Coordinate descent
         w = [0.0] * n_feat
+        residual = list(target_c)
+        l1 = alpha * l1_ratio
+        l2 = alpha * (1 - l1_ratio)
+        feature_energy = [sum(data[i][f] * data[i][f] for i in range(n)) / n or 1.0 for f in range(n_feat)]
         for _ in range(epochs):
+            max_delta = 0.0
             for f in range(n_feat):
-                # Partial residual
-                residuals = [0.0] * n
-                for i in range(n):
-                    pred = sum(w[ff] * data[i][ff] for ff in range(n_feat))
-                    residuals[i] = target_c[i] - pred + w[f] * data[i][f]
-                # Correlation
-                rho = sum(data[i][f] * residuals[i] for i in range(n)) / n
-                # Soft threshold for L1
-                l1 = alpha * l1_ratio
-                l2 = alpha * (1 - l1_ratio)
+                prev_w = w[f]
+                rho = sum(data[i][f] * (residual[i] + data[i][f] * prev_w) for i in range(n)) / n
                 if rho > l1:
-                    w[f] = (rho - l1) / (1 + l2)
+                    new_w = (rho - l1) / (feature_energy[f] + l2)
                 elif rho < -l1:
-                    w[f] = (rho + l1) / (1 + l2)
+                    new_w = (rho + l1) / (feature_energy[f] + l2)
                 else:
-                    w[f] = 0.0
+                    new_w = 0.0
+                delta = new_w - prev_w
+                if delta:
+                    w[f] = new_w
+                    for i in range(n):
+                        residual[i] -= data[i][f] * delta
+                    max_delta = max(max_delta, abs(delta))
+            if max_delta < learning_rate * 1e-3:
+                break
+        coef = [w[f] / col_scale[f] for f in range(n_feat)]
+        intercept = t_mean - sum(coef[f] * col_mean[f] for f in range(n_feat))
         out_rows: list[Record] = []
         for i in range(n):
-            pred = t_mean + sum(w[f] * data[i][f] for f in range(n_feat))
+            pred = intercept + sum(coef[f] * raw[i][f] for f in range(n_feat))
             rec: Record = {
                 self.geometry_column: recs[i][self.geometry_column],
                 f"predicted_{suffix}": round(pred, 6),
                 f"residual_{suffix}": round(targets[i] - pred, 6),
             }
             for f in range(n_feat):
-                rec[f"coef_{feature_columns[f]}_{suffix}"] = round(w[f], 6)
+                rec[f"coef_{feature_columns[f]}_{suffix}"] = round(coef[f], 6)
             out_rows.append(rec)
         return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
 
@@ -30630,13 +30636,12 @@ class GeoPromptFrame:
         if not recs:
             return self.copy()
         n = len(recs)
+        dm = self._cached_distance_matrix("euclidean")
         # Auto epsilon from k-distance elbow
         if epsilon is None:
             k_dists: list[float] = []
             for i in range(n):
-                dists = sorted(math.hypot(centroids[i][0] - centroids[j][0],
-                                          centroids[i][1] - centroids[j][1])
-                               for j in range(n) if j != i)
+                dists = sorted(dm[i][j] for j in range(n) if j != i)
                 k_dists.append(dists[min(min_points - 1, len(dists) - 1)] if dists else 0.0)
             k_dists.sort()
             # Elbow: point of maximum curvature
@@ -30650,31 +30655,35 @@ class GeoPromptFrame:
                 epsilon = k_dists[best_idx]
             else:
                 epsilon = k_dists[-1] if k_dists else 1.0
+        neighbour_lists = [[j for j in range(n) if j != i and dm[i][j] <= epsilon] for i in range(n)]
         labels = [-1] * n  # -1 = noise
         cluster_id = 0
         visited = [False] * n
-
-        def _region_query(i: int) -> list[int]:
-            return [j for j in range(n) if j != i and
-                    math.hypot(centroids[i][0] - centroids[j][0],
-                               centroids[i][1] - centroids[j][1]) <= epsilon]
 
         for i in range(n):
             if visited[i]:
                 continue
             visited[i] = True
-            neighbours = _region_query(i)
-            if len(neighbours) < min_points - 1:
+            neighbours = neighbour_lists[i]
+            if len(neighbours) + 1 < min_points:
                 continue  # noise
             labels[i] = cluster_id
             queue = list(neighbours)
-            while queue:
-                j = queue.pop(0)
+            queued = [False] * n
+            for j in queue:
+                queued[j] = True
+            queue_index = 0
+            while queue_index < len(queue):
+                j = queue[queue_index]
+                queue_index += 1
                 if not visited[j]:
                     visited[j] = True
-                    nb = _region_query(j)
-                    if len(nb) >= min_points - 1:
-                        queue.extend(nb)
+                    nb = neighbour_lists[j]
+                    if len(nb) + 1 >= min_points:
+                        for candidate in nb:
+                            if not queued[candidate]:
+                                queue.append(candidate)
+                                queued[candidate] = True
                 if labels[j] == -1:
                     labels[j] = cluster_id
             cluster_id += 1
@@ -30832,18 +30841,15 @@ class GeoPromptFrame:
         n = len(recs)
         if min_samples is None:
             min_samples = min_cluster_size
+        dm = self._cached_distance_matrix("euclidean")
         # Core distances
         core_dists: list[float] = []
         for i in range(n):
-            dists = sorted(math.hypot(centroids[i][0] - centroids[j][0],
-                                      centroids[i][1] - centroids[j][1])
-                           for j in range(n) if j != i)
+            dists = sorted(dm[i][j] for j in range(n) if j != i)
             core_dists.append(dists[min(min_samples - 1, len(dists) - 1)] if dists else 0.0)
         # Mutual reachability distance
         def _mrd(i: int, j: int) -> float:
-            d = math.hypot(centroids[i][0] - centroids[j][0],
-                           centroids[i][1] - centroids[j][1])
-            return max(core_dists[i], core_dists[j], d)
+            return max(core_dists[i], core_dists[j], dm[i][j])
         # Prim's MST on mutual reachability
         in_mst = [False] * n
         key = [float("inf")] * n
@@ -30866,68 +30872,79 @@ class GeoPromptFrame:
                     if d < key[v]:
                         key[v] = d
                         parent[v] = u
-        # Sort edges by weight (ascending) for hierarchical clustering
         mst_edges.sort()
-        # Extract clusters: cut MST at edges > threshold
-        # Use stability: cluster exists as long as possible
-        labels = list(range(n))
-        uf_parent = list(range(n))
-        uf_size = [1] * n
-        def find(x: int) -> int:
-            while uf_parent[x] != x:
-                uf_parent[x] = uf_parent[uf_parent[x]]
-                x = uf_parent[x]
-            return x
-        for w, a, b_node in mst_edges:
-            ra, rb = find(a), find(b_node)
-            if ra != rb:
-                if uf_size[ra] < uf_size[rb]:
-                    ra, rb = rb, ra
-                uf_parent[rb] = ra
-                uf_size[ra] += uf_size[rb]
-        # Extract clusters from final components
-        comp_map: dict[int, list[int]] = {}
-        for i in range(n):
-            r = find(i)
-            comp_map.setdefault(r, []).append(i)
-        cluster_id = 0
-        final_labels = [-1] * n
-        for root, members in comp_map.items():
-            if len(members) >= min_cluster_size:
-                for m in members:
-                    final_labels[m] = cluster_id
-                cluster_id += 1
-        # Re-cluster using MST pruning at density threshold
-        # Cut the longest edges that separate small clusters
-        if cluster_id <= 1 and len(mst_edges) > 0:
-            # Progressive cutting
-            uf_parent2 = list(range(n))
-            uf_size2 = [1] * n
-            def find2(x: int) -> int:
-                while uf_parent2[x] != x:
-                    uf_parent2[x] = uf_parent2[uf_parent2[x]]
-                    x = uf_parent2[x]
-                return x
-            threshold = mst_edges[-1][0] * 0.7 if mst_edges else float("inf")
-            for w, a, b_node in mst_edges:
-                if w <= threshold:
-                    ra, rb = find2(a), find2(b_node)
-                    if ra != rb:
-                        if uf_size2[ra] < uf_size2[rb]:
-                            ra, rb = rb, ra
-                        uf_parent2[rb] = ra
-                        uf_size2[ra] += uf_size2[rb]
-            comp_map2: dict[int, list[int]] = {}
-            for i in range(n):
-                r = find2(i)
-                comp_map2.setdefault(r, []).append(i)
-            cluster_id = 0
+        if not mst_edges:
+            final_labels = [0] * n if n >= min_cluster_size else [-1] * n
+        else:
+            max_edge = mst_edges[-1][0] or 1.0
+
+            def _labels_for_threshold(threshold: float) -> tuple[list[int], list[int]]:
+                uf_parent = list(range(n))
+                uf_size = [1] * n
+
+                def find(node: int) -> int:
+                    while uf_parent[node] != node:
+                        uf_parent[node] = uf_parent[uf_parent[node]]
+                        node = uf_parent[node]
+                    return node
+
+                for w, left, right in mst_edges:
+                    if w > threshold:
+                        break
+                    root_left = find(left)
+                    root_right = find(right)
+                    if root_left != root_right:
+                        if uf_size[root_left] < uf_size[root_right]:
+                            root_left, root_right = root_right, root_left
+                        uf_parent[root_right] = root_left
+                        uf_size[root_left] += uf_size[root_right]
+
+                components: dict[int, list[int]] = {}
+                for idx in range(n):
+                    components.setdefault(find(idx), []).append(idx)
+
+                labels = [-1] * n
+                component_sizes: list[int] = []
+                cluster_id = 0
+                for members in components.values():
+                    if len(members) >= min_cluster_size:
+                        component_sizes.append(len(members))
+                        for member in members:
+                            labels[member] = cluster_id
+                        cluster_id += 1
+                return labels, component_sizes
+
+            candidate_thresholds = {mst_edges[-1][0]}
+            if len(mst_edges) > 1:
+                weights = [w for w, _, _ in mst_edges]
+                gaps: list[tuple[float, float]] = []
+                for idx in range(len(weights) - 1):
+                    left = weights[idx]
+                    right = weights[idx + 1]
+                    threshold = math.sqrt(left * right) if left > 0 and right > 0 else (left + right) / 2.0
+                    gaps.append((((right - left) / max(left, 1e-12)), threshold))
+                gaps.sort(reverse=True)
+                for _, threshold in gaps[: min(5, len(gaps))]:
+                    candidate_thresholds.add(threshold)
+                candidate_thresholds.add(weights[len(weights) // 3])
+                candidate_thresholds.add(weights[(2 * len(weights)) // 3])
+
+            best_score = -float("inf")
             final_labels = [-1] * n
-            for root, members in comp_map2.items():
-                if len(members) >= min_cluster_size:
-                    for m in members:
-                        final_labels[m] = cluster_id
-                    cluster_id += 1
+            for threshold in sorted(candidate_thresholds):
+                labels, component_sizes = _labels_for_threshold(threshold)
+                clustered_points = sum(component_sizes)
+                if clustered_points == 0:
+                    continue
+                separation = 1.0 - threshold / max(max_edge, 1e-12)
+                noise_points = n - clustered_points
+                score = clustered_points * (0.4 + 0.6 * separation) - 0.25 * noise_points
+                if score > best_score:
+                    best_score = score
+                    final_labels = labels
+
+            if max(final_labels, default=-1) < 0 and n >= min_cluster_size:
+                final_labels = [0] * n
         out_rows: list[Record] = []
         for i in range(n):
             out_rows.append({
@@ -31759,11 +31776,11 @@ class GeoPromptFrame:
         total_mass = sum(masses) or 1.0
         source = [m / total_mass for m in masses]
         target = [1.0 / n] * n
+        dm = self._cached_distance_matrix("euclidean")
         kernel = [[0.0] * n for _ in range(n)]
         for i in range(n):
             for j in range(n):
-                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                kernel[i][j] = math.exp(-d / max(reg, 1e-6))
+                kernel[i][j] = math.exp(-dm[i][j] / max(reg, 1e-6))
         u = [1.0] * n
         v = [1.0] * n
         for _ in range(n_iterations):
@@ -31779,8 +31796,7 @@ class GeoPromptFrame:
             flow_sum = sum(row_flow) or 1e-12
             bary_x = sum(row_flow[j] * centroids[j][0] for j in range(n)) / flow_sum
             bary_y = sum(row_flow[j] * centroids[j][1] for j in range(n)) / flow_sum
-            cost = sum(row_flow[j] * math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                       for j in range(n))
+            cost = sum(row_flow[j] * dm[i][j] for j in range(n))
             out_rows.append({
                 self.geometry_column: recs[i][self.geometry_column],
                 f"transport_cost_{suffix}": round(cost, 6),
@@ -31814,24 +31830,20 @@ class GeoPromptFrame:
             return self.copy()
         n = len(recs)
         values = [float(r.get(value_column, 0) or 0) for r in recs]
-        neighbours: list[list[tuple[int, float]]] = []
-        for i in range(n):
-            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
-                     for j in range(n) if j != i]
-            dists.sort()
-            neighbours.append([(j, d) for d, j in dists[:k_neighbors]])
+        k = min(k_neighbors, max(n - 1, 1))
+        dm = self._cached_distance_matrix("euclidean")
+        neighbours = self._cached_knn(k, "euclidean")
         hidden = list(values)
         for _ in range(n_layers):
             new_hidden = [0.0] * n
             for i in range(n):
-                agg = 0.0
-                w_sum = 0.0
-                for j, d in neighbours[i]:
-                    w = 1.0 / max(d, 1e-12)
+                agg = (1.0 - blend) * hidden[i]
+                w_sum = (1.0 - blend)
+                for j in neighbours[i]:
+                    w = blend / max(1.0 + dm[i][j], 1e-12)
                     agg += w * hidden[j]
                     w_sum += w
-                mean_nb = agg / w_sum if w_sum > 0 else hidden[i]
-                new_hidden[i] = (1.0 - blend) * hidden[i] + blend * mean_nb
+                new_hidden[i] = agg / max(w_sum, 1e-12)
             hidden = new_hidden
         out_rows: list[Record] = []
         for i in range(n):
@@ -31868,22 +31880,23 @@ class GeoPromptFrame:
             return self.copy()
         n = len(recs)
         vals = [float(r.get(value_column, 0) or 0) for r in recs]
-        neighbours: list[list[int]] = []
-        for i in range(n):
-            dists = [(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]), j)
-                     for j in range(n) if j != i]
-            dists.sort()
-            neighbours.append([j for _, j in dists[:k_neighbors]])
+        k = min(k_neighbors, max(n - 1, 1))
+        dm = self._cached_distance_matrix("euclidean")
+        neighbours = self._cached_knn(k, "euclidean")
         current = list(vals)
         for _ in range(n_steps):
             updated = list(current)
             for i in range(n):
                 flux = 0.0
+                weight_sum = 0.0
                 for j in neighbours[i]:
                     grad = current[j] - current[i]
                     c = math.exp(-(grad / max(conductance, 1e-12)) ** 2)
-                    flux += c * grad
-                updated[i] = current[i] + time_step * flux / max(len(neighbours[i]), 1)
+                    weight = c / max(1.0 + dm[i][j], 1e-12)
+                    flux += weight * grad
+                    weight_sum += weight
+                if weight_sum > 0:
+                    updated[i] = current[i] + time_step * flux / weight_sum
             current = updated
         out_rows: list[Record] = []
         for i in range(n):
@@ -31983,24 +31996,42 @@ class GeoPromptFrame:
         if not recs:
             return self.copy()
         n = len(recs)
+        n_feat = len(feature_columns)
+        raw_features = [[float(r.get(c, 0) or 0) for c in feature_columns] for r in recs]
+        feature_mean = [sum(raw_features[i][f] for i in range(n)) / n for f in range(n_feat)]
+        feature_scale = [math.sqrt(sum((raw_features[i][f] - feature_mean[f]) ** 2 for i in range(n)) / n) or 1.0 for f in range(n_feat)]
+        features = [[(raw_features[i][f] - feature_mean[f]) / feature_scale[f] for f in range(n_feat)] for i in range(n)]
         targets = [float(r.get(target_column, 0) or 0) for r in recs]
         n_cal = max(1, int(n * calibration_fraction))
-        calibration_idx = set(range(max(0, n - n_cal), n))
+        ordered_idx = sorted(range(n), key=lambda idx: (centroids[idx][0], centroids[idx][1], idx))
+        calibration_idx: set[int] = set()
+        for slot in range(n_cal):
+            pick = min(n - 1, int((slot + 0.5) * n / n_cal))
+            calibration_idx.add(ordered_idx[pick])
+        dm = self._cached_distance_matrix("euclidean")
+        sorted_neighbours = [sorted((dm[i][j], j) for j in range(n) if j != i) for i in range(n)]
 
         def _predict(i: int, allowed: list[int]) -> float:
-            dists = []
-            for j in allowed:
-                if i == j:
-                    continue
-                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                dists.append((d, j))
-            dists.sort()
-            neighbours = dists[:k_neighbors]
-            num, den = 0.0, 0.0
+            if not allowed:
+                return sum(targets) / max(n, 1)
+            allowed_set = set(allowed)
+            neighbours: list[tuple[float, int]] = []
+            for d, j in sorted_neighbours[i]:
+                if j in allowed_set:
+                    neighbours.append((d, j))
+                    if len(neighbours) >= min(k_neighbors, len(allowed)):
+                        break
+            if not neighbours:
+                return sum(targets[j] for j in allowed) / max(len(allowed), 1)
+            num = 0.0
+            den = 0.0
             for d, j in neighbours:
-                w = 1.0 / max(d, 1e-12)
-                num += w * targets[j]
-                den += w
+                feature_distance = sum((features[i][f] - features[j][f]) ** 2 for f in range(n_feat))
+                spatial_weight = 1.0 / max(1.0 + d, 1e-12)
+                feature_weight = math.exp(-0.5 * feature_distance / max(n_feat, 1))
+                weight = spatial_weight * feature_weight
+                num += weight * targets[j]
+                den += weight
             return num / den if den > 0 else sum(targets[j] for j in allowed) / max(len(allowed), 1)
 
         train_idx = [i for i in range(n) if i not in calibration_idx]
@@ -32009,16 +32040,24 @@ class GeoPromptFrame:
             pred = _predict(i, train_idx)
             cal_residuals.append(abs(targets[i] - pred))
         cal_residuals.sort()
-        q_idx = min(len(cal_residuals) - 1, max(0, int((1 - alpha) * len(cal_residuals)))) if cal_residuals else 0
+        q_idx = min(len(cal_residuals) - 1, max(0, math.ceil((len(cal_residuals) + 1) * (1 - alpha)) - 1)) if cal_residuals else 0
         q_hat = cal_residuals[q_idx] if cal_residuals else 0.0
+        train_lookup = set(train_idx)
         out_rows: list[Record] = []
         for i in range(n):
-            pred = _predict(i, train_idx if i in calibration_idx else [j for j in range(n) if j != i])
+            if i in calibration_idx:
+                allowed = train_idx
+            else:
+                allowed = [j for j in train_idx if j != i]
+                if not allowed:
+                    allowed = [j for j in range(n) if j != i]
+            pred = _predict(i, allowed if allowed else list(train_lookup))
             out_rows.append({
                 self.geometry_column: recs[i][self.geometry_column],
                 f"predicted_{suffix}": round(pred, 6),
                 f"lower_{suffix}": round(pred - q_hat, 6),
                 f"upper_{suffix}": round(pred + q_hat, 6),
+                f"interval_width_{suffix}": round(2 * q_hat, 6),
                 f"actual_{suffix}": targets[i],
             })
         return GeoPromptFrame._from_internal_rows(out_rows, geometry_column=self.geometry_column, crs=self.crs)
