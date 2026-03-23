@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from heapq import heappop, heappush, nsmallest
 from typing import Any, Iterable, Literal, Sequence
 
-from .equations import accessibility_index, area_similarity, coordinate_distance, corridor_strength, directional_alignment, exponential_kernel, gaussian_kernel, gravity_model, inverse_distance_weight, prompt_decay, prompt_influence, prompt_interaction, row_normalize, semivariance, shannon_entropy, sigmoid
+from .equations import accessibility_index, area_similarity, clamp, coordinate_distance, corridor_strength, directional_alignment, exponential_kernel, gaussian_kernel, gravity_model, inverse_distance_weight, linear_interpolate, log_likelihood_ratio, manhattan_distance_2d, min_max_scale, prompt_decay, prompt_influence, prompt_interaction, row_normalize, semivariance, shannon_entropy, sigmoid, thin_plate_spline_basis, variogram_spherical
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_convex_hull, geometry_distance, geometry_envelope, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_vertices, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
 from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, geometry_from_shapely, overlay_intersections, overlay_union_faces, polygon_split_faces
 from .spatial_index import SpatialIndex
@@ -7304,10 +7304,7 @@ class GeoPromptFrame:
         dx = (b.max_x - b.min_x) / max(grid_resolution - 1, 1)
         dy = (b.max_y - b.min_y) / max(grid_resolution - 1, 1)
 
-        def _tps_basis(r: float) -> float:
-            return r * r * math.log(max(r, 1e-12)) if r > 1e-12 else 0.0
-
-        K = [[_tps_basis(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])) for j in range(n)] for i in range(n)]
+        K = [[thin_plate_spline_basis(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])) for j in range(n)] for i in range(n)]
         P = [[1.0, centroids[i][0], centroids[i][1]] for i in range(n)]
         size = n + 3
         A = [[0.0] * size for _ in range(size)]
@@ -7333,7 +7330,7 @@ class GeoPromptFrame:
                 val = a0 + a1 * px + a2 * py
                 for i in range(n):
                     r = math.hypot(px - centroids[i][0], py - centroids[i][1])
-                    val += w[i] * _tps_basis(r)
+                    val += w[i] * thin_plate_spline_basis(r)
                 cell_id += 1
                 rows.append({
                     f"cell_id_{spline_suffix}": f"spl-{cell_id:04d}",
@@ -9967,7 +9964,7 @@ class GeoPromptFrame:
         num_lam = sum(residuals[i] * Wr[i] for i in range(n))
         den_lam = sum(Wr[i] * Wr[i] for i in range(n))
         lam = num_lam / max(den_lam, 1e-12)
-        lam = max(-0.99, min(0.99, lam))
+        lam = clamp(lam, -0.99, 0.99)
         # GLS: y* = y - λWy, X* = X - λWX
         y_star = [y[i] - lam * sum(W[i][j] * y[j] for j in range(n)) for i in range(n)]
         X_star = [[X[i][a] - lam * sum(W[i][j] * X[j][a] for j in range(n)) for a in range(p)] for i in range(n)]
@@ -11220,7 +11217,7 @@ class GeoPromptFrame:
                 w = 1.0
                 for k_idx in range(p):
                     bw = max(bandwidths[k_idx], 1e-12)
-                    w *= math.exp(-0.5 * (dist_mat[i][j] / bw) ** 2)
+                    w *= gaussian_kernel(dist_mat[i][j], bw)
                 W[j] = w
             XtWX = [[0.0] * p for _ in range(p)]
             XtWy = [0.0] * p
@@ -11281,7 +11278,7 @@ class GeoPromptFrame:
         predictions = [0.0] * n
         coefficients = [[0.0] * p for _ in range(n)]
         for i in range(n):
-            W = [math.exp(-0.5 * (dist_mat[i][j] / max(bandwidth, 1e-12)) ** 2) for j in range(n)]
+            W = [gaussian_kernel(dist_mat[i][j], max(bandwidth, 1e-12)) for j in range(n)]
             beta = [0.0] * p
             for _it in range(max_iter):
                 mu = [max(math.exp(min(sum(beta[a] * X[j][a] for a in range(p)), 20)), 1e-12) for j in range(n)]
@@ -11599,7 +11596,7 @@ class GeoPromptFrame:
             bandwidth = dists_all[min(4, len(dists_all) - 1)] if dists_all else 1.0
         intensity = [0.0] * n
         for i in range(n):
-            s = sum(math.exp(-0.5 * (dist_mat[i][j] / max(bandwidth, 1e-12)) ** 2) for j in range(n))
+            s = sum(gaussian_kernel(dist_mat[i][j], max(bandwidth, 1e-12)) for j in range(n))
             intensity[i] = s / (2 * math.pi * bandwidth * bandwidth * n)
         max_d = max(dist_mat[i][j] for i in range(n) for j in range(i + 1, n))
         distances = [max_d * (k + 1) / n_distances for k in range(n_distances)]
@@ -12279,7 +12276,7 @@ class GeoPromptFrame:
         out: list[Record] = []
         for rec in result.to_records():
             resolved = dict(rec)
-            prob = max(0.0, min(1.0, float(resolved.pop("value__iktmp", 0.0) or 0.0)))
+            prob = clamp(float(resolved.pop("value__iktmp", 0.0) or 0.0), 0.0, 1.0)
             resolved.pop("__ik_ind", None)
             resolved[f"probability_{ik_suffix}"] = prob
             resolved[f"threshold_{ik_suffix}"] = threshold
@@ -12308,16 +12305,13 @@ class GeoPromptFrame:
         centroids = self._centroids()
         values = [float(row.get(value_column, 0) or 0) for row in self._rows]
 
-        def _tps_basis(r: float) -> float:
-            return r * r * math.log(max(r, 1e-20)) if r > 1e-12 else 0.0
-
         sz = n + 3
         A = [[0.0] * sz for _ in range(sz)]
         rhs = [0.0] * sz
         for i in range(n):
             for j in range(n):
                 d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                A[i][j] = _tps_basis(d)
+                A[i][j] = thin_plate_spline_basis(d)
             A[i][i] += smoothing
             A[i][n] = 1.0; A[i][n + 1] = centroids[i][0]; A[i][n + 2] = centroids[i][1]
             A[n][i] = 1.0; A[n + 1][i] = centroids[i][0]; A[n + 2][i] = centroids[i][1]
@@ -12355,7 +12349,7 @@ class GeoPromptFrame:
                 val = coeffs[n] + coeffs[n + 1] * px + coeffs[n + 2] * py
                 for ci in range(n):
                     d = math.hypot(px - centroids[ci][0], py - centroids[ci][1])
-                    val += coeffs[ci] * _tps_basis(d)
+                    val += coeffs[ci] * thin_plate_spline_basis(d)
                 out_rows.append({
                     self.geometry_column: {"type": "Point", "coordinates": (px, py)},
                     f"value_{tps_suffix}": val,
@@ -12673,7 +12667,7 @@ class GeoPromptFrame:
         predictions = [0.5] * n
         coefficients = [[0.0] * p for _ in range(n)]
         for i in range(n):
-            W = [math.exp(-0.5 * (dist_mat[i][j] / max(bandwidth, 1e-12)) ** 2) for j in range(n)]
+            W = [gaussian_kernel(dist_mat[i][j], max(bandwidth, 1e-12)) for j in range(n)]
             beta = [0.0] * p
             for _it in range(max_iter):
                 mu = [max(min(1.0 / (1.0 + math.exp(-min(max(sum(beta[a] * X[j][a] for a in range(p)), -20), 20))), 1 - 1e-10), 1e-10) for j in range(n)]
@@ -12730,7 +12724,7 @@ class GeoPromptFrame:
             bandwidth = dists_flat[len(dists_flat) // 2] if dists_flat else 1.0
         rows: list[Record] = []
         for i in range(n):
-            weights = [math.exp(-0.5 * (dist_mat[i][j] / max(bandwidth, 1e-12)) ** 2) for j in range(n)]
+            weights = [gaussian_kernel(dist_mat[i][j], max(bandwidth, 1e-12)) for j in range(n)]
             w_sum = sum(weights)
             if w_sum < 1e-12:
                 rows.append(dict(self._rows[i]))
@@ -17308,7 +17302,7 @@ class GeoPromptFrame:
         trimmed_mean = sum(trimmed) / len(trimmed) if trimmed else 0.0
         # Winsorise deviations
         lo, hi = vals[trim_n] if trim_n < n else vals[0], vals[-(trim_n + 1)] if trim_n < n else vals[-1]
-        win_vals = [max(lo, min(hi, v)) for v in raw_vals]
+        win_vals = [clamp(v, lo, hi) for v in raw_vals]
         win_dev = [v - trimmed_mean for v in win_vals]
         var_denom = sum(d * d for d in win_dev) / n if n > 0 else 1.0
         knn = self._cached_knn(min(k, max(n - 1, 1)), distance_method)
@@ -18768,8 +18762,8 @@ class GeoPromptFrame:
                 lam_new = sum(resid[i] * W_resid[i] for i in range(n)) / sum(w * w for w in W_resid)
             else:
                 lam_new = 0.0
-            lam_new = max(-0.99, min(0.99, lam_new))
-            rho_new = max(-0.99, min(0.99, rho_new))
+            lam_new = clamp(lam_new, -0.99, 0.99)
+            rho_new = clamp(rho_new, -0.99, 0.99)
             if abs(rho_new - rho) + abs(lam_new - lam) < 1e-6:
                 rho, lam = rho_new, lam_new
                 break
@@ -20808,7 +20802,7 @@ class GeoPromptFrame:
                 for j in range(n):
                     if i == j:
                         continue
-                    w = math.exp(-0.5 * (all_dists[i][j] / max(bw, 1e-12)) ** 2)
+                    w = gaussian_kernel(all_dists[i][j], max(bw, 1e-12))
                     w_sum += w
                     v_sum += w * vals[j]
                 pred = v_sum / w_sum if w_sum > 0 else 0.0
@@ -21180,7 +21174,7 @@ class GeoPromptFrame:
             cov_sum = 0.0
             for j in range(n):
                 d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
-                w = math.exp(-0.5 * (d / max(bandwidth, 1e-12)) ** 2)
+                w = gaussian_kernel(d, max(bandwidth, 1e-12))
                 kde_sum += w
                 cov_sum += w * cov[j]
             intensities.append(kde_sum / max(cov_sum, 1e-12) if cov_sum != 0 else kde_sum)
@@ -21522,7 +21516,7 @@ class GeoPromptFrame:
                     density = 0.0
                     for i in indices:
                         d = math.hypot(px - centroids[i][0], py - centroids[i][1])
-                        density += math.exp(-0.5 * (d / max(bandwidth, 1e-12)) ** 2)
+                        density += gaussian_kernel(d, max(bandwidth, 1e-12))
                     rows_out.append({
                         self.geometry_column: {"type": "Point", "coordinates": (px, py)},
                         f"time_{edt_suffix}": t,
@@ -21625,7 +21619,7 @@ class GeoPromptFrame:
                     if seg_len_sq < 1e-15:
                         d = math.hypot(mx - ex, my - ey)
                     else:
-                        t = max(0.0, min(1.0, ((mx - ex) * dx + (my - ey) * dy) / seg_len_sq))
+                        t = clamp(((mx - ex) * dx + (my - ey) * dy) / seg_len_sq, 0.0, 1.0)
                         px, py = ex + t * dx, ey + t * dy
                         d = math.hypot(mx - px, my - py)
                     if d < min_d:
@@ -21693,7 +21687,7 @@ class GeoPromptFrame:
                 m1 = math.hypot(v1x, v1y)
                 m2 = math.hypot(v2x, v2y)
                 cos_a = dot / max(m1 * m2, 1e-15)
-                cos_a = max(-1.0, min(1.0, cos_a))
+                cos_a = clamp(cos_a, -1.0, 1.0)
                 angles.append(math.degrees(math.acos(cos_a)))
             min_angle = min(angles) if angles else 0.0
             max_edge = max(edges) if edges else 1.0
@@ -24114,7 +24108,7 @@ class GeoPromptFrame:
             weights = []
             for j in range(n):
                 d = math.hypot(coords[i][0] - coords[j][0], coords[i][1] - coords[j][1])
-                w = math.exp(-0.5 * (d / bandwidth) ** 2) if bandwidth > 0 else 1.0
+                w = gaussian_kernel(d, bandwidth) if bandwidth > 0 else 1.0
                 weights.append(w)
             # Weighted OLS
             k = p + 1
@@ -27383,15 +27377,11 @@ class GeoPromptFrame:
         w_out = [rng.gauss(0, 0.3) for _ in range(hs)]
         b_out = 0.0
 
-        def tanh(z: float) -> float:
-            z = max(-500.0, min(500.0, z))
-            return math.tanh(z)
-
         def _gate(w: list[list[float]], h: list[float], x: float) -> list[float]:
             return [sigmoid(sum(w[k][j] * h[j] for j in range(hs)) + w[k][hs] * x) for k in range(hs)]
 
         def _gate_tanh(w: list[list[float]], h: list[float], x: float) -> list[float]:
-            return [tanh(sum(w[k][j] * h[j] for j in range(hs)) + w[k][hs] * x) for k in range(hs)]
+            return [math.tanh(sum(w[k][j] * h[j] for j in range(hs)) + w[k][hs] * x) for k in range(hs)]
 
         # Train
         for _ in range(epochs):
@@ -27404,7 +27394,7 @@ class GeoPromptFrame:
                 cg = _gate_tanh(wc, h, x)
                 og = _gate(wo, h, x)
                 c_state = [fg[k] * c_state[k] + ig[k] * cg[k] for k in range(hs)]
-                h = [og[k] * tanh(c_state[k]) for k in range(hs)]
+                h = [og[k] * math.tanh(c_state[k]) for k in range(hs)]
                 pred = sigmoid(sum(w_out[k] * h[k] for k in range(hs)) + b_out)
                 err = pred - norm_v[t + 1]
                 d_pred = err * pred * (1 - pred)
@@ -27423,7 +27413,7 @@ class GeoPromptFrame:
             cg = _gate_tanh(wc, h, x)
             og = _gate(wo, h, x)
             c_state = [fg[k] * c_state[k] + ig[k] * cg[k] for k in range(hs)]
-            h = [og[k] * tanh(c_state[k]) for k in range(hs)]
+            h = [og[k] * math.tanh(c_state[k]) for k in range(hs)]
             pred = sigmoid(sum(w_out[k] * h[k] for k in range(hs)) + b_out) * rv + min_v
             predictions.append(pred)
 
@@ -27794,7 +27784,7 @@ class GeoPromptFrame:
 
         # Simulate Grover iterations to estimate the fraction
         # theta = arcsin(sqrt(fraction))
-        theta_est = math.asin(math.sqrt(max(0, min(1, fraction)))) if n > 0 else 0
+        theta_est = math.asin(math.sqrt(clamp(fraction, 0, 1))) if n > 0 else 0
         estimates: list[float] = []
         for _ in range(n_rounds):
             # Add quantum noise
@@ -29553,8 +29543,8 @@ class GeoPromptFrame:
                     reaction = a * b_val * b_val
                     nA[gy][gx] = a + dt * (diffusion_a * la - reaction + feed_rate * (1 - a))
                     nB[gy][gx] = b_val + dt * (diffusion_b * lb + reaction - (kill_rate + feed_rate) * b_val)
-                    nA[gy][gx] = max(0.0, min(1.0, nA[gy][gx]))
-                    nB[gy][gx] = max(0.0, min(1.0, nB[gy][gx]))
+                    nA[gy][gx] = clamp(nA[gy][gx], 0.0, 1.0)
+                    nB[gy][gx] = clamp(nB[gy][gx], 0.0, 1.0)
             A, B = nA, nB
         out_rows: list[Record] = []
         for gy in range(gr):
@@ -29985,9 +29975,6 @@ class GeoPromptFrame:
                 W[i][j] *= spectral_radius / max_row
         W_in = [[rng.gauss(0, 0.5) for _ in range(3)] for _ in range(rs)]  # 3 inputs: val, x, y
 
-        def tanh(z: float) -> float:
-            return math.tanh(max(-500, min(500, z)))
-
         # Run reservoir
         states: list[list[float]] = []
         h = [0.0] * rs
@@ -30003,7 +29990,7 @@ class GeoPromptFrame:
             for i in range(rs):
                 s = sum(W[i][j] * h[j] for j in range(rs))
                 s += sum(W_in[i][k] * inp[k] for k in range(3))
-                new_h[i] = tanh(s)
+                new_h[i] = math.tanh(s)
             h = new_h
             states.append(list(h))
         # Train output: linear regression on states[:-1] -> norm_v[1:]
@@ -30167,7 +30154,7 @@ class GeoPromptFrame:
                                centroids[i][1] - centroids[j][1])
                 # Use average band for observation-level weight
                 avg_bw = sum(bandwidths) / n_feat
-                w[j] = math.exp(-0.5 * (d / max(avg_bw, 1e-12)) ** 2)
+                w[j] = gaussian_kernel(d, max(avg_bw, 1e-12))
             # Solve WLS: minimise sum w_j * (y_j - b0 - sum(b_f * x_jf))^2
             # Normal equations via gradient descent
             betas = [0.0] * (n_feat + 1)  # [intercept, b1, ..., bn_feat]
@@ -30709,7 +30696,7 @@ class GeoPromptFrame:
                 for j in range(n):
                     d = math.hypot(points[i][0] - centroids[j][0],
                                    points[i][1] - centroids[j][1])
-                    w = math.exp(-0.5 * (d / bandwidth) ** 2)
+                    w = gaussian_kernel(d, bandwidth)
                     wx += w * centroids[j][0]
                     wy += w * centroids[j][1]
                     tw += w
@@ -30985,7 +30972,7 @@ class GeoPromptFrame:
                     continue
                 d = math.hypot(centroids[i][0] - centroids[j][0],
                                centroids[i][1] - centroids[j][1])
-                w = math.exp(-0.5 * (d / bw) ** 2)
+                w = gaussian_kernel(d, bw)
                 sign_a = 1.0 if a_vals[j] > a_vals[i] else (-1.0 if a_vals[j] < a_vals[i] else 0.0)
                 sign_b = 1.0 if b_vals[j] > b_vals[i] else (-1.0 if b_vals[j] < b_vals[i] else 0.0)
                 if sign_a * sign_b > 0:
@@ -33034,7 +33021,7 @@ class GeoPromptFrame:
         out_rows: list[Record] = []
         for i in range(n):
             centrality = 1.0 / (1.0 + sum(math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) for j in range(n)) / max(n - 1, 1))
-            radius = max(0.0, min(0.99, 1.0 - centrality))
+            radius = clamp(1.0 - centrality, 0.0, 0.99)
             angle = math.atan2(sum((raw[i][f] - mean_val[f]) * (f + 1) for f in range(len(feature_columns))),
                                1.0 + sum(abs(raw[i][f] - mean_val[f]) for f in range(len(feature_columns))))
             out_rows.append({
@@ -34933,7 +34920,7 @@ def _point_to_segment_projection(point: Coordinate, seg_start: Coordinate, seg_e
     length_sq = dx * dx + dy * dy
     if length_sq == 0.0:
         return (coordinate_distance(point, seg_start, method="euclidean"), seg_start, 0.0)
-    t_value = max(0.0, min(1.0, ((px - sx) * dx + (py - sy) * dy) / length_sq))
+    t_value = clamp(((px - sx) * dx + (py - sy) * dy) / length_sq, 0.0, 1.0)
     projection = (sx + (t_value * dx), sy + (t_value * dy))
     return (coordinate_distance(point, projection, method="euclidean"), projection, t_value)
 
@@ -35286,7 +35273,7 @@ def _size_ratio(left: float, right: float) -> float:
 def _coverage_share(overlap_size: float, geometry_size: float, intersects: bool) -> float:
     if geometry_size <= 0.0:
         return 1.0 if intersects else 0.0
-    return max(0.0, min(1.0, overlap_size / geometry_size))
+    return clamp(overlap_size / geometry_size, 0.0, 1.0)
 
 
 def _geometry_overlap_size(left_geometry: Geometry, right_geometry: Geometry) -> float:
@@ -36724,7 +36711,7 @@ def _rbf_value(function: str, r: float, epsilon: float) -> float:
     elif function == "gaussian":
         return math.exp(-re * re)
     elif function == "thin_plate" or function == "thin-plate":
-        return re * re * math.log(max(re, 1e-12)) if re > 1e-12 else 0.0
+        return thin_plate_spline_basis(re)
     return math.sqrt(1.0 + re * re)
 
 

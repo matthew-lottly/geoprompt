@@ -116,7 +116,10 @@ def semivariance(value_a: float, value_b: float) -> float:
 
 
 def shannon_entropy(proportions: list[float]) -> float:
-    """Shannon entropy (natural log) for a list of proportions that sum to ~1."""
+    """Shannon entropy (natural log) for a list of proportions.
+
+    Proportions should sum to ~1.  Zero or negative entries are skipped.
+    """
     total = 0.0
     for p in proportions:
         if p > 0:
@@ -130,6 +133,87 @@ def row_normalize(values: list[float]) -> list[float]:
     if total == 0:
         return [0.0] * len(values)
     return [v / total for v in values]
+
+
+def clamp(value: float, lo: float, hi: float) -> float:
+    """Clamp *value* to the closed interval [lo, hi]."""
+    return max(lo, min(hi, value))
+
+
+def min_max_scale(value: float, min_val: float, max_val: float) -> float:
+    """Scale *value* into [0, 1] given observed min/max.  Returns 0 when range is zero."""
+    rng = max_val - min_val
+    if rng <= 0:
+        return 0.0
+    return (value - min_val) / rng
+
+
+def thin_plate_spline_basis(r: float) -> float:
+    """Thin-plate spline radial basis: r^2 * ln(r), returning 0 when r ~ 0."""
+    if r <= 1e-12:
+        return 0.0
+    return r * r * math.log(r)
+
+
+def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Cosine similarity between two equal-length vectors.  Returns 0 on zero-norm."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(y * y for y in b))
+    denom = norm_a * norm_b
+    if denom < 1e-15:
+        return 0.0
+    return dot / denom
+
+
+def manhattan_distance_2d(origin: Coordinate, destination: Coordinate) -> float:
+    """Manhattan (L1) distance between two 2-D coordinates."""
+    return abs(destination[0] - origin[0]) + abs(destination[1] - origin[1])
+
+
+def linear_interpolate(a: float, b: float, t: float) -> float:
+    """Linear interpolation: (1 - t) * a + t * b."""
+    return (1.0 - t) * a + t * b
+
+
+def log_likelihood_ratio(observed: float, expected: float) -> float:
+    """Single-term log-likelihood ratio: observed * ln(observed / expected).
+
+    Returns 0 when *observed* is zero or *expected* is non-positive.
+    """
+    if observed <= 0 or expected <= 0:
+        return 0.0
+    return observed * math.log(observed / expected)
+
+
+def variogram_spherical(h: float, nugget: float, sill: float, range_param: float) -> float:
+    """Spherical variogram model γ(h) = nugget + sill * [1.5(h/a) - 0.5(h/a)^3] for h <= a."""
+    if h <= 0:
+        return 0.0
+    if range_param <= 0:
+        return nugget + sill
+    if h >= range_param:
+        return nugget + sill
+    ratio = h / range_param
+    return nugget + sill * (1.5 * ratio - 0.5 * ratio ** 3)
+
+
+def variogram_exponential(h: float, nugget: float, sill: float, range_param: float) -> float:
+    """Exponential variogram model γ(h) = nugget + sill * [1 - exp(-3h/a)]."""
+    if h <= 0:
+        return 0.0
+    if range_param <= 0:
+        return nugget + sill
+    return nugget + sill * (1.0 - math.exp(-3.0 * h / range_param))
+
+
+def variogram_gaussian_model(h: float, nugget: float, sill: float, range_param: float) -> float:
+    """Gaussian variogram model γ(h) = nugget + sill * [1 - exp(-3(h/a)^2)]."""
+    if h <= 0:
+        return 0.0
+    if range_param <= 0:
+        return nugget + sill
+    return nugget + sill * (1.0 - math.exp(-3.0 * (h / range_param) ** 2))
 
 
 def corridor_strength(
@@ -221,8 +305,10 @@ __all__ = [
     "EARTH_RADIUS_KM",
     "accessibility_index",
     "area_similarity",
+    "clamp",
     "coordinate_distance",
     "corridor_strength",
+    "cosine_similarity",
     "directional_alignment",
     "directional_bearing",
     "euclidean_distance",
@@ -231,6 +317,10 @@ __all__ = [
     "gravity_model",
     "haversine_distance",
     "inverse_distance_weight",
+    "linear_interpolate",
+    "log_likelihood_ratio",
+    "manhattan_distance_2d",
+    "min_max_scale",
     "prompt_decay",
     "prompt_influence",
     "prompt_interaction",
@@ -238,4 +328,8 @@ __all__ = [
     "semivariance",
     "shannon_entropy",
     "sigmoid",
+    "thin_plate_spline_basis",
+    "variogram_exponential",
+    "variogram_gaussian_model",
+    "variogram_spherical",
 ]

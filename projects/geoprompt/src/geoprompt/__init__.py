@@ -1,4 +1,4 @@
-from .equations import accessibility_index, area_similarity, coordinate_distance, corridor_strength, directional_alignment, directional_bearing, euclidean_distance, exponential_kernel, gaussian_kernel, gravity_model, haversine_distance, inverse_distance_weight, prompt_decay, prompt_influence, prompt_interaction, row_normalize, semivariance, shannon_entropy, sigmoid
+from .equations import accessibility_index, area_similarity, clamp, coordinate_distance, corridor_strength, cosine_similarity, directional_alignment, directional_bearing, euclidean_distance, exponential_kernel, gaussian_kernel, gravity_model, haversine_distance, inverse_distance_weight, linear_interpolate, log_likelihood_ratio, manhattan_distance_2d, min_max_scale, prompt_decay, prompt_influence, prompt_interaction, row_normalize, semivariance, shannon_entropy, sigmoid, thin_plate_spline_basis, variogram_exponential, variogram_gaussian_model, variogram_spherical
 from .frame import Bounds, GeoPromptFrame, SpatialWeights
 from .geometry import geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_convex_hull, geometry_distance, geometry_envelope, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, transform_geometry
 from .overlay import buffer_geometries, dissolve_geometries, geometry_from_shapely, geometry_to_geojson, geometry_to_shapely
@@ -12,8 +12,10 @@ __all__ = [
     "accessibility_index",
     "area_similarity",
     "buffer_geometries",
+    "clamp",
     "coordinate_distance",
     "corridor_strength",
+    "cosine_similarity",
     "dissolve_geometries",
     "directional_alignment",
     "directional_bearing",
@@ -41,6 +43,10 @@ __all__ = [
     "gravity_model",
     "haversine_distance",
     "inverse_distance_weight",
+    "linear_interpolate",
+    "log_likelihood_ratio",
+    "manhattan_distance_2d",
+    "min_max_scale",
     "read_geojson",
     "prompt_decay",
     "prompt_influence",
@@ -49,6 +55,10 @@ __all__ = [
     "semivariance",
     "shannon_entropy",
     "sigmoid",
+    "thin_plate_spline_basis",
+    "variogram_exponential",
+    "variogram_gaussian_model",
+    "variogram_spherical",
     "read_features",
     "read_points",
     "SpatialIndex",
