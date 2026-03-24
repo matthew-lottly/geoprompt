@@ -1,12 +1,12 @@
 # GeoPrompt
 
-A pure-Python spatial analysis toolkit providing **520 geospatial tools** for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, network routing, AI-powered analysis, pseudo-quantum computing, optimal transport, topological analysis, graph diffusion, conformal prediction, and interchange formats — all without requiring compiled C extensions.
+A pure-Python spatial analysis toolkit providing **530 geospatial tools** for point, line, and polygon workflows. GeoPrompt delivers GeoPandas-style frame access, GeoJSON-compatible I/O, CRS-aware reprojection, spatial joins, geographic distance methods, and a comprehensive suite of spatial statistics, interpolation, clustering, terrain analysis, network routing, AI-powered analysis, pseudo-quantum computing, optimal transport, topological analysis, graph diffusion, conformal prediction, and interchange formats — all without requiring compiled C extensions.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
 ## Key Features
 
-- **520 spatial analysis tools** covering interpolation, classification, clustering, regression, terrain analysis, network analysis, point patterns, geometry utilities, I/O formats, raster operations, AI/ML methods, pseudo-quantum algorithms, optimal transport, topological inference, graph dynamics, and more
+- **530 spatial analysis tools** covering interpolation, classification, clustering, regression, terrain analysis, network analysis, point patterns, geometry utilities, I/O formats, raster operations, AI/ML methods, pseudo-quantum algorithms, optimal transport, topological inference, graph dynamics, and more
 - **Zero compiled dependencies** — runs on any Python 3.11+ environment; optionally accelerates with Shapely, SciPy, and PySAL when available
 - **GeoJSON-native** — all geometries use standard GeoJSON format internally
 - **CRS-aware** — coordinate reference system assignment and reprojection via `to_crs()`
@@ -94,7 +94,7 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | `dbscan` | DBSCAN with true distance matrix | `eps`, `min_samples` |
 | `hdbscan` | Hierarchical DBSCAN via mutual reachability MST | `min_cluster_size` |
 
-### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91, 189–190, 521)
+### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91, 189–190, 521, 523, 527–528)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -116,8 +116,11 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | `point_pattern_intensity` | First-order λ(s) surface | `kernel_bandwidth` |
 | `multivariate_morans_i` | Cross-variable Moran's I matrix | `columns`, `k` |
 | `local_geary_decomposition` | Multivariate local Geary statistic | `columns`, `k` |
+| `topologically_regularized_spatial_scan` | Contiguity-penalized Kulldorff scan | `topo_penalty`, `adjacency_k` |
+| `wavelet_spatial_autocorrelation` | Multi-scale wavelet decomposition autocorrelation | `n_scales`, `base_bandwidth` |
+| `multiscale_getis_ord` | Gi* across multiple distance bands | `scales`, `n_scales` |
 
-### Regression (Tools 21–22, 88, 99, 197–198, 522)
+### Regression (Tools 21–22, 88, 99, 197–198, 522, 526)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -128,6 +131,7 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | `negative_binomial_gwr` | GW negative binomial regression (IRLS) | `independent_columns`, `bandwidth` |
 | `counterfactual_gwr` | GWR with counterfactual scenario analysis | `scenario`, `auto_bandwidth` |
 | `geographically_weighted_pca` | Local PCA with spatial weights | `columns`, `n_components` |
+| `spatial_durbin_error_model` | SDEM with spatial error & lag-X spillovers | `lambda_init`, `max_iter` |
 
 ### Density & Surface (Tools 18–19, 97)
 
@@ -147,8 +151,9 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | `topographic_position_index` | Relative elevation with landform class | `k` |
 | `flow_direction` | D8 steepest-descent routing | `elevation_column` |
 | `flow_accumulation` | Upslope contributing area | `elevation_column` |
+| `stream_power_index` | SPI erosive power proxy | `elevation_column`, `k` |
 
-### Network Analysis (Tools 31–40, 195–196)
+### Network Analysis (Tools 31–40, 171, 195–196)
 
 | Tool | Method |
 |------|--------|
@@ -164,6 +169,7 @@ GeoPrompt maintains an evidence-based accuracy posture. Each tool is classified 
 | `snap_to_network_nodes` | Nearest-node assignment |
 | `service_area_polygons` | Dijkstra reachability → convex hull polygons |
 | `isochrones` | Travel-time contour rings from network origin |
+| `network_betweenness` | Brandes betweenness centrality on k-NN graph |
 
 ### Geometry Operations (Tools 23–30, 44–51, 194)
 
@@ -371,7 +377,7 @@ intersections = regions.overlay_intersections(assets)
 geoprompt/
 ├── src/geoprompt/
 │   ├── __init__.py          # Public API exports
-│   ├── frame.py             # GeoPromptFrame class — all 520 spatial tools
+│   ├── frame.py             # GeoPromptFrame class — all 530 spatial tools
 │   ├── geometry.py          # Geometry primitives and helpers
 │   ├── equations.py         # Shared mathematical functions
 │   ├── overlay.py           # Polygon overlay operations

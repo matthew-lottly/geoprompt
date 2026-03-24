@@ -1,14 +1,11 @@
 {
   "generated": "2026-03-23",
-  "total_tools": 520,
+  "total_tools": 530,
   "range": [
     1,
-    522
+    530
   ],
-  "missing_numbers": [
-    169,
-    171
-  ],
+  "missing_numbers": [],
   "categories": {
     "Interpolation": {
       "count": 48,
@@ -64,7 +61,7 @@
       ]
     },
     "Clustering": {
-      "count": 30,
+      "count": 31,
       "tool_numbers": [
         74,
         75,
@@ -95,7 +92,8 @@
         490,
         497,
         500,
-        520
+        520,
+        529
       ]
     },
     "Classification": {
@@ -120,7 +118,7 @@
       ]
     },
     "Regression": {
-      "count": 34,
+      "count": 35,
       "tool_numbers": [
         21,
         88,
@@ -155,11 +153,12 @@
         472,
         502,
         505,
-        522
+        522,
+        526
       ]
     },
     "Regionalization": {
-      "count": 8,
+      "count": 9,
       "tool_numbers": [
         129,
         160,
@@ -168,11 +167,12 @@
         271,
         287,
         297,
-        298
+        298,
+        524
       ]
     },
     "Network": {
-      "count": 50,
+      "count": 51,
       "tool_numbers": [
         22,
         32,
@@ -193,6 +193,7 @@
         140,
         141,
         170,
+        171,
         172,
         186,
         196,
@@ -227,7 +228,7 @@
       ]
     },
     "Terrain": {
-      "count": 45,
+      "count": 46,
       "tool_numbers": [
         9,
         10,
@@ -246,6 +247,7 @@
         166,
         167,
         168,
+        169,
         209,
         210,
         212,
@@ -277,7 +279,7 @@
       ]
     },
     "Statistics": {
-      "count": 58,
+      "count": 61,
       "tool_numbers": [
         16,
         17,
@@ -336,7 +338,10 @@
         474,
         477,
         508,
-        521
+        521,
+        523,
+        527,
+        528
       ]
     },
     "Geometry": {
@@ -459,7 +464,7 @@
       ]
     },
     "Point_Pattern": {
-      "count": 17,
+      "count": 18,
       "tool_numbers": [
         41,
         43,
@@ -477,7 +482,8 @@
         471,
         484,
         509,
-        513
+        513,
+        525
       ]
     },
     "ML_Advanced": {
@@ -656,13 +662,14 @@
       ]
     },
     "Anomaly_Detection": {
-      "count": 5,
+      "count": 6,
       "tool_numbers": [
         406,
         455,
         473,
         475,
-        478
+        478,
+        530
       ]
     }
   },
@@ -1844,10 +1851,24 @@
       "category": "Terrain"
     },
     {
+      "number": 169,
+      "name": "stream_power_index",
+      "method": "stream_power_index",
+      "line": 0,
+      "category": "Terrain"
+    },
+    {
       "number": 170,
       "name": "od_cost_matrix",
       "method": "od_cost_matrix",
       "line": 12920,
+      "category": "Network"
+    },
+    {
+      "number": 171,
+      "name": "network_betweenness",
+      "method": "network_betweenness",
+      "line": 0,
       "category": "Network"
     },
     {
@@ -1988,6 +2009,13 @@
       "name": "adaptive_idw",
       "method": "adaptive_idw",
       "line": 14010,
+      "category": "Interpolation"
+    },
+    {
+      "number": 192,
+      "name": "conformal_kriging",
+      "method": "conformal_kriging",
+      "line": 14276,
       "category": "Interpolation"
     },
     {
@@ -4299,6 +4327,62 @@
       "method": "counterfactual_gwr",
       "line": 33999,
       "category": "Regression"
+    },
+    {
+      "number": 523,
+      "name": "topologically_regularized_spatial_scan",
+      "method": "topologically_regularized_spatial_scan",
+      "line": 0,
+      "category": "Statistics"
+    },
+    {
+      "number": 524,
+      "name": "graph_coupled_space_time_regionalization",
+      "method": "graph_coupled_space_time_regionalization",
+      "line": 0,
+      "category": "Regionalization"
+    },
+    {
+      "number": 525,
+      "name": "anisotropic_kernel_density",
+      "method": "anisotropic_kernel_density",
+      "line": 0,
+      "category": "Point_Pattern"
+    },
+    {
+      "number": 526,
+      "name": "spatial_durbin_error_model",
+      "method": "spatial_durbin_error_model",
+      "line": 0,
+      "category": "Regression"
+    },
+    {
+      "number": 527,
+      "name": "wavelet_spatial_autocorrelation",
+      "method": "wavelet_spatial_autocorrelation",
+      "line": 0,
+      "category": "Statistics"
+    },
+    {
+      "number": 528,
+      "name": "multiscale_getis_ord",
+      "method": "multiscale_getis_ord",
+      "line": 0,
+      "category": "Statistics"
+    },
+    {
+      "number": 529,
+      "name": "network_constrained_clustering",
+      "method": "network_constrained_clustering",
+      "line": 0,
+      "category": "Clustering"
+    },
+    {
+      "number": 530,
+      "name": "spatial_envelope_anomaly",
+      "method": "spatial_envelope_anomaly",
+      "line": 0,
+      "category": "Anomaly_Detection"
     }
   ]
 }

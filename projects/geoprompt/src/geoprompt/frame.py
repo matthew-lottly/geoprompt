@@ -12973,6 +12973,45 @@ class GeoPromptFrame:
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
     # ------------------------------------------------------------------
+    # Tool 169: stream_power_index
+    # ------------------------------------------------------------------
+    def stream_power_index(
+        self,
+        elevation_column: str,
+        k: int = 8,
+        min_slope_degrees: float = 0.1,
+        spi_suffix: str = "spi",
+    ) -> "GeoPromptFrame":
+        """Stream Power Index (SPI) — proxy for erosive power of flowing water.
+
+        SPI = contributing_area × tan(slope).  Higher values indicate
+        locations where concentrated flow has more energy, useful for
+        erosion-risk mapping and channel-initiation modelling.
+        """
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        _centroids, elevations, flow_to, accum, flow_slope, flow_dist = (
+            self._hydrology_flow_model(elevation_column, k=k)
+        )
+        rows: list[Record] = []
+        for i in range(n):
+            slope_rad = math.atan(flow_slope[i]) if flow_to[i] is not None else 0.0
+            effective_slope = max(slope_rad, math.radians(min_slope_degrees))
+            cell_area = max(accum[i] * (flow_dist[i] if flow_to[i] is not None else 1.0), 1.0)
+            spi_val = cell_area * math.tan(effective_slope)
+            resolved = dict(self._rows[i])
+            resolved[f"spi_{spi_suffix}"] = round(spi_val, 6)
+            resolved[f"contributing_area_{spi_suffix}"] = round(cell_area, 6)
+            resolved[f"slope_rad_{spi_suffix}"] = round(slope_rad, 6)
+            rows.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            rows, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
     # Tool 170: od_cost_matrix — origin-destination cost matrix
     # ------------------------------------------------------------------
     def od_cost_matrix(
@@ -12998,6 +13037,91 @@ class GeoPromptFrame:
                     "cost": d,
                 })
         return results
+
+    # ------------------------------------------------------------------
+    # Tool 171: network_betweenness
+    # ------------------------------------------------------------------
+    def network_betweenness(
+        self,
+        id_column: str = "site_id",
+        weight_column: str | None = None,
+        distance_method: str = "euclidean",
+        k: int = 6,
+        betweenness_suffix: str = "btw",
+    ) -> "GeoPromptFrame":
+        """Brandes betweenness centrality for a proximity-based spatial network.
+
+        Builds a k-nearest-neighbour graph, then computes betweenness
+        centrality via Brandes' algorithm.  High-centrality locations
+        sit on many shortest paths, indicating spatial gateway roles.
+        """
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        # Build k-NN adjacency with weights
+        adj: list[list[tuple[int, float]]] = [[] for _ in range(n)]
+        for i in range(n):
+            dists = [(j, coordinate_distance(centroids[i], centroids[j], method=distance_method))
+                     for j in range(n) if j != i]
+            dists.sort(key=lambda t: t[1])
+            for j, d in dists[:k]:
+                w = float(self._rows[j].get(weight_column, d) or d) if weight_column else d
+                adj[i].append((j, max(w, 1e-12)))
+                adj[j].append((i, max(w, 1e-12)))
+
+        # Brandes algorithm
+        centrality = [0.0] * n
+        for s in range(n):
+            stack: list[int] = []
+            pred: list[list[int]] = [[] for _ in range(n)]
+            sigma = [0.0] * n
+            sigma[s] = 1.0
+            dist_s = [float("inf")] * n
+            dist_s[s] = 0.0
+            # BFS / Dijkstra
+            queue: list[tuple[float, int]] = [(0.0, s)]
+            while queue:
+                queue.sort(key=lambda t: t[0])
+                d_v, v = queue.pop(0)
+                if d_v > dist_s[v]:
+                    continue
+                stack.append(v)
+                for w_idx, w_cost in adj[v]:
+                    alt = dist_s[v] + w_cost
+                    if alt < dist_s[w_idx] - 1e-12:
+                        dist_s[w_idx] = alt
+                        sigma[w_idx] = sigma[v]
+                        pred[w_idx] = [v]
+                        queue.append((alt, w_idx))
+                    elif abs(alt - dist_s[w_idx]) < 1e-12:
+                        sigma[w_idx] += sigma[v]
+                        pred[w_idx].append(v)
+            delta = [0.0] * n
+            while stack:
+                w2 = stack.pop()
+                for v2 in pred[w2]:
+                    if sigma[w2] > 0:
+                        delta[v2] += (sigma[v2] / sigma[w2]) * (1.0 + delta[w2])
+                if w2 != s:
+                    centrality[w2] += delta[w2]
+
+        # Normalize
+        max_c = max(centrality) if centrality else 1.0
+        if max_c <= 0:
+            max_c = 1.0
+
+        rows: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            resolved[f"betweenness_{betweenness_suffix}"] = round(centrality[i], 6)
+            resolved[f"betweenness_norm_{betweenness_suffix}"] = round(centrality[i] / max_c, 6)
+            rows.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            rows, geometry_column=self.geometry_column, crs=self.crs,
+        )
 
     # ------------------------------------------------------------------
     # Tool 172: min_cut — min cut paired with max flow
@@ -34119,6 +34243,864 @@ class GeoPromptFrame:
             rows.append(resolved)
         return GeoPromptFrame._from_internal_rows(
             rows, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 523: topologically_regularized_spatial_scan
+    # ------------------------------------------------------------------
+    def topologically_regularized_spatial_scan(
+        self,
+        case_column: str,
+        population_column: str | None = None,
+        max_radius_fraction: float = 0.5,
+        distance_method: str = "euclidean",
+        n_simulations: int = 99,
+        seed: int | None = None,
+        adjacency_k: int = 6,
+        topo_penalty: float = 0.1,
+        suffix: str = "trscan",
+    ) -> "GeoPromptFrame":
+        """Kulldorff spatial scan with topological regularization.
+
+        Extends the classic scan statistic by penalizing candidate
+        clusters whose members violate spatial contiguity.  A cluster
+        that forms a connected sub-graph in the k-nearest-neighbour
+        adjacency receives the full LLR; disconnected clusters are
+        penalized proportionally to the number of connected components.
+
+        Parameters
+        ----------
+        adjacency_k : int
+            Number of nearest neighbours for the contiguity graph.
+        topo_penalty : float
+            Multiplicative discount per additional component beyond 1.
+            Effective LLR = LLR / (1 + penalty * (n_components - 1)).
+        """
+        self._require_column(case_column)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+        cases = [float(row.get(case_column, 0) or 0) for row in self._rows]
+        pops = (
+            [float(row.get(population_column, 1) or 1) for row in self._rows]
+            if population_column
+            else [1.0] * n
+        )
+        total_c = sum(cases)
+        total_p = sum(pops)
+        if total_c <= 0 or total_p <= 0:
+            rows = [
+                dict(r) | {
+                    f"in_cluster_{suffix}": False,
+                    f"llr_{suffix}": 0.0,
+                    f"p_value_{suffix}": 1.0,
+                }
+                for r in self._rows
+            ]
+            return GeoPromptFrame._from_internal_rows(
+                rows, geometry_column=self.geometry_column, crs=self.crs,
+            )
+        b = self.bounds()
+        extent = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-9)
+        max_radius = extent * max_radius_fraction
+
+        # Build k-NN adjacency sets
+        adj_sets: list[set[int]] = [set() for _ in range(n)]
+        for i in range(n):
+            sorted_j = sorted(range(n), key=lambda j: dist_matrix[i][j])
+            for j in sorted_j[1: adjacency_k + 1]:
+                adj_sets[i].add(j)
+                adj_sets[j].add(i)
+
+        def _llr(c_in: float, n_in: float) -> float:
+            c_out = total_c - c_in
+            n_out = total_p - n_in
+            if c_in <= 0 or n_in <= 0 or n_out <= 0:
+                return 0.0
+            rate_in = c_in / n_in
+            rate_out = c_out / n_out if n_out > 0 else 0.0
+            if rate_in <= rate_out:
+                return 0.0
+            val = 0.0
+            exp_in = n_in * total_c / total_p
+            exp_out = n_out * total_c / total_p
+            if c_in > 0 and exp_in > 0:
+                val += c_in * math.log(c_in / max(exp_in, 1e-12))
+            if c_out > 0 and exp_out > 0:
+                val += c_out * math.log(c_out / max(exp_out, 1e-12))
+            return max(val, 0.0)
+
+        def _count_components(members: set[int]) -> int:
+            if not members:
+                return 0
+            visited: set[int] = set()
+            comps = 0
+            for start in members:
+                if start in visited:
+                    continue
+                comps += 1
+                stack = [start]
+                while stack:
+                    node = stack.pop()
+                    if node in visited:
+                        continue
+                    visited.add(node)
+                    for nb in adj_sets[node]:
+                        if nb in members and nb not in visited:
+                            stack.append(nb)
+            return comps
+
+        best_score = 0.0
+        best_center = 0
+        best_radius = 0.0
+        best_members: set[int] = set()
+        best_raw_llr = 0.0
+        for i in range(n):
+            sorted_nb = sorted(range(n), key=lambda j: dist_matrix[i][j])
+            c_in = 0.0
+            n_in = 0.0
+            members: set[int] = set()
+            for j in sorted_nb:
+                if dist_matrix[i][j] > max_radius and j != i:
+                    break
+                c_in += cases[j]
+                n_in += pops[j]
+                members.add(j)
+                raw = _llr(c_in, n_in)
+                if raw > 0:
+                    nc = _count_components(members)
+                    score = raw / (1.0 + topo_penalty * max(nc - 1, 0))
+                    if score > best_score:
+                        best_score = score
+                        best_raw_llr = raw
+                        best_center = i
+                        best_radius = dist_matrix[i][j]
+                        best_members = set(members)
+
+        # Monte Carlo significance
+        rng = random.Random(seed)
+        exceed = 0
+        for _ in range(n_simulations):
+            sim_cases = list(cases)
+            rng.shuffle(sim_cases)
+            sim_best = 0.0
+            for i in range(n):
+                sorted_nb = sorted(range(n), key=lambda j: dist_matrix[i][j])
+                c_in = 0.0
+                n_in = 0.0
+                members_sim: set[int] = set()
+                for j in sorted_nb:
+                    if dist_matrix[i][j] > max_radius and j != i:
+                        break
+                    c_in += sim_cases[j]
+                    n_in += pops[j]
+                    members_sim.add(j)
+                    raw = _llr(c_in, n_in)
+                    if raw > 0:
+                        nc = _count_components(members_sim)
+                        score = raw / (1.0 + topo_penalty * max(nc - 1, 0))
+                        if score > sim_best:
+                            sim_best = score
+            if sim_best >= best_score:
+                exceed += 1
+        p_value = (exceed + 1) / (n_simulations + 1)
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            resolved[f"in_cluster_{suffix}"] = i in best_members
+            resolved[f"llr_{suffix}"] = round(best_raw_llr, 6) if i in best_members else 0.0
+            resolved[f"topo_score_{suffix}"] = round(best_score, 6) if i in best_members else 0.0
+            resolved[f"p_value_{suffix}"] = round(p_value, 6)
+            resolved[f"cluster_center_{suffix}"] = i == best_center
+            resolved[f"cluster_radius_{suffix}"] = round(best_radius, 6)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 524: graph_coupled_space_time_regionalization
+    # ------------------------------------------------------------------
+    def graph_coupled_space_time_regionalization(
+        self,
+        value_columns: Sequence[str],
+        time_column: str,
+        n_regions: int = 5,
+        k: int = 6,
+        alpha: float = 0.5,
+        max_iterations: int = 50,
+        seed: int | None = None,
+        distance_method: str = "euclidean",
+        suffix: str = "gstr",
+    ) -> "GeoPromptFrame":
+        """Graph-coupled space-time regionalization.
+
+        Partitions spatial features into *n_regions* contiguous regions
+        that minimize within-region dissimilarity in both attribute space
+        and temporal trajectory.  A k-NN spatial adjacency graph enforces
+        contiguity; *alpha* balances attribute distance (1-alpha) vs
+        temporal distance (alpha).
+        """
+        for col in value_columns:
+            self._require_column(col)
+        self._require_column(time_column)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+
+        # Build k-NN adjacency
+        adj: list[set[int]] = [set() for _ in range(n)]
+        for i in range(n):
+            sorted_j = sorted(range(n), key=lambda j: dist_matrix[i][j])
+            for j in sorted_j[1: k + 1]:
+                adj[i].add(j)
+                adj[j].add(i)
+
+        # Attribute vectors
+        attr_vals = [
+            [float(self._rows[i].get(col, 0) or 0) for col in value_columns]
+            for i in range(n)
+        ]
+        time_vals = [float(self._rows[i].get(time_column, 0) or 0) for i in range(n)]
+
+        def _combined_dist(i: int, j: int) -> float:
+            a_d = math.sqrt(
+                sum((attr_vals[i][d] - attr_vals[j][d]) ** 2 for d in range(len(value_columns)))
+            )
+            t_d = abs(time_vals[i] - time_vals[j])
+            return (1.0 - alpha) * a_d + alpha * t_d
+
+        # Initialize: random contiguous seed growth
+        rng = random.Random(seed)
+        labels = [-1] * n
+        seeds = rng.sample(range(n), min(n_regions, n))
+        for r, s in enumerate(seeds):
+            labels[s] = r
+        # BFS grow from seeds
+        frontier: list[tuple[int, int]] = [(s, r) for r, s in enumerate(seeds)]
+        rng.shuffle(frontier)
+        while frontier:
+            node, region = frontier.pop(0)
+            for nb in adj[node]:
+                if labels[nb] == -1:
+                    labels[nb] = region
+                    frontier.append((nb, region))
+        # Assign any remaining unlabeled to nearest labeled
+        for i in range(n):
+            if labels[i] == -1:
+                best_d = float("inf")
+                best_r = 0
+                for j in range(n):
+                    if labels[j] >= 0:
+                        d = dist_matrix[i][j]
+                        if d < best_d:
+                            best_d = d
+                            best_r = labels[j]
+                labels[i] = best_r
+
+        # Iterative improvement: reassign boundary nodes
+        for _ in range(max_iterations):
+            changed = False
+            for i in range(n):
+                neighbor_regions = {labels[nb] for nb in adj[i]}
+                if len(neighbor_regions) <= 1:
+                    continue
+                # Compute cost for each candidate region
+                best_cost = float("inf")
+                best_label = labels[i]
+                for cand_r in neighbor_regions:
+                    cost = sum(
+                        _combined_dist(i, j) for j in range(n) if labels[j] == cand_r
+                    )
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_label = cand_r
+                if best_label != labels[i]:
+                    labels[i] = best_label
+                    changed = True
+            if not changed:
+                break
+
+        # Compute region centroids for summary
+        region_sizes: dict[int, int] = {}
+        for lb in labels:
+            region_sizes[lb] = region_sizes.get(lb, 0) + 1
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            resolved[f"region_{suffix}"] = labels[i]
+            resolved[f"region_size_{suffix}"] = region_sizes.get(labels[i], 0)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 525: anisotropic_kernel_density
+    # ------------------------------------------------------------------
+    def anisotropic_kernel_density(
+        self,
+        value_column: str | None = None,
+        bandwidth: float | None = None,
+        angle_column: str | None = None,
+        ratio: float = 2.0,
+        grid_resolution: int = 20,
+        suffix: str = "akde",
+    ) -> "GeoPromptFrame":
+        """Anisotropic kernel density estimation.
+
+        Fits an oriented Gaussian kernel at each point.  The kernel's
+        major axis follows the bearing given in *angle_column* (degrees
+        east of north) or, when not supplied, the principal axis of the
+        local point cloud.  The *ratio* controls the eccentricity
+        (major / minor bandwidth ratio).
+        """
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        b = self.bounds()
+        extent = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-9)
+        h = bandwidth if bandwidth is not None else extent / max(n ** 0.2, 1.0)
+        h_major = h * ratio
+        h_minor = h
+
+        weights = [
+            float(self._rows[i].get(value_column, 1) or 1) if value_column else 1.0
+            for i in range(n)
+        ]
+
+        # Per-point rotation angle (radians from east, counter-clockwise)
+        angles: list[float] = []
+        if angle_column:
+            for i in range(n):
+                deg = float(self._rows[i].get(angle_column, 0) or 0)
+                angles.append(math.radians(90.0 - deg))  # bearing → math angle
+        else:
+            # PCA principal angle from local 6-NN
+            for i in range(n):
+                dists = sorted(
+                    ((j, math.hypot(centroids[i][0] - centroids[j][0],
+                                    centroids[i][1] - centroids[j][1]))
+                     for j in range(n) if j != i),
+                    key=lambda t: t[1],
+                )
+                neighbors = [centroids[t[0]] for t in dists[:6]]
+                cx = sum(p[0] for p in neighbors) / max(len(neighbors), 1)
+                cy = sum(p[1] for p in neighbors) / max(len(neighbors), 1)
+                cov_xx = sum((p[0] - cx) ** 2 for p in neighbors)
+                cov_yy = sum((p[1] - cy) ** 2 for p in neighbors)
+                cov_xy = sum((p[0] - cx) * (p[1] - cy) for p in neighbors)
+                theta = 0.5 * math.atan2(2 * cov_xy, cov_xx - cov_yy + 1e-15)
+                angles.append(theta)
+
+        # Build a grid and evaluate the kernel density
+        dx = (b.max_x - b.min_x) / max(grid_resolution - 1, 1)
+        dy = (b.max_y - b.min_y) / max(grid_resolution - 1, 1)
+
+        grid_pts: list[tuple[float, float]] = []
+        for gy in range(grid_resolution):
+            for gx in range(grid_resolution):
+                grid_pts.append((b.min_x + gx * dx, b.min_y + gy * dy))
+
+        grid_vals = [0.0] * len(grid_pts)
+        for i in range(n):
+            cos_a = math.cos(angles[i])
+            sin_a = math.sin(angles[i])
+            for gi, (gx, gy) in enumerate(grid_pts):
+                rx = (gx - centroids[i][0]) * cos_a + (gy - centroids[i][1]) * sin_a
+                ry = -(gx - centroids[i][0]) * sin_a + (gy - centroids[i][1]) * cos_a
+                u = (rx / max(h_major, 1e-12)) ** 2 + (ry / max(h_minor, 1e-12)) ** 2
+                if u < 9.0:
+                    grid_vals[gi] += weights[i] * math.exp(-0.5 * u)
+
+        # For each input feature, sample from the closest grid cell
+        out: list[Record] = []
+        for i in range(n):
+            gx_idx = max(0, min(grid_resolution - 1,
+                                round((centroids[i][0] - b.min_x) / max(dx, 1e-12))))
+            gy_idx = max(0, min(grid_resolution - 1,
+                                round((centroids[i][1] - b.min_y) / max(dy, 1e-12))))
+            density = grid_vals[gy_idx * grid_resolution + gx_idx]
+            resolved = dict(self._rows[i])
+            resolved[f"density_{suffix}"] = round(density, 6)
+            resolved[f"angle_deg_{suffix}"] = round(math.degrees(angles[i]), 2)
+            resolved[f"h_major_{suffix}"] = round(h_major, 6)
+            resolved[f"h_minor_{suffix}"] = round(h_minor, 6)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 526: spatial_durbin_error_model
+    # ------------------------------------------------------------------
+    def spatial_durbin_error_model(
+        self,
+        dependent_column: str,
+        independent_columns: Sequence[str],
+        mode: str = "k_nearest",
+        k: int = 6,
+        max_distance: float | None = None,
+        distance_method: str = "euclidean",
+        lambda_init: float = 0.5,
+        max_iter: int = 30,
+        suffix: str = "sdem",
+    ) -> "GeoPromptFrame":
+        """Spatial Durbin Error Model (SDEM).
+
+        Extends the classical spatial error model by including spatial
+        lags of the independent variables.  This captures both error
+        dependence and spillover effects from neighbouring covariates:
+
+            y = Xβ + WXθ + u,  where u = λWu + ε
+
+        The spatial parameter *lambda* is estimated via iterative
+        generalised least squares (IGLS).
+        """
+        self._require_column(dependent_column)
+        for col in independent_columns:
+            self._require_column(col)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+
+        # Build row-normalised spatial weight matrix W
+        W: list[list[float]] = [[0.0] * n for _ in range(n)]
+        for i in range(n):
+            if mode == "k_nearest":
+                sorted_j = sorted(range(n), key=lambda j: dist_matrix[i][j])
+                for j in sorted_j[1: k + 1]:
+                    W[i][j] = 1.0
+            else:
+                md = max_distance if max_distance else (max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-9) * 0.3 for b in [self.bounds()]).__next__()
+                for j in range(n):
+                    if j != i and dist_matrix[i][j] <= md:
+                        W[i][j] = 1.0
+            row_sum = sum(W[i])
+            if row_sum > 0:
+                for j in range(n):
+                    W[i][j] /= row_sum
+
+        p = len(independent_columns)
+        y = [float(self._rows[i].get(dependent_column, 0) or 0) for i in range(n)]
+        X_raw = [[float(self._rows[i].get(col, 0) or 0) for col in independent_columns] for i in range(n)]
+        # WX — spatial lag of each independent
+        WX = [[sum(W[i][j] * X_raw[j][c] for j in range(n)) for c in range(p)] for i in range(n)]
+        # Augmented X = [1, X, WX]
+        p_aug = 1 + p + p
+        X = [[1.0] + X_raw[i] + WX[i] for i in range(n)]
+
+        lam = lambda_init
+        coeffs: list[float] | None = None
+
+        for _ in range(max_iter):
+            # Filter: y* = y - lambda*Wy, X* = X - lambda*WX_aug
+            Wy = [sum(W[i][j] * y[j] for j in range(n)) for i in range(n)]
+            y_star = [y[i] - lam * Wy[i] for i in range(n)]
+            WX_aug = [
+                [sum(W[i][j] * X[j][c] for j in range(n)) for c in range(p_aug)]
+                for i in range(n)
+            ]
+            X_star = [[X[i][c] - lam * WX_aug[i][c] for c in range(p_aug)] for i in range(n)]
+            # OLS on filtered
+            xtx = [
+                [sum(X_star[i][a] * X_star[i][b_] for i in range(n)) for b_ in range(p_aug)]
+                for a in range(p_aug)
+            ]
+            xty = [sum(X_star[i][a] * y_star[i] for i in range(n)) for a in range(p_aug)]
+            coeffs = _solve_linear_system(xtx, xty)
+            if coeffs is None:
+                coeffs = [0.0] * p_aug
+                break
+            # Update residuals and lambda
+            resid = [y[i] - sum(coeffs[c] * X[i][c] for c in range(p_aug)) for i in range(n)]
+            W_resid = [sum(W[i][j] * resid[j] for j in range(n)) for i in range(n)]
+            num = sum(resid[i] * W_resid[i] for i in range(n))
+            den = sum(W_resid[i] * W_resid[i] for i in range(n))
+            lam_new = num / max(den, 1e-12)
+            lam_new = max(-0.99, min(0.99, lam_new))
+            if abs(lam_new - lam) < 1e-6:
+                lam = lam_new
+                break
+            lam = lam_new
+
+        if coeffs is None:
+            coeffs = [0.0] * p_aug
+
+        # Predicted and residuals
+        out: list[Record] = []
+        for i in range(n):
+            pred = sum(coeffs[c] * X[i][c] for c in range(p_aug))
+            resolved = dict(self._rows[i])
+            resolved[f"predicted_{suffix}"] = round(pred, 6)
+            resolved[f"residual_{suffix}"] = round(y[i] - pred, 6)
+            resolved[f"lambda_{suffix}"] = round(lam, 6)
+            resolved[f"intercept_{suffix}"] = round(coeffs[0], 6)
+            for ci, col in enumerate(independent_columns):
+                resolved[f"coeff_{col}_{suffix}"] = round(coeffs[1 + ci], 6)
+                resolved[f"lag_coeff_{col}_{suffix}"] = round(coeffs[1 + p + ci], 6)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 527: wavelet_spatial_autocorrelation
+    # ------------------------------------------------------------------
+    def wavelet_spatial_autocorrelation(
+        self,
+        value_column: str,
+        n_scales: int = 5,
+        base_bandwidth: float | None = None,
+        distance_method: str = "euclidean",
+        suffix: str = "wsa",
+    ) -> "GeoPromptFrame":
+        """Wavelet-based spatial autocorrelation across multiple scales.
+
+        Decomposes the spatial signal into scale-specific components
+        using difference-of-Gaussians wavelets, then computes a local
+        autocorrelation measure at each scale.  Reveals at which
+        spatial scales clustering is strongest for each feature.
+        """
+        self._require_column(value_column)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+        vals = [float(self._rows[i].get(value_column, 0) or 0) for i in range(n)]
+        mean_val = sum(vals) / n if n > 0 else 0.0
+        b = self.bounds()
+        extent = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-9)
+        h0 = base_bandwidth if base_bandwidth else extent / (n ** 0.5 + 1)
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            best_scale = -1
+            best_corr = -2.0
+            for s in range(n_scales):
+                h_s = h0 * (2.0 ** s)
+                h_s2 = h_s * 2.0
+                # DoG wavelet coefficient at feature i
+                smooth_narrow = 0.0
+                w_narrow = 0.0
+                smooth_wide = 0.0
+                w_wide = 0.0
+                for j in range(n):
+                    d = dist_matrix[i][j]
+                    g_n = math.exp(-0.5 * (d / max(h_s, 1e-12)) ** 2)
+                    g_w = math.exp(-0.5 * (d / max(h_s2, 1e-12)) ** 2)
+                    smooth_narrow += g_n * vals[j]
+                    w_narrow += g_n
+                    smooth_wide += g_w * vals[j]
+                    w_wide += g_w
+                s_n = smooth_narrow / max(w_narrow, 1e-12)
+                s_w = smooth_wide / max(w_wide, 1e-12)
+                wavelet_coeff = s_n - s_w
+
+                # Local autocorrelation: correlation of wavelet coeff with neighbours
+                nb_coeffs: list[float] = []
+                for j in range(n):
+                    if j == i:
+                        continue
+                    if dist_matrix[i][j] <= h_s:
+                        sn_j = 0.0
+                        wn_j = 0.0
+                        sw_j = 0.0
+                        ww_j = 0.0
+                        for jj in range(n):
+                            d2 = dist_matrix[j][jj]
+                            g_n2 = math.exp(-0.5 * (d2 / max(h_s, 1e-12)) ** 2)
+                            g_w2 = math.exp(-0.5 * (d2 / max(h_s2, 1e-12)) ** 2)
+                            sn_j += g_n2 * vals[jj]
+                            wn_j += g_n2
+                            sw_j += g_w2 * vals[jj]
+                            ww_j += g_w2
+                        nb_coeffs.append(sn_j / max(wn_j, 1e-12) - sw_j / max(ww_j, 1e-12))
+                if nb_coeffs:
+                    mean_nb = sum(nb_coeffs) / len(nb_coeffs)
+                    cov = sum((c - mean_nb) * wavelet_coeff for c in nb_coeffs) / len(nb_coeffs)
+                    var_nb = sum((c - mean_nb) ** 2 for c in nb_coeffs) / len(nb_coeffs)
+                    corr = cov / max(math.sqrt(var_nb) * max(abs(wavelet_coeff), 1e-12), 1e-12)
+                else:
+                    corr = 0.0
+
+                resolved[f"wavelet_s{s}_{suffix}"] = round(wavelet_coeff, 6)
+                resolved[f"autocorr_s{s}_{suffix}"] = round(corr, 6)
+                if corr > best_corr:
+                    best_corr = corr
+                    best_scale = s
+            resolved[f"dominant_scale_{suffix}"] = best_scale
+            resolved[f"dominant_autocorr_{suffix}"] = round(best_corr, 6)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 528: multiscale_getis_ord
+    # ------------------------------------------------------------------
+    def multiscale_getis_ord(
+        self,
+        value_column: str,
+        scales: Sequence[float] | None = None,
+        n_scales: int = 5,
+        distance_method: str = "euclidean",
+        suffix: str = "msgi",
+    ) -> "GeoPromptFrame":
+        """Multi-scale Getis-Ord Gi* statistic.
+
+        Evaluates the Gi* hotspot statistic across several distance
+        bands simultaneously, storing the z-score at each scale and
+        identifying the optimal scale (highest |z|) for every feature.
+        """
+        self._require_column(value_column)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+        vals = [float(self._rows[i].get(value_column, 0) or 0) for i in range(n)]
+        mean_v = sum(vals) / n
+        var_v = sum((v - mean_v) ** 2 for v in vals) / n
+        sd_v = math.sqrt(var_v) if var_v > 0 else 1e-12
+
+        b = self.bounds()
+        extent = max(b.max_x - b.min_x, b.max_y - b.min_y, 1e-9)
+        if scales is not None:
+            scale_list = list(scales)
+        else:
+            step = extent / max(n_scales, 1)
+            scale_list = [step * (s + 1) for s in range(n_scales)]
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            best_abs_z = 0.0
+            best_scale_idx = 0
+            for si, sc in enumerate(scale_list):
+                w_sum = 0.0
+                wx_sum = 0.0
+                w2_sum = 0.0
+                for j in range(n):
+                    if dist_matrix[i][j] <= sc:
+                        w = 1.0
+                    else:
+                        w = 0.0
+                    w_sum += w
+                    wx_sum += w * vals[j]
+                    w2_sum += w * w
+                if w_sum > 0 and n > 1:
+                    numerator = wx_sum - mean_v * w_sum
+                    denominator = sd_v * math.sqrt((n * w2_sum - w_sum * w_sum) / max(n - 1, 1))
+                    z = numerator / max(denominator, 1e-12)
+                else:
+                    z = 0.0
+                resolved[f"gi_z_s{si}_{suffix}"] = round(z, 6)
+                if abs(z) > best_abs_z:
+                    best_abs_z = abs(z)
+                    best_scale_idx = si
+            resolved[f"optimal_scale_idx_{suffix}"] = best_scale_idx
+            resolved[f"optimal_scale_dist_{suffix}"] = round(scale_list[best_scale_idx], 6)
+            resolved[f"optimal_gi_z_{suffix}"] = round(
+                resolved.get(f"gi_z_s{best_scale_idx}_{suffix}", 0.0), 6  # type: ignore[arg-type]
+            )
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 529: network_constrained_clustering
+    # ------------------------------------------------------------------
+    def network_constrained_clustering(
+        self,
+        value_column: str,
+        k: int = 6,
+        n_clusters: int = 5,
+        max_iterations: int = 50,
+        distance_method: str = "euclidean",
+        seed: int | None = None,
+        suffix: str = "ncc",
+    ) -> "GeoPromptFrame":
+        """Network-constrained k-medoids clustering.
+
+        Builds a k-NN spatial graph, then runs a modified k-medoids
+        algorithm where reassignment is only allowed along graph edges,
+        guaranteeing that each cluster is a connected subgraph.
+        """
+        self._require_column(value_column)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+        vals = [float(self._rows[i].get(value_column, 0) or 0) for i in range(n)]
+
+        # Build adjacency
+        adj: list[set[int]] = [set() for _ in range(n)]
+        for i in range(n):
+            sorted_j = sorted(range(n), key=lambda j: dist_matrix[i][j])
+            for j in sorted_j[1: k + 1]:
+                adj[i].add(j)
+                adj[j].add(i)
+
+        # Graph shortest-path distance (BFS with uniform weight)
+        graph_dist: list[list[float]] = [[float("inf")] * n for _ in range(n)]
+        for s in range(n):
+            graph_dist[s][s] = 0.0
+            queue = [s]
+            head = 0
+            while head < len(queue):
+                u = queue[head]
+                head += 1
+                for v in adj[u]:
+                    alt = graph_dist[s][u] + dist_matrix[u][v]
+                    if alt < graph_dist[s][v]:
+                        graph_dist[s][v] = alt
+                        queue.append(v)
+
+        # k-medoids PAM-style
+        rng = random.Random(seed)
+        nc = min(n_clusters, n)
+        medoids = rng.sample(range(n), nc)
+        labels = [0] * n
+        for _ in range(max_iterations):
+            # Assign
+            for i in range(n):
+                best_d = float("inf")
+                best_m = 0
+                for mi, m in enumerate(medoids):
+                    d = graph_dist[i][m] + abs(vals[i] - vals[m])
+                    if d < best_d:
+                        best_d = d
+                        best_m = mi
+                labels[i] = best_m
+            # Update medoids
+            changed = False
+            for mi in range(nc):
+                members = [j for j in range(n) if labels[j] == mi]
+                if not members:
+                    continue
+                best_cost = float("inf")
+                best_med = medoids[mi]
+                for cand in members:
+                    cost = sum(graph_dist[cand][j] + abs(vals[cand] - vals[j]) for j in members)
+                    if cost < best_cost:
+                        best_cost = cost
+                        best_med = cand
+                if best_med != medoids[mi]:
+                    medoids[mi] = best_med
+                    changed = True
+            if not changed:
+                break
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            resolved[f"cluster_{suffix}"] = labels[i]
+            resolved[f"medoid_{suffix}"] = medoids[labels[i]]
+            resolved[f"dist_to_medoid_{suffix}"] = round(graph_dist[i][medoids[labels[i]]], 6)
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
+        )
+
+    # ------------------------------------------------------------------
+    # Tool 530: spatial_envelope_anomaly
+    # ------------------------------------------------------------------
+    def spatial_envelope_anomaly(
+        self,
+        value_columns: Sequence[str],
+        k: int = 6,
+        contamination: float = 0.1,
+        distance_method: str = "euclidean",
+        suffix: str = "sea",
+    ) -> "GeoPromptFrame":
+        """Spatial envelope anomaly detection.
+
+        Computes a local multivariate envelope (bounding hyper-rectangle
+        of neighbor attribute values) for each feature, then scores
+        how far the feature's own attributes fall outside the local
+        envelope.  Features with high exceedance across many dimensions
+        are flagged as spatial anomalies.
+        """
+        for col in value_columns:
+            self._require_column(col)
+        n = len(self._rows)
+        if n == 0:
+            return GeoPromptFrame._from_internal_rows(
+                [], geometry_column=self.geometry_column, crs=self.crs,
+            )
+        centroids = self._centroids()
+        dist_matrix = _pairwise_distance_matrix(centroids, distance_method)
+        p = len(value_columns)
+        attr_vals = [
+            [float(self._rows[i].get(col, 0) or 0) for col in value_columns]
+            for i in range(n)
+        ]
+
+        scores: list[float] = []
+        for i in range(n):
+            # k nearest neighbours
+            sorted_j = sorted(range(n), key=lambda j: dist_matrix[i][j])
+            neighbors = sorted_j[1: k + 1]
+            if not neighbors:
+                scores.append(0.0)
+                continue
+            # Envelope: min/max per dimension
+            exceedance = 0.0
+            for d in range(p):
+                nb_vals = [attr_vals[j][d] for j in neighbors]
+                lo = min(nb_vals)
+                hi = max(nb_vals)
+                rng_d = hi - lo
+                if rng_d < 1e-12:
+                    rng_d = 1.0
+                v = attr_vals[i][d]
+                if v < lo:
+                    exceedance += (lo - v) / rng_d
+                elif v > hi:
+                    exceedance += (v - hi) / rng_d
+            scores.append(exceedance)
+
+        # Threshold
+        sorted_scores = sorted(scores, reverse=True)
+        top_n = max(1, int(contamination * n))
+        threshold = sorted_scores[min(top_n - 1, n - 1)] if n > 0 else 0.0
+
+        out: list[Record] = []
+        for i in range(n):
+            resolved = dict(self._rows[i])
+            resolved[f"anomaly_score_{suffix}"] = round(scores[i], 6)
+            resolved[f"is_anomaly_{suffix}"] = 1 if scores[i] >= threshold and scores[i] > 0 else 0
+            out.append(resolved)
+        return GeoPromptFrame._from_internal_rows(
+            out, geometry_column=self.geometry_column, crs=self.crs,
         )
 
     # ------------------------------------------------------------------
