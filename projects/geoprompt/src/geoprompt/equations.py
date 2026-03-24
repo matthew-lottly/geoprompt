@@ -144,7 +144,7 @@ def clamp(value: float, lo: float, hi: float) -> float:
 
 
 def min_max_scale(value: float, min_val: float, max_val: float) -> float:
-    """Scale *value* into [0, 1] given observed min/max.  Returns 0 when range is zero."""
+    """Linearly scale *value* using observed min/max. Returns 0 when range is zero."""
     rng = max_val - min_val
     if rng <= 0:
         return 0.0
@@ -270,11 +270,11 @@ def gravity_model(
 ) -> float:
     if distance_value < 0:
         raise ValueError("distance_value must be zero or greater")
+    if friction <= 0:
+        raise ValueError("friction must be greater than zero")
     effective_distance = max(distance_value, min_distance)
     if effective_distance == 0:
         return float("inf") if origin_weight > 0 and destination_weight > 0 else 0.0
-    if friction <= 0:
-        raise ValueError("friction must be greater than zero")
     return float(origin_weight) * float(destination_weight) / math.pow(effective_distance, friction)
 
 
