@@ -14,3 +14,6 @@ paper.bib
 paper-draft*.md
 paper-final*.md
 submission*.md
+
+# Also exclude PUBLISHING plan (monorepo-specific)
+PUBLISHING.md
