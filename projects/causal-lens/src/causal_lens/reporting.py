@@ -17,11 +17,15 @@ def results_to_frame(results: list[dict]) -> pd.DataFrame:
                 "method": result["method"],
                 "estimand": result["estimand"],
                 "effect": result["effect"],
+                "se": result.get("se"),
+                "p_value": result.get("p_value"),
                 "ci_low": result["ci_low"],
                 "ci_high": result["ci_high"],
                 "overlap_ok": diagnostics["overlap_ok"],
                 "mean_abs_balance_before": sum(abs(value) for value in balance_before.values()) / len(balance_before),
                 "mean_abs_balance_after": sum(abs(value) for value in balance_after.values()) / len(balance_after),
+                "ess_treated": diagnostics.get("ess_treated"),
+                "ess_control": diagnostics.get("ess_control"),
             }
         )
     return pd.DataFrame(rows)
@@ -75,6 +79,15 @@ def export_dataset_artifacts(dataset_key: str, payload: dict, output_dir: Path) 
             subgroup_frame,
             title=f"{_display_name(dataset_key)} subgroup effects",
             output_path=charts_dir / f"{dataset_key}_subgroup_effects.png",
+        )
+
+    if payload["results"]:
+        primary = payload["results"][-1]
+        _plot_love(
+            primary["diagnostics"]["balance_before"],
+            primary["diagnostics"]["balance_after"],
+            title=f"{_display_name(dataset_key)} covariate balance (Love plot)",
+            output_path=charts_dir / f"{dataset_key}_love_plot.png",
         )
 
 
@@ -184,6 +197,73 @@ def _plot_subgroup_effects(subgroup_frame: pd.DataFrame, title: str, output_path
     plt.tight_layout()
     plt.savefig(output_path, dpi=160)
     plt.close()
+
+
+def export_propensity_overlap(
+    propensity: "np.ndarray",
+    treatment: "np.ndarray",
+    title: str,
+    output_path: Path,
+) -> None:
+    """Export a propensity-score overlap histogram by treatment group."""
+    import numpy as np
+
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    bins = np.linspace(float(propensity.min()), float(propensity.max()), 35)
+    ax.hist(propensity[treatment == 1], bins=bins, alpha=0.55, label="Treated", color="#476C9B", density=True)
+    ax.hist(propensity[treatment == 0], bins=bins, alpha=0.55, label="Control", color="#C96E35", density=True)
+    ax.set_xlabel("Propensity score")
+    ax.set_ylabel("Density")
+    ax.set_title(title)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
+def export_placebo_artifacts(placebo_results: list[dict], output_dir: Path) -> pd.DataFrame:
+    """Export placebo/falsification test results to CSV."""
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(placebo_results)
+    frame.to_csv(tables_dir / "placebo_test.csv", index=False)
+    return frame
+
+
+def export_rosenbaum_artifacts(rosenbaum_results: list[dict], output_dir: Path) -> pd.DataFrame:
+    """Export Rosenbaum sensitivity bounds to CSV."""
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame(rosenbaum_results)
+    frame.to_csv(tables_dir / "rosenbaum_bounds.csv", index=False)
+    return frame
+
+
+def _plot_love(
+    balance_before: dict[str, float],
+    balance_after: dict[str, float],
+    title: str,
+    output_path: Path,
+) -> None:
+    """Love plot: covariate-level |SMD| before and after adjustment."""
+    covariates = list(balance_before.keys())
+    y_positions = list(range(len(covariates)))
+    abs_before = [abs(balance_before[c]) for c in covariates]
+    abs_after = [abs(balance_after[c]) for c in covariates]
+
+    fig, ax = plt.subplots(figsize=(8.5, max(4.8, 0.4 * len(covariates))))
+    ax.scatter(abs_before, y_positions, marker="x", s=60, color="#C96E35", label="Unadjusted", zorder=3)
+    ax.scatter(abs_after, y_positions, marker="o", s=60, color="#4C8B72", label="Adjusted", zorder=3)
+    ax.axvline(0.1, color="#A44A3F", linestyle="--", linewidth=1.2, label="|SMD| = 0.1")
+    ax.axvline(0.25, color="#A44A3F", linestyle=":", linewidth=1.0, alpha=0.6, label="|SMD| = 0.25")
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(covariates)
+    ax.set_xlabel("Absolute standardized mean difference")
+    ax.set_title(title)
+    ax.legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
 
 
 def _display_name(dataset_key: str) -> str:

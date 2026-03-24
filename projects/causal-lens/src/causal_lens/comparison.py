@@ -99,19 +99,27 @@ def compare_on_dataset(
     return rows
 
 
-def main() -> None:
-    output_dir = Path(__file__).resolve().parents[1] / "outputs" / "tables"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
+def build_external_comparison() -> pd.DataFrame:
     lalonde = load_lalonde_benchmark()
     nhefs = load_nhefs_complete_benchmark()
 
     all_rows: list[dict] = []
     all_rows.extend(compare_on_dataset("lalonde", lalonde, LALONDE_CONFOUNDERS, "outcome"))
     all_rows.extend(compare_on_dataset("nhefs", nhefs, NHEFS_COMPLETE_CONFOUNDERS, "outcome"))
+    return pd.DataFrame(all_rows)
 
-    comparison = pd.DataFrame(all_rows)
-    comparison.to_csv(output_dir / "external_comparison.csv", index=False)
+
+def export_external_comparison_artifacts(output_dir: Path) -> pd.DataFrame:
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    comparison = build_external_comparison()
+    comparison.to_csv(tables_dir / "external_comparison.csv", index=False)
+    return comparison
+
+
+def main() -> None:
+    output_dir = Path(__file__).resolve().parents[2] / "outputs"
+    comparison = export_external_comparison_artifacts(output_dir)
 
     print("=== CausalLens vs Manual Implementation ===")
     for _, row in comparison.iterrows():
@@ -131,7 +139,7 @@ def main() -> None:
         if find_spec("dowhy") is None:
             raise ImportError
         print("\nDoWhy detected — running DoWhy comparison...")
-        _compare_dowhy(lalonde, nhefs, output_dir)
+        _compare_dowhy(load_lalonde_benchmark(), load_nhefs_complete_benchmark(), output_dir / "tables")
     except ImportError:
         print("\nDoWhy not installed — skipping DoWhy comparison.")
         print("Install with: pip install dowhy")

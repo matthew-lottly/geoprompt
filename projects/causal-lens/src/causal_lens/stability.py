@@ -85,9 +85,19 @@ def _run_estimators(
 
 
 def run_stability_analysis() -> pd.DataFrame:
-    seeds = [42, 123, 7, 2024, 999]
-    bootstrap_counts = [20, 40, 80]
-    calipers = {"lalonde": [0.03, 0.05, 0.10], "nhefs": [0.01, 0.02, 0.05]}
+    return run_stability_analysis_with_settings(
+        seeds=[42, 123, 7, 2024, 999],
+        bootstrap_counts=[20, 40, 80],
+        calipers={"lalonde": [0.03, 0.05, 0.10], "nhefs": [0.01, 0.02, 0.05]},
+    )
+
+
+def run_stability_analysis_with_settings(
+    *,
+    seeds: list[int],
+    bootstrap_counts: list[int],
+    calipers: dict[str, list[float]],
+) -> pd.DataFrame:
 
     lalonde = load_lalonde_benchmark()
     nhefs = load_nhefs_complete_benchmark()
@@ -126,6 +136,24 @@ def run_stability_analysis() -> pd.DataFrame:
     return pd.DataFrame(all_rows)
 
 
+def export_stability_artifacts(output_dir: Path, *, quick: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
+    tables_dir = output_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+    if quick:
+        raw = run_stability_analysis_with_settings(
+            seeds=[42, 123],
+            bootstrap_counts=[20],
+            calipers={"lalonde": [0.05], "nhefs": [0.02]},
+        )
+    else:
+        raw = run_stability_analysis()
+    raw.to_csv(tables_dir / "stability_raw.csv", index=False)
+
+    summary = summarize_stability(raw)
+    summary.to_csv(tables_dir / "stability_summary.csv", index=False)
+    return raw, summary
+
+
 def summarize_stability(frame: pd.DataFrame) -> pd.DataFrame:
     grouped = frame.groupby(["dataset", "method"])
     summary = grouped.agg(
@@ -143,15 +171,10 @@ def summarize_stability(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def main() -> None:
-    output_dir = Path(__file__).resolve().parents[1] / "outputs" / "tables"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(__file__).resolve().parents[2] / "outputs"
 
     print("Running stability analysis across seeds and settings...")
-    raw = run_stability_analysis()
-    raw.to_csv(output_dir / "stability_raw.csv", index=False)
-
-    summary = summarize_stability(raw)
-    summary.to_csv(output_dir / "stability_summary.csv", index=False)
+    raw, summary = export_stability_artifacts(output_dir)
 
     print("\n=== Stability Summary ===")
     for _, row in summary.iterrows():
@@ -161,8 +184,8 @@ def main() -> None:
             f"effect={row['mean_effect']:>10.2f} ± {row['std_effect']:>8.2f}  "
             f"{cv_label}  (n={int(row['n_runs'])})"
         )
-    print(f"\nRaw data: {output_dir / 'stability_raw.csv'}")
-    print(f"Summary:  {output_dir / 'stability_summary.csv'}")
+    print(f"\nRaw data: {output_dir / 'tables' / 'stability_raw.csv'}")
+    print(f"Summary:  {output_dir / 'tables' / 'stability_summary.csv'}")
 
 
 if __name__ == "__main__":

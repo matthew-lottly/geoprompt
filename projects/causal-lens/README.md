@@ -27,15 +27,22 @@ The current repository now uses three complementary evidence tracks:
 - Nearest-neighbor propensity matching with optional calipers
 - Inverse probability weighting with stabilized weights and weight capping for ATE and ATT targets
 - Doubly robust estimation that combines outcome and propensity models with weight trimming
-- Covariate-balance summaries using standardized mean differences
+- Analytic standard errors from OLS (regression), Hajek influence functions (IPW), and semiparametric influence functions (doubly robust)
+- Covariate-balance summaries using standardized mean differences and variance ratios
+- Kish effective sample size for weighted estimators to detect unstable weights
 - Common-support and overlap diagnostics for positivity review
 - Additive-bias sensitivity summaries for explain-away analysis on the outcome scale
+- E-values for unmeasured confounding (VanderWeele & Ding 2017) quantifying the minimum confounder strength to explain away the effect
+- Rosenbaum sensitivity bounds for matched-pair designs quantifying hidden-bias tolerance
+- Placebo/falsification tests on pre-treatment outcomes for specification validation
 - Subgroup treatment-effect summaries for quick heterogeneous-effect review
 - A small command-line demo that exports a reproducible causal report
 - A real-style observational intervention fixture for stable estimator-comparison tests
 - Publication-oriented methodology notes explaining why the initial estimator set is justified
 - Reference parity tests against manual formulas and direct statistical-model fits
 - Paper-ready chart and table exports for estimator comparison, balance, sensitivity, and subgroup effects
+- Love plots showing covariate-level balance before and after adjustment with standard |SMD| thresholds
+- Propensity-score overlap histograms for visual positivity assessment
 - Manuscript drafting docs, figure captions, and cross-dataset benchmark tables for the software-paper path
 - Packaged public benchmarks based on Lalonde and NHEFS so installed users can reproduce the evidence stack without a source checkout
 - Literature comparison table showing CausalLens results match published reference values from Dehejia & Wahba (1999) and Hernán & Robins (2020)
@@ -47,14 +54,18 @@ The current repository now uses three complementary evidence tracks:
 The default command writes `outputs/causal_report.json` with:
 
 - a fixed real-style observational dataset section with estimator comparisons
-- a Lalonde benchmark section with public observational training-program data
+- a Lalonde benchmark section with public observational training-program data, using light propensity-overlap trimming for the weighting estimators
 - an NHEFS benchmark section with public smoking-cessation observational data
 - a synthetic validation dataset section with known-effect comparisons
 - overlap summary and propensity score range checks
-- covariate balance before/after weighting
+- covariate balance before/after weighting, variance ratios, and effective sample sizes
 - lightweight bootstrap intervals for the selected estimate
-- additive-bias sensitivity summaries for the primary doubly robust estimate
+- analytic standard errors and p-values from influence functions (DR, IPW) and OLS (regression)
+- additive-bias sensitivity summaries with E-values for the primary doubly robust estimate
 - subgroup treatment-effect estimates
+- placebo/falsification test results on pre-treatment outcomes
+- Rosenbaum sensitivity bounds for matched-pair designs
+- external comparison and stability-analysis summaries for the exported benchmark artifacts
 
 It also writes paper-oriented artifacts under `outputs/charts/` and `outputs/tables/` including:
 
@@ -63,10 +74,14 @@ It also writes paper-oriented artifacts under `outputs/charts/` and `outputs/tab
 - sensitivity curves
 - subgroup effect charts
 - estimator summary tables in CSV and Markdown
+- `external_comparison.csv` showing parity against manual sklearn/statsmodels implementations
+- `stability_raw.csv` and `stability_summary.csv` capturing repeated-run variability across benchmark settings
+- `placebo_test.csv` showing falsification test results on pre-treatment outcomes
+- `rosenbaum_bounds.csv` showing matched-pair sensitivity to hidden bias at each Gamma level
+- Love plots and propensity-score overlap histograms for each benchmark dataset
 
 ## Next Upgrade Path
 
-- add sensitivity analysis for unmeasured confounding
 - add panel-data estimators such as difference-in-differences
 - add instrumental variables and 2SLS workflows
 - add article figures, benchmark tables, and formal estimator-comparison writeups
@@ -84,4 +99,4 @@ See [docs/manuscript-outline.md](docs/manuscript-outline.md) for a section-by-se
 See [docs/limitations-and-assumptions.md](docs/limitations-and-assumptions.md) for a paper-ready limitations section.
 See [docs/figure-captions.md](docs/figure-captions.md) for reusable captions tied to the generated artifacts.
 See [docs/literature-comparison.md](docs/literature-comparison.md) for published reference value comparison.
-See [paper.md](paper.md) for the current JOSS-style paper draft.
+The submission manuscript is kept in a local ignored drafts folder until submission; the public repo intentionally exposes only the supporting methodology and benchmark notes.

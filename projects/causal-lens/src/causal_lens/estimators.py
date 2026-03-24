@@ -5,14 +5,25 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from scipy.stats import norm
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from causal_lens.data import DataSpec, validate_observational_frame
-from causal_lens.diagnostics import standardized_mean_difference, summarize_overlap
+from causal_lens.diagnostics import (
+    compute_e_value,
+    compute_e_value_ci,
+    effective_sample_size,
+    rosenbaum_bounds,
+    standardized_mean_difference,
+    summarize_overlap,
+    variance_ratio,
+)
 from causal_lens.results import (
     CausalEstimate,
     DiagnosticSummary,
+    PlaceboResult,
+    RosenbaumSensitivity,
     SensitivityScenario,
     SensitivitySummary,
     SubgroupEstimate,
@@ -27,6 +38,7 @@ class BaseEstimator:
     estimand: str = "ATE"
     bootstrap_repeats: int = 40
     bootstrap_seed: int = 42
+    propensity_trim_bounds: tuple[float, float] | None = None
 
     def _prepare(self, frame: pd.DataFrame) -> pd.DataFrame:
         spec = DataSpec(
@@ -34,7 +46,16 @@ class BaseEstimator:
             outcome_col=self.outcome_col,
             confounders=self.confounders,
         )
-        return validate_observational_frame(frame, spec)
+        prepared = validate_observational_frame(frame, spec)
+        if self.propensity_trim_bounds is None:
+            return prepared
+        lower, upper = self.propensity_trim_bounds
+        if not 0.0 <= lower < upper <= 1.0:
+            raise ValueError("propensity_trim_bounds must satisfy 0.0 <= lower < upper <= 1.0")
+        propensity = self._fit_propensity(prepared)
+        keep_mask = (propensity >= lower) & (propensity <= upper)
+        trimmed = prepared.loc[keep_mask].reset_index(drop=True)
+        return validate_observational_frame(trimmed, spec)
 
     def _fit_propensity(self, frame: pd.DataFrame) -> np.ndarray:
         scaler = StandardScaler()
@@ -60,6 +81,11 @@ class BaseEstimator:
             self.confounders,
             weights=weights,
         )
+        var_ratios = variance_ratio(frame, self.treatment_col, self.confounders, weights=weights)
+        ess_t: float | None = None
+        ess_c: float | None = None
+        if weights is not None:
+            ess_t, ess_c = effective_sample_size(weights, treatment)
         return DiagnosticSummary(
             propensity_min=float(overlap["propensity_min"]),
             propensity_max=float(overlap["propensity_max"]),
@@ -68,6 +94,9 @@ class BaseEstimator:
             overlap_ok=bool(overlap["overlap_ok"]),
             balance_before=balance_before,
             balance_after=balance_after,
+            variance_ratios=var_ratios,
+            ess_treated=ess_t,
+            ess_control=ess_c,
         )
 
     def _bootstrap_interval(self, frame: pd.DataFrame) -> tuple[float, float]:
@@ -91,6 +120,8 @@ class BaseEstimator:
     def fit(self, frame: pd.DataFrame) -> CausalEstimate:
         prepared = self._prepare(frame)
         effect = float(self._estimate_effect(prepared))
+        se = getattr(self, "_last_se", None)
+        p_value = getattr(self, "_last_p_value", None)
         propensity = self._fit_propensity(prepared)
         weights = self._diagnostic_weights(prepared, propensity)
         diagnostics = self._build_diagnostics(prepared, propensity, weights=weights)
@@ -105,6 +136,8 @@ class BaseEstimator:
             treated_count=int(treatment.sum()),
             control_count=int((1 - treatment).sum()),
             diagnostics=diagnostics,
+            se=se,
+            p_value=p_value,
         )
 
     def sensitivity_analysis(
@@ -142,12 +175,20 @@ class BaseEstimator:
             )
 
         scale = outcome_std if outcome_std > 1e-12 else 1.0
+        e_val = compute_e_value(estimate.effect, outcome_std)
+        if estimate.ci_low is not None and estimate.ci_high is not None and not (estimate.ci_low <= 0.0 <= estimate.ci_high):
+            ci_bound_near_null = min(abs(estimate.ci_low), abs(estimate.ci_high))
+            e_val_ci = compute_e_value_ci(ci_bound_near_null, outcome_std)
+        else:
+            e_val_ci = 1.0
         return SensitivitySummary(
             bias_to_zero_effect=float(bias_to_zero_effect),
             bias_to_zero_ci=float(bias_to_zero_ci),
             standardized_bias_to_zero_effect=float(bias_to_zero_effect / scale),
             standardized_bias_to_zero_ci=float(bias_to_zero_ci / scale),
             scenarios=scenarios,
+            e_value=e_val,
+            e_value_ci=e_val_ci,
         )
 
     def subgroup_effects(
@@ -197,6 +238,8 @@ class RegressionAdjustmentEstimator(BaseEstimator):
         design = sm.add_constant(frame[[self.treatment_col, *self.confounders]])
         outcome = frame[self.outcome_col]
         model = sm.OLS(outcome, design).fit()
+        self._last_se = float(model.bse[self.treatment_col])
+        self._last_p_value = float(model.pvalues[self.treatment_col])
         return float(model.params[self.treatment_col])
 
 
@@ -210,6 +253,7 @@ class PropensityMatcher(BaseEstimator):
         caliper: float | None = 0.15,
         bootstrap_repeats: int = 40,
         bootstrap_seed: int = 42,
+        propensity_trim_bounds: tuple[float, float] | None = None,
     ) -> None:
         super().__init__(
             treatment_col,
@@ -218,6 +262,7 @@ class PropensityMatcher(BaseEstimator):
             estimand=estimand,
             bootstrap_repeats=bootstrap_repeats,
             bootstrap_seed=bootstrap_seed,
+            propensity_trim_bounds=propensity_trim_bounds,
         )
         self.caliper = caliper
 
@@ -258,6 +303,25 @@ class PropensityMatcher(BaseEstimator):
             weights[control_index] += 1.0
         return weights
 
+    def rosenbaum_sensitivity(
+        self,
+        frame: pd.DataFrame,
+        gamma_values: list[float] | None = None,
+    ) -> list[RosenbaumSensitivity]:
+        """Rosenbaum bounds for hidden-bias sensitivity on matched pairs."""
+        prepared = self._prepare(frame)
+        propensity = self._fit_propensity(prepared)
+        matched_pairs = self._matched_pairs(prepared, propensity)
+        differences = np.array([
+            float(prepared.iloc[t][self.outcome_col] - prepared.iloc[c][self.outcome_col])
+            for t, c in matched_pairs
+        ])
+        bounds = rosenbaum_bounds(differences, gamma_values)
+        return [
+            RosenbaumSensitivity(gamma=g, p_upper=p, significant_at_05=sig)
+            for g, p, sig in bounds
+        ]
+
 
 class IPWEstimator(BaseEstimator):
     weight_cap: float = 20.0
@@ -281,7 +345,27 @@ class IPWEstimator(BaseEstimator):
         weights = self._ipw_weights(treatment, propensity)
         treated_mean = np.average(outcome[treatment == 1], weights=weights[treatment == 1])
         control_mean = np.average(outcome[treatment == 0], weights=weights[treatment == 0])
-        return float(treated_mean - control_mean)
+        effect = float(treated_mean - control_mean)
+        # Hajek influence-function SE
+        n = len(outcome)
+        sum_w1 = weights[treatment == 1].sum()
+        sum_w0 = weights[treatment == 0].sum()
+        influence = np.where(
+            treatment == 1,
+            weights * (outcome - treated_mean) / sum_w1,
+            -weights * (outcome - control_mean) / sum_w0,
+        )
+        if n > 1:
+            self._last_se = float(np.sqrt(np.var(influence, ddof=1) * n))
+            if self._last_se > 1e-12:
+                z = effect / self._last_se
+                self._last_p_value = float(2.0 * (1.0 - norm.cdf(abs(z))))
+            else:
+                self._last_p_value = None
+        else:
+            self._last_se = None
+            self._last_p_value = None
+        return effect
 
     def _diagnostic_weights(self, frame: pd.DataFrame, propensity: np.ndarray) -> np.ndarray | None:
         treatment = frame[self.treatment_col].to_numpy(dtype=int)
@@ -304,9 +388,62 @@ class DoublyRobustEstimator(BaseEstimator):
         w1 = np.clip(1.0 / propensity, 0.0, self.weight_cap)
         w0 = np.clip(1.0 / (1.0 - propensity), 0.0, self.weight_cap)
         pseudo = mu1 - mu0 + treatment * (outcome - mu1) * w1 - (1 - treatment) * (outcome - mu0) * w0
-        return float(np.mean(pseudo))
+        effect = float(np.mean(pseudo))
+        # Influence-function analytic SE (semiparametric efficiency bound)
+        n = len(pseudo)
+        if n > 1:
+            self._last_se = float(np.sqrt(np.var(pseudo, ddof=1) / n))
+            if self._last_se > 1e-12:
+                z = effect / self._last_se
+                self._last_p_value = float(2.0 * (1.0 - norm.cdf(abs(z))))
+            else:
+                self._last_p_value = None
+        else:
+            self._last_se = None
+            self._last_p_value = None
+        return effect
 
     def _diagnostic_weights(self, frame: pd.DataFrame, propensity: np.ndarray) -> np.ndarray | None:
         treatment = frame[self.treatment_col].to_numpy(dtype=int)
         raw = np.where(treatment == 1, 1.0 / propensity, 1.0 / (1.0 - propensity))
         return np.clip(raw, 0.0, self.weight_cap)
+
+
+def run_placebo_test(
+    frame: pd.DataFrame,
+    *,
+    treatment_col: str,
+    placebo_outcome: str,
+    confounders: list[str],
+    bootstrap_repeats: int = 20,
+    matcher_caliper: float | None = 0.15,
+) -> list[PlaceboResult]:
+    """Run all estimators on a pre-treatment outcome as a falsification check.
+
+    All CIs should include zero if the method is valid for this dataset.
+    """
+    results: list[PlaceboResult] = []
+    estimators: list[BaseEstimator] = [
+        RegressionAdjustmentEstimator(treatment_col, placebo_outcome, confounders, bootstrap_repeats=bootstrap_repeats),
+        PropensityMatcher(treatment_col, placebo_outcome, confounders, caliper=matcher_caliper, bootstrap_repeats=bootstrap_repeats),
+        IPWEstimator(treatment_col, placebo_outcome, confounders, bootstrap_repeats=bootstrap_repeats),
+        DoublyRobustEstimator(treatment_col, placebo_outcome, confounders, bootstrap_repeats=bootstrap_repeats),
+    ]
+    for est in estimators:
+        estimate = est.fit(frame)
+        passes = (
+            estimate.ci_low is not None
+            and estimate.ci_high is not None
+            and estimate.ci_low <= 0.0 <= estimate.ci_high
+        )
+        results.append(
+            PlaceboResult(
+                placebo_outcome=placebo_outcome,
+                method=est.__class__.__name__,
+                effect=estimate.effect,
+                ci_low=estimate.ci_low,
+                ci_high=estimate.ci_high,
+                passes=passes,
+            )
+        )
+    return results

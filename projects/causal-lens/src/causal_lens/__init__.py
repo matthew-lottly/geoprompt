@@ -3,6 +3,7 @@ from causal_lens.estimators import (
     IPWEstimator,
     PropensityMatcher,
     RegressionAdjustmentEstimator,
+    run_placebo_test,
 )
 from causal_lens.data import (
     LALONDE_CONFOUNDERS,
@@ -14,6 +15,8 @@ from causal_lens.data import (
 from causal_lens.results import (
     CausalEstimate,
     DiagnosticSummary,
+    PlaceboResult,
+    RosenbaumSensitivity,
     SensitivitySummary,
     SubgroupEstimate,
 )
@@ -27,16 +30,19 @@ __all__ = [
     "DoublyRobustEstimator",
     "export_benchmark_artifacts",
     "export_dataset_artifacts",
+    "generate_synthetic_observational_data",
     "IPWEstimator",
     "LALONDE_CONFOUNDERS",
     "load_lalonde_benchmark",
     "load_monitoring_intervention_sample",
     "load_nhefs_complete_benchmark",
     "NHEFS_COMPLETE_CONFOUNDERS",
+    "PlaceboResult",
     "PropensityMatcher",
     "RegressionAdjustmentEstimator",
     "results_to_frame",
+    "RosenbaumSensitivity",
+    "run_placebo_test",
     "SensitivitySummary",
     "SubgroupEstimate",
-    "generate_synthetic_observational_data",
 ]
