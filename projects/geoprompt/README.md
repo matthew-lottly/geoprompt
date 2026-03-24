@@ -89,7 +89,7 @@ This section is a curated reference to major tool families. The full machine-rea
 | `raster_algebra` | Safe math expression on grid values | `expression` (uses `x`) |
 | `space_time_kriging` | Product-sum variogram space-time kriging | `value_column`, `time_column` |
 
-### Classification & Clustering (Tools 3, 41–43, 77–79, 90, 98, 187–188)
+### Classification & Clustering (Tools 3, 41–43, 77–79, 90, 98, 187–188, 529)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
@@ -103,6 +103,7 @@ This section is a curated reference to major tool families. The full machine-rea
 | `location_allocation` | P-median facility optimization | `p`, `demand_column` |
 | `dbscan` | DBSCAN with true distance matrix | `eps`, `min_samples` |
 | `hdbscan` | Hierarchical DBSCAN via mutual reachability MST | `min_cluster_size` |
+| `network_constrained_clustering` | Connected k-medoids over a k-NN graph | `n_clusters`, `k`, `max_iterations` |
 
 ### Spatial Statistics (Tools 10–11, 16–17, 52, 72–76, 86–87, 89, 91, 189–190, 521, 523, 527–528)
 
@@ -143,13 +144,28 @@ This section is a curated reference to major tool families. The full machine-rea
 | `geographically_weighted_pca` | Local PCA with spatial weights | `columns`, `n_components` |
 | `spatial_durbin_error_model` | SDEM with spatial error & lag-X spillovers | `lambda_init`, `max_iter` |
 
-### Density & Surface (Tools 18–19, 97)
+### Density & Surface (Tools 18–19, 97, 525)
 
 | Tool | Method | Key Parameters |
 |------|--------|---------------|
 | `kernel_density` | KDE with Silverman bandwidth & kernel selection | `kernel` (`epanechnikov`, `gaussian`, `quartic`) |
 | `standard_deviational_ellipse` | Weighted covariance ellipse | `weight_column` |
 | `point_pattern_intensity` | Kernel-smoothed intensity surface | `grid_resolution` |
+| `anisotropic_kernel_density` | Oriented Gaussian KDE with major/minor axes | `bandwidth`, `angle_column`, `ratio` |
+
+### Regionalization (Tools 129, 160–161, 262, 271, 287, 297–298, 524)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `max_p_regions` | Regionalization with endogenous region count | `floor_variable`, `floor_value` |
+| `skater_regionalization` | MST-based regionalization | `attribute_columns`, `n_regions` |
+| `azp_regionalization` | Automatic zoning procedure | `attribute_columns`, `n_regions` |
+| `soft_regionalization` | Fuzzy region membership assignment | `attribute_columns`, `n_regions` |
+| `regionalization_stability` | Region stability under perturbations | `attribute_columns`, `n_regions`, `n_runs` |
+| `regionalization_diagnostics` | Region compactness and balance review | `label_column` |
+| `regionalization_consensus` | Consensus labels from multiple partitions | `label_columns` |
+| `region_adjacency_summary` | Adjacency and border statistics by region | `label_column` |
+| `graph_coupled_space_time_regionalization` | Contiguous regions balancing spatial and temporal dissimilarity | `value_columns`, `time_column`, `n_regions` |
 
 ### Terrain & Hydrology (Tools 7–8, 92–95)
 
@@ -180,6 +196,17 @@ This section is a curated reference to major tool families. The full machine-rea
 | `service_area_polygons` | Dijkstra reachability → convex hull polygons |
 | `isochrones` | Travel-time contour rings from network origin |
 | `network_betweenness` | Brandes betweenness centrality on k-NN graph |
+
+### Anomaly Detection (Tools 406, 455, 473, 475, 478, 530)
+
+| Tool | Method | Key Parameters |
+|------|--------|---------------|
+| `spatial_anomaly_detector` | Isolation-forest-style anomaly detection | `columns`, `contamination` |
+| `spatial_outlier_ensemble` | Ensemble outlier scoring from multiple local diagnostics | `value_column`, `k` |
+| `spatial_bootstrap_confidence` | Bootstrap local uncertainty and tail-risk flags | `value_column`, `n_bootstrap` |
+| `spatial_permutation_test` | Monte Carlo anomaly/significance screening | `value_column`, `n_permutations` |
+| `spatial_silhouette_score` | Cluster-separation anomaly diagnostic | `label_column`, `distance_method` |
+| `spatial_envelope_anomaly` | Local multivariate envelope exceedance scoring | `value_columns`, `k`, `contamination` |
 
 ### Geometry Operations (Tools 23–30, 44–51, 194)
 

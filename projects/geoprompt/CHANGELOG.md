@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Documentation & Packaging
+- Refined package metadata in `pyproject.toml` with author metadata, project URLs, and clearer package description
+- Updated the README image to a PyPI-safe raw GitHub URL
+- Reworked installation guidance to distinguish base install from optional extras
+- Clarified that the README tool reference is curated and that the full inventory lives in `docs/tool-inventory.json`
+
+### Validation & Equations
+- Fixed `prompt_decay` to reject negative distances with a descriptive `ValueError`
+- Fixed `gravity_model` to validate non-positive friction before the zero-distance shortcut
+- Added dedicated equations audit coverage for variograms, directional helpers, scaling semantics, sigmoid saturation, and validation edge cases
+
+### New Tools (521–530) and Backfills
+- **169 `stream_power_index`** — SPI erosive power proxy for hydrologic energy mapping
+- **171 `network_betweenness`** — Brandes betweenness centrality on a k-nearest-neighbour graph
+- **521 `transport_aware_hotspot`** — accessibility-weighted adaptive hotspot detection
+- **522 `counterfactual_gwr`** — geographically weighted regression with counterfactual scenario analysis
+- **523 `topologically_regularized_spatial_scan`** — contiguity-penalized Kulldorff scan statistic
+- **524 `graph_coupled_space_time_regionalization`** — contiguous regionalization balancing attribute and temporal dissimilarity
+- **525 `anisotropic_kernel_density`** — oriented Gaussian kernel density with anisotropic bandwidths
+- **526 `spatial_durbin_error_model`** — SDEM with spatially lagged covariates and correlated error structure
+- **527 `wavelet_spatial_autocorrelation`** — multi-scale wavelet decomposition for local autocorrelation
+- **528 `multiscale_getis_ord`** — Gi* hotspot scoring across multiple distance bands
+- **529 `network_constrained_clustering`** — connected k-medoids clustering over a network graph
+- **530 `spatial_envelope_anomaly`** — local multivariate envelope anomaly detection
+
 ### New Tools (441–520): Novel Spatial Algorithms
 - **441 `gravity_flow_model`** — gravity-style spatial interaction flows
 - **442 `diffusion_kernel_smooth`** — heat-equation smoothing on a k-NN graph
