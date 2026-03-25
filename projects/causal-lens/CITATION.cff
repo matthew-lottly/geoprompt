@@ -3,16 +3,18 @@ message: "If you use this software, please cite it as below."
 type: software
 title: "CausalLens"
 abstract: >-
-  A Python toolkit for causal inference on observational tabular data,
-  providing regression adjustment, propensity matching, inverse probability
-  weighting, doubly robust estimation with cross-fitting, heterogeneous
-  treatment effect meta-learners, and integrated diagnostics including
-  balance checks, sensitivity analysis, E-values, and Rosenbaum bounds.
+  A unified, diagnostics-first Python toolkit for causal inference spanning
+  observational estimation, difference-in-differences, synthetic control,
+  instrumental variables (2SLS), sharp and fuzzy regression discontinuity
+  with robust bias-corrected inference, McCrary manipulation testing, and
+  structural bunching elasticity estimation. Includes cross-design Monte
+  Carlo simulation, public benchmark validation, sensitivity analysis,
+  E-values, Rosenbaum bounds, and manuscript-oriented exports.
 authors:
   - family-names: Powell
     given-names: Matthew
     orcid: ""
-version: "0.1.0"
+version: "0.5.0"
 date-released: "2026-03-24"
 license: MIT
 repository-code: "https://github.com/matthew-lottly/causal-lens"
@@ -22,4 +24,11 @@ keywords:
   - observational studies
   - doubly robust estimation
   - propensity score
+  - regression discontinuity
+  - difference-in-differences
+  - synthetic control
+  - instrumental variables
+  - bunching
+  - McCrary test
+  - Monte Carlo simulation
   - Python

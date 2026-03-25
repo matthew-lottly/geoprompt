@@ -12,7 +12,14 @@ Data science portfolio project for causal effect estimation, observational-study
 
 ## Overview
 
-CausalLens packages core causal-inference workflows for observational tabular data and quasi-experimental designs into a small, testable Python library. It is the first Python package to integrate observational estimators, panel methods, instrumental variables, sharp and fuzzy regression discontinuity with robust bias-corrected inference, McCrary manipulation testing, and structural bunching elasticity estimation through a unified diagnostics-first API. The contribution is a compact implementation that makes assumptions, benchmark evidence, and estimator comparison explicit enough to review.
+CausalLens packages core causal-inference workflows for observational tabular data and quasi-experimental designs into a small, testable Python library. It integrates observational estimators, panel methods, instrumental variables, sharp and fuzzy regression discontinuity with robust bias-corrected inference, McCrary manipulation testing, and structural bunching elasticity estimation through a unified diagnostics-first API. No existing Python package covers this combination of identification strategies with built-in diagnostic infrastructure. The contribution is a compact implementation that makes assumptions, benchmark evidence, and estimator comparison explicit enough to review.
+
+### What CausalLens Does Not Claim
+
+- CausalLens does not claim parity with rdrobust on bandwidth optimization or the full CCT inference pipeline.
+- CausalLens does not claim parity with EconML or DoubleML on ML-based nuisance estimation or heterogeneous treatment effects.
+- CausalLens does not claim parity with DoWhy on graph-based identification and refutation workflows.
+- CausalLens does not claim the bunching implementation matches the depth of the R `bunching` package on round-number corrections or notch designs.
 
 The current repository now uses four complementary evidence tracks:
 
