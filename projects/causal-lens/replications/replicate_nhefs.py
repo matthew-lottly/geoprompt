@@ -50,8 +50,8 @@ def main() -> None:
             "CI_high": round(result.ci_high, 2) if result.ci_high else None,
             "p_value": round(result.p_value, 4) if result.p_value else None,
         })
-        print(f"  {name:12s}  ATT = {result.effect:.2f} kg  "
-              f"SE = {result.se:.2f}" if result.se else "")
+        se_str = f"  SE = {result.se:.2f}" if result.se else ""
+        print(f"  {name:12s}  ATT = {result.effect:.2f} kg{se_str}")
 
     df = pd.DataFrame(rows)
     df.to_csv(OUTPUT_DIR / "nhefs_replication.csv", index=False)

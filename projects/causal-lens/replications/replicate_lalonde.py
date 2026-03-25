@@ -57,8 +57,8 @@ def main() -> None:
             "p_value": round(result.p_value, 4) if result.p_value else None,
             "Overlap_OK": result.diagnostics.overlap_ok,
         })
-        print(f"  {name:12s}  ATT = ${result.effect:,.0f}  "
-              f"SE = {result.se:,.0f}" if result.se else "")
+        se_str = f"  SE = {result.se:,.0f}" if result.se else ""
+        print(f"  {name:12s}  ATT = ${result.effect:,.0f}{se_str}")
 
     df = pd.DataFrame(rows)
     df.to_csv(OUTPUT_DIR / "lalonde_replication.csv", index=False)
