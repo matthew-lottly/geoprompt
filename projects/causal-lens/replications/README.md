@@ -2,7 +2,8 @@
 
 Standalone scripts that reproduce the key results from the CausalLens software paper.
 Each script is self-contained and writes outputs to `replications/outputs/`.
-A single runner script is also provided to execute the full stack from one command.
+A single runner script is also provided to execute the full stack from one command
+and then regenerate the manuscript-ready tables and figures under `outputs/paper/`.
 
 ## Scripts
 
@@ -31,4 +32,6 @@ python replications/replicate_cross_design.py
 
 ## Outputs
 
-All CSVs are written to `replications/outputs/` and are git-ignored.
+- Replication CSVs are written to `replications/outputs/` and are git-ignored.
+- The one-command runner also refreshes the manuscript-ready bundle under `outputs/paper/`.
+- Supporting benchmark, comparison, and stability tables are written under `outputs/tables/`.

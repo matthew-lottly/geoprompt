@@ -23,13 +23,20 @@ def main() -> None:
 
     full = "--full" in sys.argv
     if full:
-        config = SimulationConfig(n_replications=200, bootstrap_repeats=15)
+        config = SimulationConfig(
+            n_replications=200,
+            bootstrap_repeats=15,
+            verbose=True,
+            progress_every=10,
+        )
         print("Running FULL simulation (200 reps × 5 DGPs × 3 sample sizes)...\n")
     else:
         config = SimulationConfig(
             n_replications=50,
             sample_sizes=(200, 500, 1000),
             bootstrap_repeats=10,
+            verbose=True,
+            progress_every=5,
         )
         print("Running QUICK simulation (50 reps × 5 DGPs × 3 sample sizes)...\n")
 

@@ -270,6 +270,8 @@ class SimulationConfig:
     confounders: tuple[str, ...] = ("x1", "x2")
     dgp_names: tuple[str, ...] | None = None
     seed: int = 42
+    verbose: bool = False
+    progress_every: int | None = None
 
 
 def run_simulation(config: SimulationConfig | None = None) -> pd.DataFrame:
@@ -286,10 +288,19 @@ def run_simulation(config: SimulationConfig | None = None) -> pd.DataFrame:
     confounders = list(config.confounders)
     rng = np.random.default_rng(config.seed)
     rows: list[dict] = []
+    total_blocks = len(dgp_names) * len(config.sample_sizes)
+    block_index = 0
 
     for dgp_name in dgp_names:
         dgp_fn = DGP_REGISTRY[dgp_name]
         for n in config.sample_sizes:
+            block_index += 1
+            if config.verbose:
+                print(
+                    f"[{block_index}/{total_blocks}] Starting DGP={dgp_name}, n={n}, "
+                    f"reps={config.n_replications}",
+                    flush=True,
+                )
             for rep in range(config.n_replications):
                 data = dgp_fn(n, rng, config.true_effect)
                 estimators = _build_estimators(confounders, config.bootstrap_repeats)
@@ -326,6 +337,19 @@ def run_simulation(config: SimulationConfig | None = None) -> pd.DataFrame:
                             "covered": np.nan,
                             "true_effect": config.true_effect,
                         })
+                if config.verbose and config.progress_every is not None:
+                    if (rep + 1) % config.progress_every == 0 or rep + 1 == config.n_replications:
+                        print(
+                            f"[{block_index}/{total_blocks}] Completed {rep + 1}/{config.n_replications} "
+                            f"replications for DGP={dgp_name}, n={n}",
+                            flush=True,
+                        )
+
+            if config.verbose:
+                print(
+                    f"[{block_index}/{total_blocks}] Finished DGP={dgp_name}, n={n}",
+                    flush=True,
+                )
 
     return pd.DataFrame(rows)
 

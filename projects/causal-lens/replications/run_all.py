@@ -30,6 +30,15 @@ def _run_script(script_name: str, extra_args: list[str] | None = None) -> None:
     print(f"\n=== Completed {script_name} in {elapsed:.1f}s ===\n")
 
 
+def _run_reporting_bundle() -> None:
+    command = [sys.executable, "-m", "causal_lens.cli"]
+    start = time.perf_counter()
+    print("\n=== Generating manuscript-ready report artifacts ===\n")
+    subprocess.run(command, check=True)
+    elapsed = time.perf_counter() - start
+    print(f"\n=== Completed manuscript-ready report artifacts in {elapsed:.1f}s ===\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Run the CausalLens replication scripts from one command."
@@ -54,7 +63,10 @@ def main() -> None:
         simulation_args = ["--full"] if args.full else None
         _run_script("replicate_simulation.py", simulation_args)
 
+    _run_reporting_bundle()
+
     print("Replication outputs are available in replications/outputs/.")
+    print("Manuscript-ready tables and figures are available in outputs/paper/.")
 
 
 if __name__ == "__main__":
