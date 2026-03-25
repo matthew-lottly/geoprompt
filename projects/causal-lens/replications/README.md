@@ -2,11 +2,13 @@
 
 Standalone scripts that reproduce the key results from the CausalLens software paper.
 Each script is self-contained and writes outputs to `replications/outputs/`.
+A single runner script is also provided to execute the full stack from one command.
 
 ## Scripts
 
 | Script | Benchmark | Expected Runtime |
 |--------|-----------|-----------------|
+| `run_all.py` | Runs the full replication stack | <1 min without simulation; 3-20 min with simulation |
 | `replicate_lalonde.py` | Dehejia & Wahba (1999) job-training ATT | ~2 min |
 | `replicate_nhefs.py` | Hernán & Robins (2020) NHEFS weight gain | ~1 min |
 | `replicate_simulation.py` | Monte Carlo bias/RMSE/coverage study | 3–20 min |
@@ -17,6 +19,9 @@ Each script is self-contained and writes outputs to `replications/outputs/`.
 ```bash
 # From the project root:
 pip install -e .
+python replications/run_all.py --skip-simulation
+python replications/run_all.py              # includes quick simulation
+python replications/run_all.py --full       # includes full simulation
 python replications/replicate_lalonde.py
 python replications/replicate_nhefs.py
 python replications/replicate_simulation.py          # quick mode

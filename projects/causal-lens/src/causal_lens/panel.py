@@ -6,13 +6,33 @@ observed in both pre-treatment and post-treatment periods.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
 from scipy.stats import norm
 
 from causal_lens.results import StaggeredDiDEstimate
+
+
+def _named_series(values: Any, names: list[str]) -> pd.Series:
+    """Return statsmodels outputs as a name-aligned pandas Series.
+
+    Some wrapped statsmodels results can fail to construct a labeled Series
+    directly under newer pandas versions. Normalizing through NumPy avoids that
+    mismatch while preserving the model's exogenous names.
+    """
+    return pd.Series(np.asarray(values, dtype=float), index=names)
+
+
+def _named_frame(values: Any, names: list[str]) -> pd.DataFrame:
+    """Return statsmodels 2-D outputs as a name-aligned pandas DataFrame."""
+    return pd.DataFrame(np.asarray(values, dtype=float), index=names)
+
+
+def _float_cell(frame: pd.DataFrame, row_label: str, column_index: int) -> float:
+    """Return a scalar float from a labeled DataFrame cell."""
+    return float(cast(float, frame.loc[row_label].iloc[column_index]))
 
 
 @dataclass(frozen=True)
@@ -137,12 +157,17 @@ class DifferenceInDifferences:
             cov_kwds={"groups": frame[self.cluster_col].to_numpy()},
         )
 
-        effect = float(model.params["treat_x_post"])
-        se = float(model.bse["treat_x_post"])
-        p_value = float(model.pvalues["treat_x_post"])
-        ci = model.conf_int().loc["treat_x_post"]
-        ci_low = float(ci[0])
-        ci_high = float(ci[1])
+        param_names = list(model.model.exog_names)
+        params = _named_series(model.params, param_names)
+        bse = _named_series(model.bse, param_names)
+        pvalues = _named_series(model.pvalues, param_names)
+        conf_int = _named_frame(model.conf_int(), param_names)
+
+        effect = float(params["treat_x_post"])
+        se = float(bse["treat_x_post"])
+        p_value = float(pvalues["treat_x_post"])
+        ci_low = _float_cell(conf_int, "treat_x_post", 0)
+        ci_high = _float_cell(conf_int, "treat_x_post", 1)
 
         n_treated = int(frame[self.treatment_col].sum())
         n_control = int((1 - frame[self.treatment_col]).sum())
@@ -201,13 +226,15 @@ class DifferenceInDifferences:
 
         x_df = pd.DataFrame(np.column_stack(x_parts), columns=col_names)
         model = sm.OLS(outcome, x_df).fit()
+        tvalues = _named_series(model.tvalues, col_names)
+        pvalues = _named_series(model.pvalues, col_names)
 
         # Joint F-test on the interaction terms
         if interact_cols:
             restriction = " = ".join(interact_cols) + " = 0" if len(interact_cols) == 1 else None
             if len(interact_cols) == 1:
-                f_stat = float(model.tvalues[interact_cols[0]] ** 2)
-                p_val = float(model.pvalues[interact_cols[0]])
+                f_stat = float(tvalues[interact_cols[0]] ** 2)
+                p_val = float(pvalues[interact_cols[0]])
             else:
                 r_matrix = np.zeros((len(interact_cols), len(col_names)))
                 for i, col in enumerate(interact_cols):

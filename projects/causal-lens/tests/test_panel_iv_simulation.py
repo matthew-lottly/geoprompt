@@ -67,6 +67,26 @@ def _did_multi_period_dataset(
     return pd.DataFrame(rows)
 
 
+def _did_cross_design_dataset(n_units: int = 100, seed: int = 42) -> pd.DataFrame:
+    """Match the multi-period synthetic DiD structure used in replication."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    for i in range(n_units):
+        treated = int(i >= n_units // 2)
+        baseline = rng.normal(5.0, 1.0)
+        for t in range(4):
+            post = int(t >= 2)
+            y = baseline + 0.5 * t + 2.0 * treated * post + rng.normal(0, 0.3)
+            rows.append({
+                "unit": i,
+                "time": t,
+                "treatment": treated,
+                "post": post,
+                "outcome": y,
+            })
+    return pd.DataFrame(rows)
+
+
 def _synth_control_dataset(
     n_controls: int = 10, n_periods: int = 20, treatment_time: int = 10,
     effect: float = 5.0, seed: int = 42,
@@ -161,6 +181,16 @@ def test_did_parallel_trends() -> None:
     trends = did.parallel_trends_test(data)
     assert trends["p_value"] > 0.05  # parallel trends should hold
     assert trends["n_periods"] >= 2
+
+
+def test_did_fit_handles_multi_period_integer_clusters() -> None:
+    data = _did_cross_design_dataset()
+    did = DifferenceInDifferences(
+        "unit", "time", "treatment", "outcome", "post", cluster_col="unit"
+    )
+    result = did.fit(data)
+    assert result.se is not None and result.se > 0
+    assert result.p_value is not None
 
 
 # ---------------------------------------------------------------------------

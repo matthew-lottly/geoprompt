@@ -82,7 +82,9 @@ def test_export_benchmark_artifacts_writes_files(tmp_path: Path) -> None:
     export_benchmark_artifacts(_sample_payload(), tmp_path)
     csv_path = tmp_path / "tables" / "cross_dataset_benchmark_summary.csv"
     md_path = tmp_path / "tables" / "cross_dataset_benchmark_summary.md"
+    tex_path = tmp_path / "tables" / "cross_dataset_benchmark_summary.tex"
     assert csv_path.exists()
     assert md_path.exists()
+    assert tex_path.exists()
     frame = pd.read_csv(csv_path)
     assert len(frame) == 4

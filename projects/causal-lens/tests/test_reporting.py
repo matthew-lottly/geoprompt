@@ -71,6 +71,7 @@ def test_export_dataset_artifacts_writes_tables_and_charts(tmp_path: Path) -> No
     export_dataset_artifacts("real_dataset", payload, tmp_path)
     assert (tmp_path / "tables" / "real_dataset_estimator_summary.csv").exists()
     assert (tmp_path / "tables" / "real_dataset_estimator_summary.md").exists()
+    assert (tmp_path / "tables" / "real_dataset_estimator_summary.tex").exists()
     assert (tmp_path / "charts" / "real_dataset_estimator_comparison.png").exists()
     assert (tmp_path / "charts" / "real_dataset_balance_summary.png").exists()
     assert (tmp_path / "charts" / "real_dataset_sensitivity_curve.png").exists()

@@ -1,18 +1,18 @@
 | dataset | method | effect | ci_width | overlap_ok | mean_abs_balance_before | mean_abs_balance_after | balance_improvement |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| real_dataset | RegressionAdjustmentEstimator | -0.044435779119835817 | 0.005914584810413251 | True | 0.00782780363856473 | 0.00782780363856473 | 0.0 |
-| real_dataset | PropensityMatcher | -0.044583333333333336 | 0.028500000000000004 | True | 0.00782780363856473 | 0.007996162762590386 | -0.00016835912402565593 |
-| real_dataset | IPWEstimator | -0.04460196135502753 | 0.009517266707450303 | True | 0.00782780363856473 | 0.0048288480832506244 | 0.0029989555553141057 |
-| real_dataset | DoublyRobustEstimator | -0.04444583349959205 | 0.006648321902360491 | True | 0.00782780363856473 | 0.0048288480832506244 | 0.0029989555553141057 |
-| lalonde_public_benchmark | RegressionAdjustmentEstimator | 1480.6609612042494 | 2314.750146952764 | True | 0.40968470012688657 | 0.40968470012688657 | 0.0 |
-| lalonde_public_benchmark | PropensityMatcher | 1429.146070833333 | 2475.1871088069224 | True | 0.40968470012688657 | 0.060820366670448454 | 0.34886433345643814 |
-| lalonde_public_benchmark | IPWEstimator | 1463.9472999310256 | 3463.2469290685654 | True | 0.40968470012688657 | 0.0958671379088994 | 0.3138175622179872 |
-| lalonde_public_benchmark | DoublyRobustEstimator | 1709.503487405228 | 2042.6325840705395 | True | 0.40968470012688657 | 0.09751886548992271 | 0.31216583463696385 |
-| nhefs_public_benchmark | RegressionAdjustmentEstimator | 3.3341674140824518 | 1.690209998744685 | True | 0.1521322101281169 | 0.1521322101281169 | 0.0 |
-| nhefs_public_benchmark | PropensityMatcher | 3.2117884332647817 | 1.8937134814032373 | True | 0.1521322101281169 | 0.029879113398767032 | 0.12225309672934986 |
-| nhefs_public_benchmark | IPWEstimator | 3.2634978711907743 | 1.905387461090343 | True | 0.1521322101281169 | 0.012853630864701801 | 0.13927857926341508 |
-| nhefs_public_benchmark | DoublyRobustEstimator | 3.293647427944588 | 1.9007692649058097 | True | 0.1521322101281169 | 0.012853630864701768 | 0.13927857926341514 |
-| synthetic_validation_dataset | RegressionAdjustmentEstimator | 1.9846249321644263 | 0.42406031970839786 | True | 0.4101570945338573 | 0.4101570945338573 | 0.0 |
-| synthetic_validation_dataset | PropensityMatcher | 1.7069487424995728 | 1.0049324762910719 | True | 0.4101570945338573 | 0.05052043831836204 | 0.35963665621549523 |
-| synthetic_validation_dataset | IPWEstimator | 1.927137190707402 | 0.5831585047425085 | True | 0.4101570945338573 | 0.01574644379960979 | 0.3944106507342475 |
-| synthetic_validation_dataset | DoublyRobustEstimator | 1.9354540855590772 | 0.4195612187945641 | True | 0.4101570945338573 | 0.015746443799608996 | 0.3944106507342483 |
+| real_dataset | Regression adjustment | -0.044 | 0.006 | Yes | 0.008 | 0.008 | 0.000 |
+| real_dataset | Propensity matching | -0.045 | 0.029 | Yes | 0.008 | 0.008 | -0.000 |
+| real_dataset | IPW | -0.045 | 0.010 | Yes | 0.008 | 0.005 | 0.003 |
+| real_dataset | Doubly robust | -0.044 | 0.007 | Yes | 0.008 | 0.005 | 0.003 |
+| lalonde_public_benchmark | Regression adjustment | 1,480.661 | 2,314.750 | Yes | 0.410 | 0.410 | 0.000 |
+| lalonde_public_benchmark | Propensity matching | 1,429.146 | 2,475.187 | Yes | 0.410 | 0.061 | 0.349 |
+| lalonde_public_benchmark | IPW | 1,463.947 | 3,463.247 | Yes | 0.410 | 0.096 | 0.314 |
+| lalonde_public_benchmark | Doubly robust | 1,709.503 | 2,042.633 | Yes | 0.410 | 0.098 | 0.312 |
+| nhefs_public_benchmark | Regression adjustment | 3.334 | 1.690 | Yes | 0.152 | 0.152 | 0.000 |
+| nhefs_public_benchmark | Propensity matching | 3.212 | 1.894 | Yes | 0.152 | 0.030 | 0.122 |
+| nhefs_public_benchmark | IPW | 3.263 | 1.905 | Yes | 0.152 | 0.013 | 0.139 |
+| nhefs_public_benchmark | Doubly robust | 3.294 | 1.901 | Yes | 0.152 | 0.013 | 0.139 |
+| synthetic_validation_dataset | Regression adjustment | 1.985 | 0.424 | Yes | 0.410 | 0.410 | 0.000 |
+| synthetic_validation_dataset | Propensity matching | 1.707 | 1.005 | Yes | 0.410 | 0.051 | 0.360 |
+| synthetic_validation_dataset | IPW | 1.927 | 0.583 | Yes | 0.410 | 0.016 | 0.394 |
+| synthetic_validation_dataset | Doubly robust | 1.935 | 0.420 | Yes | 0.410 | 0.016 | 0.394 |

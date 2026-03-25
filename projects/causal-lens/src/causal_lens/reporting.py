@@ -5,7 +5,28 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+import numpy as np
 import pandas as pd
+
+
+CHART_DPI = 300
+PALETTE = {
+    "ink": "#1F2A44",
+    "blue": "#4C78A8",
+    "teal": "#4E9F8A",
+    "ochre": "#C58B39",
+    "rose": "#B75D69",
+    "grid": "#D9DEE7",
+    "band": "#AFC5E4",
+}
+METHOD_LABELS = {
+    "RegressionAdjustmentEstimator": "Regression adjustment",
+    "PropensityMatcher": "Propensity matching",
+    "IPWEstimator": "IPW",
+    "DoublyRobustEstimator": "Doubly robust",
+    "DifferenceInDifferences": "Difference-in-differences",
+}
 
 
 def results_to_frame(results: list[dict]) -> pd.DataFrame:
@@ -34,11 +55,16 @@ def results_to_frame(results: list[dict]) -> pd.DataFrame:
 
 
 def subgroup_to_frame(subgroups: list[dict]) -> pd.DataFrame:
+    if not subgroups:
+        return pd.DataFrame(columns=["subgroup", "rows", "treated_count", "control_count", "effect", "ci_low", "ci_high"])
     return pd.DataFrame(subgroups)
 
 
 def sensitivity_to_frame(summary: dict) -> pd.DataFrame:
-    return pd.DataFrame(summary["scenarios"])
+    scenarios = summary.get("scenarios", [])
+    if not scenarios:
+        return pd.DataFrame(columns=["bias", "adjusted_effect", "adjusted_ci_low", "adjusted_ci_high"])
+    return pd.DataFrame(scenarios)
 
 
 def export_dataset_artifacts(dataset_key: str, payload: dict, output_dir: Path) -> None:
@@ -55,11 +81,13 @@ def export_dataset_artifacts(dataset_key: str, payload: dict, output_dir: Path) 
     subgroup_csv = tables_dir / f"{dataset_key}_subgroup_summary.csv"
     sensitivity_csv = tables_dir / f"{dataset_key}_sensitivity_summary.csv"
     results_md = tables_dir / f"{dataset_key}_estimator_summary.md"
+    results_tex = tables_dir / f"{dataset_key}_estimator_summary.tex"
 
     results_frame.to_csv(results_csv, index=False)
     subgroup_frame.to_csv(subgroup_csv, index=False)
     sensitivity_frame.to_csv(sensitivity_csv, index=False)
     results_md.write_text(_frame_to_markdown(results_frame), encoding="utf-8")
+    results_tex.write_text(_frame_to_latex(results_frame, caption=f"{_display_name(dataset_key)} estimator summary.", label=f"tab:{dataset_key}-estimators"), encoding="utf-8")
 
     _plot_estimator_comparison(
         results_frame,
@@ -100,8 +128,10 @@ def export_benchmark_artifacts(report_payload: dict, output_dir: Path) -> None:
     benchmark_frame = benchmark_to_frame(report_payload)
     benchmark_csv = tables_dir / "cross_dataset_benchmark_summary.csv"
     benchmark_md = tables_dir / "cross_dataset_benchmark_summary.md"
+    benchmark_tex = tables_dir / "cross_dataset_benchmark_summary.tex"
     benchmark_frame.to_csv(benchmark_csv, index=False)
     benchmark_md.write_text(_frame_to_markdown(benchmark_frame), encoding="utf-8")
+    benchmark_tex.write_text(_frame_to_latex(benchmark_frame, caption="Cross-dataset benchmark summary.", label="tab:cross-dataset-benchmarks"), encoding="utf-8")
 
 
 def benchmark_to_frame(report_payload: dict) -> pd.DataFrame:
@@ -135,50 +165,70 @@ def _plot_estimator_comparison(results_frame: pd.DataFrame, title: str, output_p
     ci_high = frame["ci_high"].astype(float).to_numpy()
     lower = (effect - ci_low).clip(min=0.0)
     upper = (ci_high - effect).clip(min=0.0)
-    plt.figure(figsize=(8.5, 4.8))
-    plt.barh(frame["method"], effect, color="#476C9B")
-    plt.errorbar(effect, frame["method"], xerr=[lower, upper], fmt="none", ecolor="#1F2A44", capsize=4)
-    plt.axvline(0.0, color="#A44A3F", linestyle="--", linewidth=1.6)
-    plt.title(title)
-    plt.xlabel("Estimated effect")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=160)
-    plt.close()
+    y_positions = np.arange(len(frame))
+    labels = [_clean_method_name(method) for method in frame["method"]]
+    fig, ax = plt.subplots(figsize=(8.6, max(4.6, 0.72 * len(frame) + 1.2)))
+    _apply_publication_style(ax)
+    ax.hlines(y_positions, ci_low, ci_high, color=PALETTE["ink"], linewidth=2.0, zorder=2)
+    ax.scatter(effect, y_positions, s=60, color=PALETTE["blue"], edgecolor="white", linewidth=0.8, zorder=3)
+    ax.axvline(0.0, color=PALETTE["rose"], linestyle="--", linewidth=1.4)
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Estimated effect with 95% confidence interval")
+    ax.set_title(title, loc="left", pad=10)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_balance_summary(results_frame: pd.DataFrame, title: str, output_path: Path) -> None:
     frame = results_frame.copy()
-    x_positions = range(len(frame))
-    width = 0.38
-    plt.figure(figsize=(8.8, 4.8))
-    plt.bar([position - width / 2 for position in x_positions], frame["mean_abs_balance_before"], width=width, label="Before", color="#C96E35")
-    plt.bar([position + width / 2 for position in x_positions], frame["mean_abs_balance_after"], width=width, label="After", color="#4C8B72")
-    plt.xticks(list(x_positions), frame["method"], rotation=20, ha="right")
-    plt.ylabel("Mean absolute SMD")
-    plt.title(title)
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=160)
-    plt.close()
+    frame["method_label"] = frame["method"].map(_clean_method_name)
+    frame = frame.sort_values("mean_abs_balance_before", ascending=True)
+    y_positions = np.arange(len(frame))
+    before = frame["mean_abs_balance_before"].astype(float).to_numpy()
+    after = frame["mean_abs_balance_after"].astype(float).to_numpy()
+    fig, ax = plt.subplots(figsize=(8.6, max(4.6, 0.72 * len(frame) + 1.2)))
+    _apply_publication_style(ax)
+    ax.hlines(y_positions, after, before, color=PALETTE["grid"], linewidth=2.2, zorder=1)
+    ax.scatter(before, y_positions, s=52, color=PALETTE["ochre"], label="Before adjustment", zorder=3)
+    ax.scatter(after, y_positions, s=52, color=PALETTE["teal"], label="After adjustment", zorder=3)
+    ax.axvline(0.1, color=PALETTE["rose"], linestyle=":", linewidth=1.2)
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(frame["method_label"])
+    ax.set_xlabel("Mean absolute standardized mean difference")
+    ax.set_title(title, loc="left", pad=10)
+    ax.legend(frameon=False, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_sensitivity_summary(sensitivity_frame: pd.DataFrame, title: str, output_path: Path) -> None:
-    plt.figure(figsize=(8.5, 4.8))
-    plt.plot(sensitivity_frame["bias"], sensitivity_frame["adjusted_effect"], marker="o", color="#8C4C7D", linewidth=2.0)
-    plt.fill_between(
+    fig, ax = plt.subplots(figsize=(8.4, 4.9))
+    _apply_publication_style(ax)
+    ax.plot(
+        sensitivity_frame["bias"],
+        sensitivity_frame["adjusted_effect"],
+        marker="o",
+        markersize=5.5,
+        color=PALETTE["ink"],
+        linewidth=2.2,
+    )
+    ax.fill_between(
         sensitivity_frame["bias"],
         sensitivity_frame["adjusted_ci_low"],
         sensitivity_frame["adjusted_ci_high"],
-        color="#D8B4D0",
-        alpha=0.35,
+        color=PALETTE["band"],
+        alpha=0.45,
     )
-    plt.axhline(0.0, color="#A44A3F", linestyle="--", linewidth=1.6)
-    plt.title(title)
-    plt.xlabel("Additive bias")
-    plt.ylabel("Adjusted effect")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=160)
-    plt.close()
+    ax.axhline(0.0, color=PALETTE["rose"], linestyle="--", linewidth=1.4)
+    ax.set_title(title, loc="left", pad=10)
+    ax.set_xlabel("Additive hidden-bias shift")
+    ax.set_ylabel("Adjusted effect")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
+    plt.close(fig)
 
 
 def _plot_subgroup_effects(subgroup_frame: pd.DataFrame, title: str, output_path: Path) -> None:
@@ -188,17 +238,19 @@ def _plot_subgroup_effects(subgroup_frame: pd.DataFrame, title: str, output_path
     ci_high = frame["ci_high"].astype(float).to_numpy()
     lower = (effect - ci_low).clip(min=0.0)
     upper = (ci_high - effect).clip(min=0.0)
-    y_positions = list(range(len(frame)))
-    plt.figure(figsize=(9.0, 5.2))
-    plt.barh(y_positions, effect, color="#5B7C99")
-    plt.errorbar(effect, y_positions, xerr=[lower, upper], fmt="none", ecolor="#22324A", capsize=4)
-    plt.axvline(0.0, color="#A44A3F", linestyle="--", linewidth=1.6)
-    plt.title(title)
-    plt.xlabel("Estimated effect")
-    plt.yticks(y_positions, frame["subgroup"])
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=160)
-    plt.close()
+    y_positions = np.arange(len(frame))
+    fig, ax = plt.subplots(figsize=(8.8, max(4.8, 0.72 * len(frame) + 1.2)))
+    _apply_publication_style(ax)
+    ax.hlines(y_positions, ci_low, ci_high, color=PALETTE["ink"], linewidth=2.0, zorder=2)
+    ax.scatter(effect, y_positions, s=60, color=PALETTE["teal"], edgecolor="white", linewidth=0.8, zorder=3)
+    ax.axvline(0.0, color=PALETTE["rose"], linestyle="--", linewidth=1.4)
+    ax.set_title(title, loc="left", pad=10)
+    ax.set_xlabel("Estimated effect with 95% confidence interval")
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels(frame["subgroup"])
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
+    plt.close(fig)
 
 
 def export_propensity_overlap(
@@ -210,16 +262,35 @@ def export_propensity_overlap(
     """Export a propensity-score overlap histogram by treatment group."""
     import numpy as np
 
-    fig, ax = plt.subplots(figsize=(8.5, 4.8))
-    bins = np.linspace(float(propensity.min()), float(propensity.max()), 35)
-    ax.hist(propensity[treatment == 1], bins=bins, alpha=0.55, label="Treated", color="#476C9B", density=True)
-    ax.hist(propensity[treatment == 0], bins=bins, alpha=0.55, label="Control", color="#C96E35", density=True)
+    fig, ax = plt.subplots(figsize=(8.4, 4.9))
+    _apply_publication_style(ax)
+    bins = np.linspace(float(propensity.min()), float(propensity.max()), 28)
+    ax.hist(
+        propensity[treatment == 1],
+        bins=bins,
+        alpha=0.55,
+        label="Treated",
+        color=PALETTE["blue"],
+        density=True,
+        edgecolor="white",
+        linewidth=0.5,
+    )
+    ax.hist(
+        propensity[treatment == 0],
+        bins=bins,
+        alpha=0.55,
+        label="Control",
+        color=PALETTE["ochre"],
+        density=True,
+        edgecolor="white",
+        linewidth=0.5,
+    )
     ax.set_xlabel("Propensity score")
     ax.set_ylabel("Density")
-    ax.set_title(title)
-    ax.legend()
+    ax.set_title(title, loc="left", pad=10)
+    ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=160)
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -248,23 +319,26 @@ def _plot_love(
     output_path: Path,
 ) -> None:
     """Love plot: covariate-level |SMD| before and after adjustment."""
-    covariates = list(balance_before.keys())
+    covariates = sorted(balance_before.keys(), key=lambda covariate: abs(balance_before[covariate]), reverse=True)
     y_positions = list(range(len(covariates)))
     abs_before = [abs(balance_before[c]) for c in covariates]
     abs_after = [abs(balance_after[c]) for c in covariates]
 
-    fig, ax = plt.subplots(figsize=(8.5, max(4.8, 0.4 * len(covariates))))
-    ax.scatter(abs_before, y_positions, marker="x", s=60, color="#C96E35", label="Unadjusted", zorder=3)
-    ax.scatter(abs_after, y_positions, marker="o", s=60, color="#4C8B72", label="Adjusted", zorder=3)
-    ax.axvline(0.1, color="#A44A3F", linestyle="--", linewidth=1.2, label="|SMD| = 0.1")
-    ax.axvline(0.25, color="#A44A3F", linestyle=":", linewidth=1.0, alpha=0.6, label="|SMD| = 0.25")
+    fig, ax = plt.subplots(figsize=(8.4, max(4.8, 0.52 * len(covariates) + 1.1)))
+    _apply_publication_style(ax)
+    for y_position, before_value, after_value in zip(y_positions, abs_before, abs_after):
+        ax.hlines(y_position, min(before_value, after_value), max(before_value, after_value), color=PALETTE["grid"], linewidth=2.0, zorder=1)
+    ax.scatter(abs_before, y_positions, marker="o", s=52, color=PALETTE["ochre"], label="Before adjustment", zorder=3)
+    ax.scatter(abs_after, y_positions, marker="o", s=52, color=PALETTE["teal"], label="After adjustment", zorder=3)
+    ax.axvline(0.1, color=PALETTE["rose"], linestyle="--", linewidth=1.2, label="|SMD| = 0.1")
+    ax.axvline(0.25, color=PALETTE["rose"], linestyle=":", linewidth=1.0, alpha=0.7, label="|SMD| = 0.25")
     ax.set_yticks(y_positions)
     ax.set_yticklabels(covariates)
     ax.set_xlabel("Absolute standardized mean difference")
-    ax.set_title(title)
-    ax.legend(loc="upper right", fontsize=8)
+    ax.set_title(title, loc="left", pad=10)
+    ax.legend(loc="lower right", frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(output_path, dpi=160)
+    fig.savefig(output_path, dpi=CHART_DPI, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -273,11 +347,68 @@ def _display_name(dataset_key: str) -> str:
 
 
 def _frame_to_markdown(frame: pd.DataFrame) -> str:
-    columns = list(frame.columns)
+    formatted = _format_table_frame(frame)
+    columns = list(formatted.columns)
     header = "| " + " | ".join(columns) + " |"
     divider = "| " + " | ".join(["---"] * len(columns)) + " |"
     rows = [header, divider]
-    for _, row in frame.iterrows():
+    for _, row in formatted.iterrows():
         values = [str(row[column]) for column in columns]
         rows.append("| " + " | ".join(values) + " |")
     return "\n".join(rows) + "\n"
+
+
+def _frame_to_latex(frame: pd.DataFrame, caption: str, label: str) -> str:
+    formatted = _format_table_frame(frame)
+    return formatted.to_latex(index=False, escape=False, caption=caption, label=label)
+
+
+def _format_table_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    formatted = frame.copy()
+    for column in formatted.columns:
+        if column == "method":
+            formatted[column] = formatted[column].map(_clean_method_name)
+            continue
+        if pd.api.types.is_bool_dtype(formatted[column]):
+            formatted[column] = formatted[column].map(lambda value: "Yes" if bool(value) else "No")
+            continue
+        if pd.api.types.is_numeric_dtype(formatted[column]):
+            formatted[column] = formatted[column].map(lambda value: _format_numeric_value(column, value))
+    return formatted
+
+
+def _format_numeric_value(column: str, value: object) -> str:
+    if pd.isna(value):
+        return ""
+    numeric_value = float(value)
+    lower_column = column.lower()
+    if any(token in lower_column for token in ["count", "rows", "ess"]):
+        return f"{numeric_value:,.0f}" if numeric_value >= 100 else f"{numeric_value:.1f}".rstrip("0").rstrip(".")
+    if "p_value" in lower_column:
+        return "<0.001" if numeric_value < 0.001 else f"{numeric_value:.3f}"
+    if "effect" in lower_column or "ci_" in lower_column:
+        return f"{numeric_value:,.3f}" if abs(numeric_value) >= 100 else f"{numeric_value:.3f}"
+    if "balance" in lower_column or "width" in lower_column or "bias" in lower_column or lower_column == "se":
+        return f"{numeric_value:.3f}"
+    return f"{numeric_value:.3f}"
+
+
+def _clean_method_name(method: object) -> str:
+    method_str = str(method)
+    return METHOD_LABELS.get(method_str, method_str.replace("Estimator", "").replace("_", " "))
+
+
+def _apply_publication_style(ax: plt.Axes) -> None:
+    ax.set_facecolor("white")
+    ax.figure.patch.set_facecolor("white")
+    ax.grid(axis="x", color=PALETTE["grid"], linewidth=0.8, alpha=0.85)
+    ax.set_axisbelow(True)
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color(PALETTE["grid"])
+    ax.spines["bottom"].set_color(PALETTE["grid"])
+    ax.tick_params(colors=PALETTE["ink"])
+    ax.xaxis.label.set_color(PALETTE["ink"])
+    ax.yaxis.label.set_color(PALETTE["ink"])
+    ax.title.set_color(PALETTE["ink"])
+    ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
