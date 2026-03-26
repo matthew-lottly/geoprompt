@@ -39,6 +39,7 @@ def _run_estimators(
     bootstrap_repeats: int,
     bootstrap_seed: int,
     caliper: float | None,
+    propensity_trim_bounds: tuple[float, float] | None = None,
 ) -> list[dict]:
     rows: list[dict] = []
     for cls in [
@@ -52,6 +53,7 @@ def _run_estimators(
             confounders,
             bootstrap_repeats=bootstrap_repeats,
             bootstrap_seed=bootstrap_seed,
+            propensity_trim_bounds=propensity_trim_bounds,
         )
         result = est.fit(dataset)
         diag = result.diagnostics
@@ -70,6 +72,7 @@ def _run_estimators(
         caliper=caliper,
         bootstrap_repeats=bootstrap_repeats,
         bootstrap_seed=bootstrap_seed,
+        propensity_trim_bounds=propensity_trim_bounds,
     )
     result = matcher.fit(dataset)
     diag = result.diagnostics
@@ -89,6 +92,7 @@ def run_stability_analysis() -> pd.DataFrame:
         seeds=[42, 123, 7, 2024, 999, 314, 55, 808, 1776, 2025, 31415, 65536],
         bootstrap_counts=[50, 200, 500],
         calipers={"lalonde": [0.03, 0.05, 0.10], "nhefs": [0.01, 0.02, 0.05]},
+        trim_bounds={"lalonde": (0.03, 0.97)},
     )
 
 
@@ -97,17 +101,20 @@ def run_stability_analysis_with_settings(
     seeds: list[int],
     bootstrap_counts: list[int],
     calipers: dict[str, list[float]],
+    trim_bounds: dict[str, tuple[float, float]] | None = None,
 ) -> pd.DataFrame:
 
     lalonde = load_lalonde_benchmark()
     nhefs = load_nhefs_complete_benchmark()
     synthetic = generate_synthetic_observational_data()
 
+    _tb = trim_bounds or {}
+
     all_rows: list[dict] = []
 
     for seed, n_boot in itertools.product(seeds, bootstrap_counts):
         for cal in calipers["lalonde"]:
-            for row in _run_estimators(lalonde, "outcome", LALONDE_CONFOUNDERS, n_boot, seed, cal):
+            for row in _run_estimators(lalonde, "outcome", LALONDE_CONFOUNDERS, n_boot, seed, cal, _tb.get("lalonde")):
                 all_rows.append({
                     "dataset": "lalonde",
                     "seed": seed,
@@ -116,7 +123,7 @@ def run_stability_analysis_with_settings(
                     **row,
                 })
         for cal in calipers["nhefs"]:
-            for row in _run_estimators(nhefs, "outcome", NHEFS_COMPLETE_CONFOUNDERS, n_boot, seed, cal):
+            for row in _run_estimators(nhefs, "outcome", NHEFS_COMPLETE_CONFOUNDERS, n_boot, seed, cal, _tb.get("nhefs")):
                 all_rows.append({
                     "dataset": "nhefs",
                     "seed": seed,
@@ -124,7 +131,7 @@ def run_stability_analysis_with_settings(
                     "caliper": cal,
                     **row,
                 })
-        for row in _run_estimators(synthetic, "outcome", ["age", "severity", "baseline_score"], n_boot, seed, 0.02):
+        for row in _run_estimators(synthetic, "outcome", ["age", "severity", "baseline_score"], n_boot, seed, 0.02, _tb.get("synthetic")):
             all_rows.append({
                 "dataset": "synthetic",
                 "seed": seed,
@@ -144,6 +151,7 @@ def export_stability_artifacts(output_dir: Path, *, quick: bool = False) -> tupl
             seeds=[42, 123, 7, 2024, 999],
             bootstrap_counts=[50],
             calipers={"lalonde": [0.05], "nhefs": [0.02]},
+            trim_bounds={"lalonde": (0.03, 0.97)},
         )
     else:
         raw = run_stability_analysis()

@@ -205,32 +205,34 @@ def export_paper_artifacts(
 
     _plot_estimator_comparison(
         lalonde_frame,
-        title="Lalonde benchmark: estimator comparison",
+        title=None,
         output_path=figures_dir / "figure01_lalonde_estimators.png",
         figsize=(paper_w, paper_h),
     )
     _plot_estimator_comparison(
         nhefs_frame,
-        title="NHEFS benchmark: estimator comparison",
+        title=None,
         output_path=figures_dir / "figure02_nhefs_estimators.png",
         figsize=(paper_w, paper_h),
     )
     _plot_love(
         report_payload["nhefs_public_benchmark"]["results"][-1]["diagnostics"]["balance_before"],
         report_payload["nhefs_public_benchmark"]["results"][-1]["diagnostics"]["balance_after"],
-        title="NHEFS benchmark: covariate balance",
+        title=None,
         output_path=figures_dir / "figure03_nhefs_love_plot.png",
         figsize=(paper_w, paper_h + 1.0),
     )
     _plot_estimator_comparison(
         synthetic_frame,
-        title="Synthetic validation: estimator comparison",
+        title=None,
         output_path=figures_dir / "figure04_synthetic_estimators.png",
         figsize=(paper_w, paper_h),
+        reference_value=2.0,
     )
+    paper_benchmark_frame = benchmark_frame[benchmark_frame["dataset"] != "real_dataset"]
     _plot_benchmark_balance_overview(
-        benchmark_frame,
-        title="Benchmark balance improvement across methods",
+        paper_benchmark_frame,
+        title=None,
         output_path=figures_dir / "figure05_balance_overview.png",
         figsize=(paper_w, paper_h + 2.0),
     )
@@ -313,29 +315,42 @@ def benchmark_to_frame(report_payload: dict) -> pd.DataFrame:
 
 def _plot_estimator_comparison(
     results_frame: pd.DataFrame,
-    title: str,
+    title: str | None,
     output_path: Path,
     *,
     figsize: tuple[float, float] | None = None,
+    reference_value: float | None = 0.0,
 ) -> None:
     frame = results_frame.copy().sort_values("effect")
     effect = frame["effect"].astype(float).to_numpy()
     ci_low = frame["ci_low"].astype(float).to_numpy()
     ci_high = frame["ci_high"].astype(float).to_numpy()
-    lower = (effect - ci_low).clip(min=0.0)
-    upper = (ci_high - effect).clip(min=0.0)
     y_positions = np.arange(len(frame))
     labels = [_clean_method_name(method) for method in frame["method"]]
     size = figsize or (8.6, max(4.6, 0.72 * len(frame) + 1.2))
     fig, ax = plt.subplots(figsize=size)
     _apply_publication_style(ax)
-    ax.hlines(y_positions, ci_low, ci_high, color=PALETTE["ink"], linewidth=2.0, zorder=2)
-    ax.scatter(effect, y_positions, s=60, color=PALETTE["blue"], edgecolor="white", linewidth=0.8, zorder=3)
-    ax.axvline(0.0, color=PALETTE["rose"], linestyle="--", linewidth=1.4)
+    ax.errorbar(
+        effect,
+        y_positions,
+        xerr=[effect - ci_low, ci_high - effect],
+        fmt="o",
+        markersize=6.5,
+        color=PALETTE["blue"],
+        ecolor=PALETTE["ink"],
+        elinewidth=1.8,
+        capsize=3.5,
+        markeredgecolor="white",
+        markeredgewidth=0.8,
+        zorder=3,
+    )
+    if reference_value is not None:
+        ax.axvline(reference_value, color=PALETTE["rose"], linestyle="--", linewidth=1.2)
     ax.set_yticks(y_positions)
     ax.set_yticklabels(labels)
     ax.set_xlabel("Estimated effect with 95% confidence interval")
-    ax.set_title(title, loc="left", pad=10)
+    if title:
+        ax.set_title(title, loc="left", pad=10)
     fig.tight_layout()
     _save_figure(fig, output_path)
     plt.close(fig)
@@ -475,7 +490,7 @@ def export_rosenbaum_artifacts(rosenbaum_results: list[dict], output_dir: Path) 
 def _plot_love(
     balance_before: dict[str, float],
     balance_after: dict[str, float],
-    title: str,
+    title: str | None,
     output_path: Path,
     *,
     figsize: tuple[float, float] | None = None,
@@ -498,8 +513,9 @@ def _plot_love(
     ax.set_yticks(y_positions)
     ax.set_yticklabels(covariates)
     ax.set_xlabel("Absolute standardized mean difference")
-    ax.set_title(title, loc="left", pad=10)
-    ax.legend(loc="lower right", frameon=False, fontsize=8)
+    if title:
+        ax.set_title(title, loc="left", pad=10)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.12), ncol=2, frameon=False, fontsize=8)
     fig.tight_layout()
     _save_figure(fig, output_path)
     plt.close(fig)
@@ -507,7 +523,7 @@ def _plot_love(
 
 def _plot_benchmark_balance_overview(
     benchmark_frame: pd.DataFrame,
-    title: str,
+    title: str | None,
     output_path: Path,
     *,
     figsize: tuple[float, float] | None = None,
@@ -533,8 +549,9 @@ def _plot_benchmark_balance_overview(
     ax.set_yticks(y_positions)
     ax.set_yticklabels(frame["label"])
     ax.set_xlabel("Mean absolute standardized mean difference")
-    ax.set_title(title, loc="left", pad=10)
-    ax.legend(frameon=False, loc="lower right")
+    if title:
+        ax.set_title(title, loc="left", pad=10)
+    ax.legend(frameon=False, loc="upper center", bbox_to_anchor=(0.5, -0.08), ncol=2)
     fig.tight_layout()
     _save_figure(fig, output_path)
     plt.close(fig)
@@ -618,6 +635,9 @@ def _short_dataset_name(dataset_key: str) -> str:
         "lalonde_public_benchmark": "Lalonde",
         "nhefs_public_benchmark": "NHEFS",
         "synthetic_validation_dataset": "Synthetic",
+        "lalonde": "Lalonde",
+        "nhefs": "NHEFS",
+        "synthetic": "Synthetic",
     }
     return short_names.get(dataset_key, _paper_dataset_name(dataset_key))
 
@@ -797,3 +817,7 @@ def _apply_publication_style(ax: plt.Axes) -> None:
     ax.yaxis.label.set_color(PALETTE["ink"])
     ax.title.set_color(PALETTE["ink"])
     ax.xaxis.set_major_locator(MaxNLocator(nbins=6))
+    ax.tick_params(axis="both", labelsize=9)
+    ax.xaxis.label.set_size(9.5)
+    ax.yaxis.label.set_size(9.5)
+    ax.title.set_size(10.5)

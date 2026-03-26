@@ -1,3 +1,5 @@
+__version__ = "0.5.0"
+
 from causal_lens.estimators import (
     CrossFittedDREstimator,
     DoublyRobustEstimator,
@@ -46,6 +48,7 @@ from causal_lens.design_diagnostics import (
 )
 
 __all__ = [
+    "__version__",
     "CausalEstimate",
     "benchmark_to_frame",
     "BunchingElasticity",

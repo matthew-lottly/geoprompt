@@ -2,13 +2,63 @@
 
 This project is intended to live as a standalone Python package under `projects/causal-lens` and later as its own public repository.
 
+## Recommended Standalone Repository Name
+
+- causal-lens
+
+## Recommended Description
+
+- Diagnostics-first Python toolkit for causal effect estimation, sensitivity analysis, and reviewer-facing export workflows.
+
+## Suggested Topics
+
+- python
+- causal-inference
+- econometrics
+- statistics
+- treatment-effects
+- reproducibility
+
 ## Release Checklist
 
 1. Run the test suite (`pytest tests/ -v`).
 2. Build the package (`python -m build`).
 3. Validate distribution metadata (`twine check dist/*`).
-4. Tag the release after the package and docs are in sync.
-5. Verify CITATION.cff version matches pyproject.toml version.
+4. Confirm the PyPI Trusted Publisher is linked to the correct repository and workflow:
+	- monorepo: `matthew-lottly/Matt-Powell` with workflow `.github/workflows/publish-causal-lens-pypi.yml`
+	- standalone repo: `matthew-lottly/causal-lens` with workflow `.github/workflows/publish-pypi.yml`
+5. If the PyPI publisher entry expects an environment, set it to `pypi` so the OIDC claim matches the workflow.
+6. Tag the release after the package and docs are in sync.
+7. Verify `CITATION.cff` version matches `pyproject.toml` version.
+8. Confirm `README.md` and package metadata still point at the intended repository path.
+
+## PyPI Commands
+
+```bash
+python -m pip install --upgrade build twine
+python -m build
+python -m twine check dist/*
+python -m twine upload dist/*
+```
+
+## GitHub Actions Publish Flow
+
+Use this flow when PyPI Trusted Publishing is connected to GitHub:
+
+1. Ensure the Trusted Publisher entry in PyPI points at the repository that is actually running the workflow.
+2. For the current monorepo release path, set the workflow file to `.github/workflows/publish-causal-lens-pypi.yml`.
+3. Set the environment name to `pypi` when using the current workflow.
+4. Push a tag such as `causal-lens-v0.5.0`.
+5. Watch the `Publish CausalLens To PyPI` workflow in GitHub Actions.
+
+Example tag commands:
+
+```bash
+git tag causal-lens-v0.5.0
+git push origin causal-lens-v0.5.0
+```
+
+If and when the project is split into its own repository, keep `.github/workflows/publish-pypi.yml` in the standalone repo and use a plain version tag such as `v0.5.0` there.
 
 ## Journal Targets
 
