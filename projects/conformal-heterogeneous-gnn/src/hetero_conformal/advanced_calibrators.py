@@ -17,6 +17,7 @@ from typing import Dict, Optional, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .conformal import ConformalResult, PropagationAwareCalibrator, HeteroConformalCalibrator
 
@@ -406,7 +407,8 @@ class QuantileHead(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
         )
-        self.upper_head = nn.Sequential(
+        # Parameterize upper quantile as lo + softplus(delta) to ensure hi >= lo
+        self.delta_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Linear(hidden_dim // 2, 1),
@@ -414,7 +416,8 @@ class QuantileHead(nn.Module):
 
     def forward(self, h: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         lo = self.lower_head(h).squeeze(-1)
-        hi = self.upper_head(h).squeeze(-1)
+        delta = self.delta_head(h).squeeze(-1)
+        hi = lo + F.softplus(delta)
         return lo, hi
 
 
@@ -445,6 +448,7 @@ class CQRCalibrator:
         neighborhood_weight: float = 0.3,
         quantile_epochs: int = 100,
         lr: float = 1e-3,
+        verbose: bool = False,
     ):
         self.alpha = alpha
         self.use_propagation = use_propagation
@@ -456,6 +460,8 @@ class CQRCalibrator:
         self._sigma: Dict[str, np.ndarray] = {}
         self._q_lo: Dict[str, np.ndarray] = {}
         self._q_hi: Dict[str, np.ndarray] = {}
+        self._quantile_losses: Dict[str, list] = {}
+        self.verbose = verbose
         self._calibrated = False
 
     def train_quantile_heads(
@@ -490,21 +496,41 @@ class CQRCalibrator:
             y_train = torch.tensor(labels[ntype][train_mask], dtype=torch.float32)
 
             head.train()
-            for _ in range(self.quantile_epochs):
+            losses = []
+            n_train = int(train_mask.sum())
+            if self.verbose:
+                print(f"CQR: training quantile head for ntype={ntype}, n_train={n_train}")
+            for ep in range(self.quantile_epochs):
                 lo, hi = head(h_train)
                 loss = pinball_loss(lo, y_train, tau_lo) + pinball_loss(hi, y_train, tau_hi)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                losses.append(float(loss.detach().cpu().numpy()))
+                if self.verbose and (ep == 0 or (ep + 1) % max(1, self.quantile_epochs // 5) == 0):
+                    print(f"  ntype={ntype} epoch={ep+1}/{self.quantile_epochs} loss={losses[-1]:.4f}")
 
             head.eval()
             self.quantile_heads[ntype] = head
 
+            # store per-epoch loss trace
+            self._quantile_losses[ntype] = losses
+
             # Get quantile predictions for ALL nodes
             with torch.no_grad():
                 lo_all, hi_all = head(model_hidden[ntype])
-                self._q_lo[ntype] = lo_all.numpy()
-                self._q_hi[ntype] = hi_all.numpy()
+                lo_np = lo_all.numpy()
+                hi_np = hi_all.numpy()
+                # Enforce ordering: lower quantile should not exceed upper quantile.
+                # If inversions exist, fix them by swapping; log a small warning.
+                inversions = (hi_np < lo_np)
+                n_inv = int(inversions.sum())
+                if n_inv > 0:
+                    print(f"WARN: QuantileHead inversions for ntype={ntype}: {n_inv} values; fixing by ordering.")
+                lo_fixed = np.minimum(lo_np, hi_np)
+                hi_fixed = np.maximum(lo_np, hi_np)
+                self._q_lo[ntype] = lo_fixed
+                self._q_hi[ntype] = hi_fixed
 
     def calibrate(
         self,

@@ -418,7 +418,8 @@ def run_advanced_sweep() -> list[dict]:
                         h_new[nt] = F.relu(h_new[nt]) + h[nt]
                     h = h_new
 
-            cqr_cal = CQRCalibrator(alpha=cfg.alpha, quantile_epochs=50)
+            # Increase quantile head training epochs and enable verbose logging
+            cqr_cal = CQRCalibrator(alpha=cfg.alpha, quantile_epochs=200, lr=1e-3, verbose=True)
             cqr_cal.train_quantile_heads(h, graph.node_labels, train_masks, cfg.hidden_dim)
             cqr_cal.calibrate(
                 predictions, graph.node_labels, cal_masks, train_masks,
@@ -427,6 +428,16 @@ def run_advanced_sweep() -> list[dict]:
             result = cqr_cal.predict(predictions, test_masks)
             rows.append(_build_row(seed, "cqr_propagation", result, predictions, graph, test_masks))
             print(f"  seed={seed} cqr_propagation: cov={marginal_coverage(result, graph.node_labels, test_masks):.4f}")
+            # Save per-head quantile training losses for inspection
+            try:
+                import json
+                out_losses = {k: v for k, v in cqr_cal._quantile_losses.items()}
+                out_path = os.path.join(os.getcwd(), "outputs", f"cqr_quantile_losses_seed{seed}.json")
+                with open(out_path, "w") as fh:
+                    json.dump(out_losses, fh)
+                print(f"  wrote {out_path}")
+            except Exception as e:
+                print(f"  WARN: failed to save quantile losses: {e}")
         except Exception as e:
             print(f"  WARN: cqr_propagation seed={seed} failed: {e}")
 
