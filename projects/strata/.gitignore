@@ -36,6 +36,11 @@ outputs/*.md
 
 # Paper / submission (tracked in monorepo, excluded from standalone)
 paper/
+# Allow specific paper files to be tracked in this repo
+!paper/
+!paper/strata-paper.md
+!paper/submission_jmlr/
+!paper/submission_jmlr/**
 REFERENCES.md
 PUBLISHING.md
 
