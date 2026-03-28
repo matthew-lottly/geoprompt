@@ -3,7 +3,8 @@
 **Matt Powell**
 
 Lottly AI
-
+ 
+Corresponding author: matthew.a.powell@outlook.com
 ---
 
 ## Abstract
@@ -11,6 +12,8 @@ Lottly AI
 Quantifying uncertainty in node-level risk predictions across coupled infrastructure systems—power grids, water networks, and telecommunications—requires prediction intervals that are both distribution-free and topology-aware. Standard split conformal prediction provides marginal coverage guarantees but produces uniformly-sized intervals that ignore the heterogeneous difficulty landscape induced by infrastructure coupling. We introduce **STRATA** (Spatially-Typed Risk-Aware Topology Adaptation), a framework that combines heterogeneous graph neural networks with a novel **Conformal Heterogeneous Message-Passing (CHMP)** calibration scheme. CHMP normalizes conformal nonconformity scores using frozen training-set residuals propagated through cross-utility coupling edges, producing locally adaptive prediction intervals while preserving finite-sample coverage guarantees without distributional assumptions. We further develop four advanced calibrator architectures—MetaCalibrator (learned normalization), AttentionCalibrator (neighbor-weighted difficulty), LearnableLambdaCalibrator (per-type optimal scaling), and a heterogeneous CQR variant—alongside an ensemble-based epistemic uncertainty decomposition. Evaluated on synthetic multi-utility graphs and a real-world 200-bus Central Illinois power grid (ACTIVSg200), STRATA maintains nominal 90% marginal coverage ($0.908 \pm 0.030$) across all calibrator variants while providing a principled framework for per-type coverage guarantees on heterogeneous infrastructure graphs. An ensemble-based calibrator achieves the narrowest intervals ($0.743 \pm 0.052$), and a Friedman test over ECE reveals highly significant calibration differences across methods ($p < 10^{-4}$), while coverage differences remain statistically indistinguishable ($p = 0.93$)—consistent with conformal theory. Spatial diagnostics reveal significant Moran's I autocorrelation in coverage patterns, confirming the value of propagation-aware calibration in infrastructure networks.
 
 ---
+
+**Keywords:** conformal prediction; graph neural networks; heterogeneous graphs; uncertainty quantification; infrastructure resilience; spatial statistics
 
 **Figures and supplementary material**
 
@@ -388,10 +391,10 @@ The advanced calibrators (Meta, Attention, LearnableLambda) produce more *balanc
 
 On the ACTIVSg200 200-bus Central Illinois power grid (single seed, diagnostic run):
 
-- **Marginal coverage**: 0.894 (target: 0.90)
-- **Type-conditional coverage**: Power 0.94, Water 0.84, Telecom 0.88
-- **Mean interval width**: 0.774
-- **ECE**: 0.061
+- **Marginal coverage**: 0.8866 (seed 42)
+- **Type-conditional coverage**: Power 0.90, Water 0.8148, Telecom 0.95
+- **Mean interval width**: 0.4949
+- **ECE**: 0.0546
 
 Water coverage falls below the nominal target ($0.84 < 0.90$), while power exceeds it ($0.94 > 0.90$). This imbalance reflects the construction of the water layer from power demand heuristics: water nodes derived from low-demand power buses receive less informative features, leading to higher prediction error and under-coverage. The telecom layer similarly shows coverage below target ($0.88$), though closer to the nominal level.
 
