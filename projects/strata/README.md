@@ -63,6 +63,10 @@ data/
 ```python
 from hetero_conformal.experiment import run_experiment, ExperimentConfig
 
+Reproducibility notes:
+- Put benchmark CSV outputs into `projects/strata/outputs/` (the workflow and paper scripts read this folder).
+- The repository includes a CI workflow that runs tests and generates the paper tables on push/PR: see `.github/workflows/ci.yml`.
+
 # Run with defaults (90% coverage target)
 result = run_experiment()
 
