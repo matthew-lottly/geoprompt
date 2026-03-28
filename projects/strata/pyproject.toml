@@ -7,10 +7,17 @@ name = "strata-conformal-gnn"
 version = "0.1.0"
 description = "STRATA: Structured Type-Aware Risk Assessment Through Adaptive Calibration on Heterogeneous Infrastructure Graphs"
 readme = "README.md"
-license = {text = "MIT"}
+license = "MIT"
 requires-python = ">=3.10"
 authors = [
     {name = "Matt Powell"},
+]
+keywords = [
+    "conformal-prediction",
+    "heterogeneous-graphs",
+    "uncertainty-quantification",
+    "graph-neural-networks",
+    "infrastructure",
 ]
 dependencies = [
     "torch>=2.0",
@@ -19,12 +26,31 @@ dependencies = [
     "geoprompt>=0.1.7",
 ]
 
+[project.urls]
+Homepage = "https://github.com/matthew-lottly/strata"
+Repository = "https://github.com/matthew-lottly/strata"
+Issues = "https://github.com/matthew-lottly/strata/issues"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
     "pytest-cov",
     "ruff>=0.4",
     "pre-commit>=3.5",
+]
+api = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.7",
+]
+dashboard = [
+    "streamlit>=1.36",
+    "pandas>=2.2",
+    "plotly>=5.22",
+]
+release = [
+    "build>=1.2",
+    "twine>=5.0",
 ]
 
 [tool.setuptools.packages.find]

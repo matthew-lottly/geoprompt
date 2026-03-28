@@ -89,6 +89,60 @@ print(f"Mean interval width: {result.mean_width:.4f}")
 pytest tests/ -v
 ```
 
+## Reproducing Results
+
+A `Makefile` is provided for full reproducibility:
+
+```bash
+make all        # Run tests, benchmarks, ablations, analysis, and figures
+make test       # Run pytest suite (98 tests)
+make benchmark  # Run synthetic + real-data benchmarks
+make figures    # Generate publication figures (georeferenced maps + bar charts)
+make pdf        # Build LaTeX manuscript (requires pdflatex)
+```
+
+## Real-Data Benchmarks
+
+STRATA includes two public MATPOWER-derived benchmarks:
+
+- `load_activsg200()` — 200-bus Central Illinois power grid
+- `load_ieee118()` — IEEE 118-bus transmission case
+
+Both produce georeferenced site maps with real lat/lon coordinates on OpenStreetMap basemaps.
+
+```bash
+python scripts/run_real_data_benchmark.py
+python scripts/run_real_method_comparison.py
+python scripts/generate_paper_figures.py   # produces georeferenced maps
+```
+
+## Conditional Coverage Analysis
+
+```bash
+python scripts/run_conditional_coverage.py
+```
+
+Compares Mondrian vs CHMP width redistribution across degree bins and width deciles.
+
+## Fairness, Profiling, Dashboard, and API
+
+```bash
+python scripts/fairness_audit.py
+python scripts/profile_benchmark.py
+python scripts/run_ablations.py
+python scripts/build_submission_bundle.py
+```
+
+Optional extras:
+
+```bash
+pip install -e ".[dashboard,api,release]"
+streamlit run dashboard/app.py
+python scripts/serve_api.py
+python -m build
+python -m twine check dist/*
+```
+
 ## Ablation Study
 
 ```python

@@ -8,6 +8,7 @@ from hetero_conformal.real_data import (
     _parse_cell_array,
     _geocode_bus,
     load_activsg200,
+    load_ieee118,
 )
 
 
@@ -142,3 +143,13 @@ class TestACTIVSg200Graph:
         m1 = g1.node_masks["power"]["train"]
         m2 = g2.node_masks["power"]["train"]
         assert not np.array_equal(m1, m2)
+
+
+def test_load_ieee118_smoke():
+    graph = load_ieee118(seed=7)
+    assert set(graph.node_features.keys()) == {"power", "water", "telecom"}
+    assert graph.node_features["power"].shape[0] == 118
+    assert graph.edge_index[("power", "feeds", "power")].shape[1] > 118
+    assert graph.node_labels["power"].min() >= 0.0
+    assert graph.node_labels["power"].max() <= 1.0
+

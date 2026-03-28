@@ -43,6 +43,11 @@ ACTIVSG200_URL = (
     "MATPOWER/matpower/master/data/case_ACTIVSg200.m"
 )
 
+IEEE118_URL = (
+    "https://raw.githubusercontent.com/"
+    "MATPOWER/matpower/master/data/case118.m"
+)
+
 # Central Illinois city coordinates (lat, lon) for geocoding bus names.
 # Coordinates are approximate centroids sufficient for spatial analysis.
 _CITY_COORDS: Dict[str, Tuple[float, float]] = {
@@ -203,7 +208,9 @@ def _geocode_bus(
 # ---------------------------------------------------------------------------
 
 
-def load_activsg200(
+def _load_matpower_case(
+    case_name: str,
+    url: str,
     cache_dir: Optional[str] = None,
     train_frac: float = 0.5,
     cal_frac: float = 0.25,
@@ -211,7 +218,7 @@ def load_activsg200(
     coupling_radius: float = 0.12,
     seed: int = 42,
 ) -> HeteroInfraGraph:
-    """Load the ACTIVSg200 power grid and derive a heterogeneous graph.
+    """Load a MATPOWER transmission case and derive a heterogeneous graph.
 
     Constructs a three-layer infrastructure graph:
 
@@ -249,12 +256,13 @@ def load_activsg200(
     # ------------------------------------------------------------------
     # 1. Download and parse ACTIVSg200
     # ------------------------------------------------------------------
+    file_name = f"case_{case_name}.m" if not case_name.startswith("case") else f"{case_name}.m"
     if cache_dir is None:
-        cache_path = Path(__file__).resolve().parents[2] / "data" / "case_ACTIVSg200.m"
+        cache_path = Path(__file__).resolve().parents[2] / "data" / file_name
     else:
-        cache_path = Path(cache_dir) / "case_ACTIVSg200.m"
+        cache_path = Path(cache_dir) / file_name
 
-    text = _download_matpower(ACTIVSG200_URL, cache_path)
+    text = _download_matpower(url, cache_path)
     bus_data = _parse_matrix(text, "bus")
     branch_data = _parse_matrix(text, "branch")
     bus_names = _parse_cell_array(text, "bus_name")
@@ -418,3 +426,50 @@ def load_activsg200(
         graph.node_masks[ntype] = _split_masks(n, train_frac, cal_frac, rng)
 
     return graph
+
+
+def load_activsg200(
+    cache_dir: Optional[str] = None,
+    train_frac: float = 0.5,
+    cal_frac: float = 0.25,
+    coupling_prob: float = 0.4,
+    coupling_radius: float = 0.12,
+    seed: int = 42,
+) -> HeteroInfraGraph:
+    """Load the ACTIVSg200 power grid and derive a heterogeneous graph."""
+    return _load_matpower_case(
+        case_name="ACTIVSg200",
+        url=ACTIVSG200_URL,
+        cache_dir=cache_dir,
+        train_frac=train_frac,
+        cal_frac=cal_frac,
+        coupling_prob=coupling_prob,
+        coupling_radius=coupling_radius,
+        seed=seed,
+    )
+
+
+def load_ieee118(
+    cache_dir: Optional[str] = None,
+    train_frac: float = 0.5,
+    cal_frac: float = 0.25,
+    coupling_prob: float = 0.4,
+    coupling_radius: float = 0.12,
+    seed: int = 42,
+) -> HeteroInfraGraph:
+    """Load the public IEEE 118-bus MATPOWER case and derive a heterogeneous graph.
+
+    This provides a second public benchmark beyond ACTIVSg200 using the same
+    heterogeneous construction strategy: real transmission topology plus derived
+    water and telecom layers based on demand centres.
+    """
+    return _load_matpower_case(
+        case_name="118",
+        url=IEEE118_URL,
+        cache_dir=cache_dir,
+        train_frac=train_frac,
+        cal_frac=cal_frac,
+        coupling_prob=coupling_prob,
+        coupling_radius=coupling_radius,
+        seed=seed,
+    )
