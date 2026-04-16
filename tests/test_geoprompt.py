@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from geoprompt.compare import _stress_feature_records, _stress_region_records
-from geoprompt import GeoPromptFrame, geometry_centroid
+from geoprompt import GeoPromptFrame, geometry_centroid, geometry_intersects
 from geoprompt.demo import build_demo_report
 from geoprompt.equations import area_similarity, corridor_strength, directional_alignment, euclidean_distance, haversine_distance, prompt_decay, prompt_interaction
 from geoprompt.io import (
@@ -74,6 +74,46 @@ def test_mixed_geometries_and_corridor_strength() -> None:
     assert corridor[0] == 0.0
 
 
+def test_multi_geometries_support_metrics_and_predicates() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {
+                "site_id": "cluster-a",
+                "geometry": {
+                    "type": "MultiPoint",
+                    "coordinates": [(-112.0, 40.70), (-111.98, 40.72)],
+                },
+            },
+            {
+                "site_id": "corridor-a",
+                "geometry": {
+                    "type": "MultiLineString",
+                    "coordinates": [
+                        [(-112.0, 40.70), (-111.95, 40.70)],
+                        [(-111.95, 40.70), (-111.95, 40.75)],
+                    ],
+                },
+            },
+            {
+                "site_id": "zones-a",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [[(-112.01, 40.69), (-111.99, 40.69), (-111.99, 40.71), (-112.01, 40.71)]],
+                        [[(-111.97, 40.73), (-111.95, 40.73), (-111.95, 40.75), (-111.97, 40.75)]],
+                    ],
+                },
+            },
+        ],
+        crs="EPSG:4326",
+    )
+
+    assert frame.geometry_types() == ["MultiPoint", "MultiLineString", "MultiPolygon"]
+    assert frame.geometry_lengths()[1] == pytest.approx(0.1)
+    assert frame.geometry_areas()[2] == pytest.approx(0.0008)
+    assert geometry_intersects({"type": "Point", "coordinates": (-111.96, 40.74)}, frame[2]["geometry"]) is True
+
+
 def test_line_centroid_uses_segment_length_weighting() -> None:
     centroid = geometry_centroid(
         {
@@ -112,6 +152,37 @@ def test_read_data_supports_limit_rows_and_sampling() -> None:
     assert len(frame) == 3
 
 
+def test_read_data_supports_linestring_and_polygon_wkt(tmp_path: Path) -> None:
+    csv_path = tmp_path / "wkt_features.csv"
+    csv_path.write_text(
+        "site_id,shape\n"
+        'line_a,"LINESTRING (-112.0 40.7, -111.95 40.75)"\n'
+        'poly_a,"POLYGON ((-112.0 40.7, -111.98 40.7, -111.98 40.72, -112.0 40.72, -112.0 40.7))"\n',
+        encoding="utf-8",
+    )
+
+    frame = read_data(csv_path, geometry_column="shape")
+
+    assert frame.geometry_types() == ["LineString", "Polygon"]
+    assert frame.geometry_areas()[1] == pytest.approx(0.0004)
+
+
+def test_read_data_supports_multilinestring_and_multipolygon_wkt(tmp_path: Path) -> None:
+    csv_path = tmp_path / "wkt_multi_features.csv"
+    csv_path.write_text(
+        "site_id,shape\n"
+        'ml_a,"MULTILINESTRING ((-112.0 40.7, -111.95 40.7), (-111.95 40.7, -111.95 40.75))"\n'
+        'mp_a,"MULTIPOLYGON (((-112.0 40.7, -111.98 40.7, -111.98 40.72, -112.0 40.72, -112.0 40.7)), ((-111.97 40.73, -111.95 40.73, -111.95 40.75, -111.97 40.75, -111.97 40.73)))"\n',
+        encoding="utf-8",
+    )
+
+    frame = read_data(csv_path, geometry_column="shape")
+
+    assert frame.geometry_types() == ["MultiLineString", "MultiPolygon"]
+    assert frame.geometry_lengths()[0] > 0.09
+    assert frame.geometry_areas()[1] > 0.0007
+
+
 def test_read_table_csv_points_and_write_data_csv(tmp_path: Path) -> None:
     csv_path = tmp_path / "points.csv"
     csv_path.write_text(
@@ -136,6 +207,20 @@ def test_read_table_csv_points_and_write_data_csv(tmp_path: Path) -> None:
     written = write_data(output_csv, frame)
     assert written.exists()
     assert "geometry" in written.read_text(encoding="utf-8")
+
+
+def test_read_table_accepts_geometry_column_without_xy(tmp_path: Path) -> None:
+    csv_path = tmp_path / "shapes.csv"
+    csv_path.write_text(
+        "site_id,shape\n"
+        'a,"POINT (-111.95 40.70)"\n'
+        'b,"MULTIPOINT ((-111.96 40.71), (-111.97 40.72))"\n',
+        encoding="utf-8",
+    )
+
+    frame = read_table(csv_path, geometry_column="shape")
+
+    assert frame.geometry_types() == ["Point", "MultiPoint"]
 
 
 def test_read_data_csv_requires_geometry_hints(tmp_path: Path) -> None:
@@ -456,23 +541,57 @@ def test_query_radius_returns_sorted_distance_matches() -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
 
     nearby = frame.query_radius(anchor="north-hub-point", max_distance=0.09, include_anchor=True)
+    indexed_nearby = frame.query_radius(anchor="north-hub-point", max_distance=0.09, include_anchor=True, use_spatial_index=True)
     records = nearby.to_records()
 
     assert records[0]["site_id"] == "north-hub-point"
     assert records[0]["distance"] == 0.0
     assert all(record["distance"] <= 0.09 for record in records)
     assert records == sorted(records, key=lambda item: (float(item["distance"]), str(item["site_id"])))
+    assert nearby.to_records() == indexed_nearby.to_records()
 
 
 def test_within_distance_returns_boolean_mask() -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json")
 
     mask = frame.within_distance(anchor="north-hub-point", max_distance=0.09, include_anchor=False)
-    matched_ids = [row["site_id"] for row, include_row in zip(frame, mask, strict=True) if include_row]
+    indexed_mask = frame.within_distance(anchor="north-hub-point", max_distance=0.09, include_anchor=False, use_spatial_index=True)
+    matched_ids = [row["site_id"] for row, include_row in zip(frame, mask) if include_row]
 
     assert "north-hub-point" not in matched_ids
     assert "central-yard-point" in matched_ids
     assert all(isinstance(value, bool) for value in mask)
+    assert mask == indexed_mask
+
+
+def test_nearest_neighbors_indexed_matches_direct() -> None:
+    frame = read_features(PROJECT_ROOT / "data" / "sample_features.json", crs="EPSG:4326")
+
+    direct = frame.nearest_neighbors(k=2, use_spatial_index=False)
+    indexed = frame.nearest_neighbors(k=2, use_spatial_index=True)
+
+    assert direct == indexed
+
+
+def test_frame_filter_sort_select_and_json_export(tmp_path: Path) -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "b", "value": 2.0, "group": "north", "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}},
+            {"site_id": "a", "value": 5.0, "group": "south", "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    filtered = frame.where(group="north")
+    sorted_frame = frame.sort_values("site_id")
+    selected = frame.select_columns(["site_id", "value", "geometry"])
+    written = frame.to_json(tmp_path / "frame.json")
+
+    assert len(filtered) == 1
+    assert filtered[0]["site_id"] == "b"
+    assert sorted_frame[0]["site_id"] == "a"
+    assert selected.columns == ["site_id", "value", "geometry"]
+    assert Path(written).exists()
 
 
 def test_proximity_join_matches_nearby_features() -> None:
@@ -745,6 +864,45 @@ def test_set_crs_and_reproject() -> None:
     assert abs(first_point[1]) > 1000000
 
 
+def test_frame_to_geojson_supports_multi_geometries() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {"site_id": "multi-a", "geometry": {"type": "MultiPoint", "coordinates": [(0.0, 0.0), (1.0, 1.0)]}},
+            {"site_id": "multi-b", "geometry": {"type": "MultiLineString", "coordinates": [[(0.0, 0.0), (1.0, 0.0)], [(1.0, 0.0), (1.0, 1.0)]]}},
+        ],
+        crs="epsg:4326",
+    )
+
+    collection = frame_to_geojson(frame)
+
+    assert collection["crs"]["properties"]["name"] == "EPSG:4326"
+    assert collection["features"][0]["geometry"]["type"] == "MultiPoint"
+    assert collection["features"][1]["geometry"]["type"] == "MultiLineString"
+
+
+def test_set_crs_normalizes_epsg_variants_and_numeric_targets() -> None:
+    frame = GeoPromptFrame.from_records(
+        [{"site_id": "a", "geometry": {"type": "Point", "coordinates": (-111.9, 40.7)}}]
+    )
+
+    labelled = frame.set_crs("epsg:4326")
+    projected = labelled.to_crs(3857)
+
+    assert labelled.crs == "EPSG:4326"
+    assert projected.crs == "EPSG:3857"
+    assert projected[0]["geometry"]["coordinates"] != labelled[0]["geometry"]["coordinates"]
+
+
+def test_coverage_summary_indexed_matches_direct() -> None:
+    regions = read_features(PROJECT_ROOT / "data" / "benchmark_regions.json", crs="EPSG:4326")
+    features = read_features(PROJECT_ROOT / "data" / "benchmark_features.json", crs="EPSG:4326")
+
+    direct = regions.coverage_summary(features, predicate="intersects", use_spatial_index=False)
+    indexed = regions.coverage_summary(features, predicate="intersects", use_spatial_index=True)
+
+    assert direct.to_records() == indexed.to_records()
+
+
 def test_spatial_join_contains_regions() -> None:
     regions = read_features(PROJECT_ROOT / "data" / "benchmark_regions.json", crs="EPSG:4326")
     features = read_features(PROJECT_ROOT / "data" / "benchmark_features.json", crs="EPSG:4326")
@@ -794,6 +952,49 @@ def test_area_similarity_equation() -> None:
 
     assert round(similarity, 4) == 0.6886
     assert round(corridor, 4) == 0.0793
+
+
+def test_catchment_competition_overlay_summary_corridor_zone_fit_and_clustering() -> None:
+    providers = GeoPromptFrame.from_records(
+        [
+            {"site_id": "north", "capacity": 100.0, "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+            {"site_id": "south", "capacity": 80.0, "geometry": {"type": "Point", "coordinates": [2.0, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    demand = GeoPromptFrame.from_records(
+        [
+            {"target_id": "a", "demand": 10.0, "geometry": {"type": "Point", "coordinates": [0.2, 0.0]}},
+            {"target_id": "b", "demand": 15.0, "geometry": {"type": "Point", "coordinates": [1.0, 0.0]}},
+            {"target_id": "c", "demand": 12.0, "geometry": {"type": "Point", "coordinates": [1.8, 0.0]}},
+        ],
+        crs="EPSG:4326",
+    )
+    corridors = GeoPromptFrame.from_records(
+        [
+            {"corridor_id": "main", "weight": 1.0, "geometry": {"type": "LineString", "coordinates": [(0.0, 0.0), (1.5, 0.0)]}},
+        ],
+        crs="EPSG:4326",
+    )
+    zones = GeoPromptFrame.from_records(
+        [
+            {"zone_id": "service", "demand_index": 50.0, "geometry": {"type": "Polygon", "coordinates": [[(0.0, -0.5), (2.0, -0.5), (2.0, 0.5), (0.0, 0.5)]]}},
+        ],
+        crs="EPSG:4326",
+    )
+
+    competition = providers.catchment_competition(demand, distance=1.1, target_id_column="target_id")
+    overlay = zones.overlay_summary(demand, target_id_column="target_id")
+    corridor_reach = corridors.corridor_reach(demand, max_distance=0.3, target_id_column="target_id")
+    zone_fit = providers.zone_fit_scoring(zones, zone_id_column="zone_id", demand_column="demand_index")
+    clusters = demand.multi_scale_clustering(distance_threshold=1.0, min_cluster_size=1)
+
+    assert len(competition) == 2
+    assert "contested_target_ids_competition" in competition.columns
+    assert overlay[0]["count_overlay"] >= 3
+    assert corridor_reach[0]["count_reach"] >= 2
+    assert zone_fit[0]["zone_fit_score"] >= 0.0
+    assert "cluster_id" in clusters.columns
 
 
 def test_directional_alignment() -> None:

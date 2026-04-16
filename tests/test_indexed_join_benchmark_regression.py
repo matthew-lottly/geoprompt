@@ -80,3 +80,37 @@ def test_spatial_join_indexed_benchmark_budget() -> None:
     assert len(indexed) == len(non_indexed)
     assert indexed_elapsed <= non_indexed_elapsed * 1.5
     assert indexed_elapsed < 8.0
+
+
+@pytest.mark.skipif(not BENCHMARK_ENABLED, reason="set GEOPROMPT_RUN_BENCHMARKS=1 to run benchmark regression checks")
+def test_nearest_neighbors_indexed_benchmark_budget() -> None:
+    frame = _grid_points(45, 45)
+
+    started = time.perf_counter()
+    non_indexed = frame.nearest_neighbors(k=2, use_spatial_index=False)
+    non_indexed_elapsed = time.perf_counter() - started
+
+    started = time.perf_counter()
+    indexed = frame.nearest_neighbors(k=2, use_spatial_index=True)
+    indexed_elapsed = time.perf_counter() - started
+
+    assert len(indexed) == len(non_indexed)
+    assert indexed_elapsed <= non_indexed_elapsed * 1.5
+    assert indexed_elapsed < 8.0
+
+
+@pytest.mark.skipif(not BENCHMARK_ENABLED, reason="set GEOPROMPT_RUN_BENCHMARKS=1 to run benchmark regression checks")
+def test_query_radius_indexed_benchmark_budget() -> None:
+    frame = _grid_points(50, 50)
+
+    started = time.perf_counter()
+    non_indexed = frame.query_radius(anchor="p_25_25", max_distance=0.03, use_spatial_index=False)
+    non_indexed_elapsed = time.perf_counter() - started
+
+    started = time.perf_counter()
+    indexed = frame.query_radius(anchor="p_25_25", max_distance=0.03, use_spatial_index=True)
+    indexed_elapsed = time.perf_counter() - started
+
+    assert len(indexed) == len(non_indexed)
+    assert indexed_elapsed <= non_indexed_elapsed * 1.5
+    assert indexed_elapsed < 8.0

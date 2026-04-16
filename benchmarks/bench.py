@@ -45,6 +45,10 @@ def main() -> None:
         bench(f"hotspot_getis_ord (n={n})", frame.hotspot_getis_ord, "value", mode="k_nearest", k=4)
         bench(f"dbscan_cluster (n={n})", frame.dbscan_cluster, eps=10.0, min_samples=3)
         bench(f"nearest_neighbor_distance (n={n})", frame.nearest_neighbor_distance)
+        bench(f"nearest_neighbors direct (n={n})", frame.nearest_neighbors, k=2, use_spatial_index=False)
+        bench(f"nearest_neighbors indexed (n={n})", frame.nearest_neighbors, k=2, use_spatial_index=True)
+        bench(f"query_radius direct (n={n})", frame.query_radius, anchor="p0", max_distance=15.0, use_spatial_index=False)
+        bench(f"query_radius indexed (n={n})", frame.query_radius, anchor="p0", max_distance=15.0, use_spatial_index=True)
         bench(f"buffer (n={n})", frame.buffer, 5.0)
         bench(f"convex_hulls (n={n})", frame.convex_hulls)
 

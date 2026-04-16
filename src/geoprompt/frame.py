@@ -8,8 +8,11 @@ dependencies (geometry engines like Shapely/GeoPandas are opt-in via methods).
 from __future__ import annotations
 
 import importlib
+import json
 from dataclasses import dataclass
 from heapq import nsmallest
+from itertools import zip_longest
+from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
 from .equations import DistanceMethod, area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
@@ -27,6 +30,27 @@ AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
 
 
 Coordinate = tuple[float, float]
+
+
+def _normalize_crs(crs: object | None) -> str | None:
+    if crs is None:
+        return None
+    try:
+        pyproj = importlib.import_module("pyproj")
+        resolved = pyproj.CRS.from_user_input(crs)
+        authority = resolved.to_authority()
+        if authority is not None:
+            return f"{authority[0]}:{authority[1]}"
+        return str(resolved.to_string())
+    except Exception:
+        text = str(crs).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            return f"EPSG:{text}"
+        if text.lower().startswith("epsg:"):
+            return f"EPSG:{text.split(':', 1)[1].strip()}"
+        return text.upper()
 
 
 def _row_sort_key(row: Record) -> str:
@@ -49,6 +73,16 @@ def _bounds_within(candidate: tuple[float, float, float, float], container: tupl
         and candidate[2] <= container[2]
         and candidate[3] <= container[3]
     )
+
+
+_ZIP_SENTINEL = object()
+
+
+def _zip_strict(*iterables: Iterable[Any]) -> Iterable[tuple[Any, ...]]:
+    for items in zip_longest(*iterables, fillvalue=_ZIP_SENTINEL):
+        if _ZIP_SENTINEL in items:
+            raise ValueError("zip() arguments must have equal length")
+        yield items
 
 
 @dataclass(frozen=True)
@@ -198,7 +232,7 @@ class GeoPromptFrame:
                 coordinates on its own.
         """
         self.geometry_column = geometry_column
-        self.crs = crs
+        self.crs = _normalize_crs(crs)
         self._rows = [dict(row) for row in rows]
         for row in self._rows:
             row[self.geometry_column] = normalize_geometry(row[self.geometry_column])
@@ -229,7 +263,7 @@ class GeoPromptFrame:
     ) -> "GeoPromptFrame":
         frame = cls.__new__(cls)
         frame.geometry_column = geometry_column
-        frame.crs = crs
+        frame.crs = _normalize_crs(crs)
         frame._rows = [dict(row) for row in rows]
         return frame
 
@@ -243,6 +277,12 @@ class GeoPromptFrame:
         geometry column).
         """
         return iter(self._rows)
+
+    def __getitem__(self, item: int | slice) -> Record | list[Record]:
+        """Return one row by index or a list of rows by slice."""
+        if isinstance(item, slice):
+            return [dict(row) for row in self._rows[item]]
+        return dict(self._rows[item])
 
     @property
     def columns(self) -> list[str]:
@@ -263,6 +303,42 @@ class GeoPromptFrame:
     def to_records(self) -> list[Record]:
         """Return all rows as a list of shallow-copied dicts."""
         return [dict(row) for row in self._rows]
+
+    def to_json(self, output_path: str | Path, indent: int = 2) -> str:
+        """Write the frame rows to JSON and return the output path."""
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self.to_records(), indent=indent), encoding="utf-8")
+        return str(path)
+
+    def select_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
+        """Return a new frame containing the requested columns and the geometry column."""
+        resolved = list(columns)
+        for column in resolved:
+            self._require_column(column)
+        if self.geometry_column not in resolved:
+            resolved.append(self.geometry_column)
+        rows = [{column: row[column] for column in resolved if column in row} for row in self._rows]
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def where(self, predicate: Any | None = None, **equals: Any) -> "GeoPromptFrame":
+        """Filter rows by equality conditions and/or a callable predicate."""
+        if predicate is not None and not callable(predicate):
+            raise TypeError("predicate must be callable when provided")
+        rows: list[Record] = []
+        for row in self._rows:
+            if any(row.get(key) != value for key, value in equals.items()):
+                continue
+            if predicate is not None and not bool(predicate(row)):
+                continue
+            rows.append(dict(row))
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def sort_values(self, by: str, descending: bool = False) -> "GeoPromptFrame":
+        """Return a new frame sorted by a column."""
+        self._require_column(by)
+        rows = sorted(self._rows, key=lambda row: (row.get(by) is None, row.get(by), _row_sort_key(row)), reverse=descending)
+        return GeoPromptFrame(rows=[dict(row) for row in rows], geometry_column=self.geometry_column, crs=self.crs)
 
     def bounds(self) -> Bounds:
         """Return the bounding box of all geometries in the frame.
@@ -382,6 +458,7 @@ class GeoPromptFrame:
         id_column: str = "site_id",
         k: int = 1,
         distance_method: DistanceMethod = "euclidean",
+        use_spatial_index: bool = True,
     ) -> list[Record]:
         """Find the *k* nearest neighbors for every row within the same frame.
 
@@ -404,15 +481,21 @@ class GeoPromptFrame:
 
         centroids = self._centroids()
         geometry_types = self.geometry_types()
+        spatial_index = self.build_spatial_index() if use_spatial_index and distance_method == "euclidean" and len(self._rows) > 1 else None
         nearest: list[Record] = []
         for origin_index, origin in enumerate(self._rows):
+            candidate_indices: Sequence[int] = range(len(self._rows))
+            if spatial_index is not None:
+                resolved_candidates = [index for index in spatial_index.nearest(centroids[origin_index], k + 1) if index != origin_index]
+                if len(resolved_candidates) >= k:
+                    candidate_indices = resolved_candidates
             candidates = [
                 (
-                    destination,
+                    self._rows[destination_index],
                     geometry_types[destination_index],
                     coordinate_distance(centroids[origin_index], centroids[destination_index], method=distance_method),
                 )
-                for destination_index, destination in enumerate(self._rows)
+                for destination_index in candidate_indices
                 if destination_index != origin_index
             ]
             for rank, (destination, destination_geometry_type, distance_value) in enumerate(
@@ -507,7 +590,7 @@ class GeoPromptFrame:
         )
         joined_rows: list[Record] = []
 
-        for left_row, left_centroid in zip(self._rows, left_centroids, strict=True):
+        for left_row, left_centroid in _zip_strict(self._rows, left_centroids):
             candidate_indices = None if right_index is None else right_index.nearest(left_centroid, k, max_distance=max_distance)
             row_matches = self._nearest_row_matches(
                 origin_centroid=left_centroid,
@@ -633,7 +716,7 @@ class GeoPromptFrame:
         target_centroids = targets._centroids()
         assignments: dict[str, list[tuple[Record, float]]] = {}
 
-        for target_row, target_centroid in zip(target_rows, target_centroids, strict=True):
+        for target_row, target_centroid in _zip_strict(target_rows, target_centroids):
             row_matches = self._nearest_row_matches(
                 origin_centroid=target_centroid,
                 right_rows=self._rows,
@@ -678,6 +761,7 @@ class GeoPromptFrame:
         id_column: str = "site_id",
         include_anchor: bool = False,
         distance_method: DistanceMethod = "euclidean",
+        use_spatial_index: bool = True,
     ) -> "GeoPromptFrame":
         """Return all rows within ``max_distance`` of an anchor, sorted by distance.
 
@@ -700,8 +784,19 @@ class GeoPromptFrame:
         anchor_geometry, anchor_id = self._resolve_anchor_geometry(anchor, id_column=id_column)
         anchor_centroid = geometry_centroid(anchor_geometry)
 
+        spatial_index = self.build_spatial_index() if use_spatial_index and distance_method == "euclidean" and self._rows else None
+        candidate_indices: Sequence[int] = range(len(self._rows))
+        if spatial_index is not None:
+            candidate_indices = spatial_index.query_centroids(
+                anchor_centroid[0] - max_distance,
+                anchor_centroid[1] - max_distance,
+                anchor_centroid[0] + max_distance,
+                anchor_centroid[1] + max_distance,
+            )
+
         rows: list[Record] = []
-        for row in self._rows:
+        for index in candidate_indices:
+            row = self._rows[index]
             row_id = str(row.get(id_column)) if id_column in row else None
             distance_value = coordinate_distance(anchor_centroid, geometry_centroid(row[self.geometry_column]), method=distance_method)
             if anchor_id is not None and not include_anchor and row_id == anchor_id:
@@ -724,6 +819,7 @@ class GeoPromptFrame:
         id_column: str = "site_id",
         include_anchor: bool = False,
         distance_method: DistanceMethod = "euclidean",
+        use_spatial_index: bool = True,
     ) -> list[bool]:
         """Return a boolean mask indicating which rows are within ``max_distance`` of the anchor.
 
@@ -743,13 +839,26 @@ class GeoPromptFrame:
         anchor_geometry, anchor_id = self._resolve_anchor_geometry(anchor, id_column=id_column)
         anchor_centroid = geometry_centroid(anchor_geometry)
         centroids = self._centroids()
+        matches = [False] * len(self._rows)
 
-        return [
-            False
-            if anchor_id is not None and not include_anchor and id_column in row and str(row[id_column]) == anchor_id
-            else coordinate_distance(anchor_centroid, centroid, method=distance_method) <= max_distance
-            for row, centroid in zip(self._rows, centroids, strict=True)
-        ]
+        candidate_indices: Sequence[int] = range(len(self._rows))
+        if use_spatial_index and distance_method == "euclidean" and self._rows:
+            spatial_index = self.build_spatial_index()
+            candidate_indices = spatial_index.query_centroids(
+                anchor_centroid[0] - max_distance,
+                anchor_centroid[1] - max_distance,
+                anchor_centroid[0] + max_distance,
+                anchor_centroid[1] + max_distance,
+            )
+
+        for index in candidate_indices:
+            row = self._rows[index]
+            centroid = centroids[index]
+            if anchor_id is not None and not include_anchor and id_column in row and str(row[id_column]) == anchor_id:
+                matches[index] = False
+                continue
+            matches[index] = coordinate_distance(anchor_centroid, centroid, method=distance_method) <= max_distance
+        return matches
 
     def proximity_join(
         self,
@@ -798,7 +907,7 @@ class GeoPromptFrame:
         )
         joined_rows: list[Record] = []
 
-        for left_row, left_centroid in zip(self._rows, left_centroids, strict=True):
+        for left_row, left_centroid in _zip_strict(self._rows, left_centroids):
             row_matches: list[tuple[Record, float]] = []
             candidate_indices = range(len(right_rows))
             if right_index is not None:
@@ -862,7 +971,7 @@ class GeoPromptFrame:
             resolution=resolution,
         )
         rows: list[Record] = []
-        for row, buffered_geometries in zip(self._rows, buffered_groups, strict=True):
+        for row, buffered_geometries in _zip_strict(self._rows, buffered_groups):
             for buffered_geometry in buffered_geometries:
                 buffered_row = dict(row)
                 buffered_row[self.geometry_column] = buffered_geometry
@@ -913,11 +1022,11 @@ class GeoPromptFrame:
         )
 
         joined_rows: list[Record] = []
-        for left_row, buffered_geometries in zip(self._rows, buffered_groups, strict=True):
+        for left_row, buffered_geometries in _zip_strict(self._rows, buffered_groups):
             row_matches: list[tuple[Record, Geometry]] = []
             for buffered_geometry in buffered_geometries:
                 buffered_bounds = geometry_bounds(buffered_geometry)
-                for right_row, right_bound in zip(right_rows, right_bounds, strict=True):
+                for right_row, right_bound in _zip_strict(right_rows, right_bounds):
                     if not _bounds_intersect(buffered_bounds, right_bound):
                         continue
                     if geometry_intersects(buffered_geometry, right_row[other.geometry_column]):
@@ -952,6 +1061,7 @@ class GeoPromptFrame:
         target_id_column: str = "site_id",
         aggregations: dict[str, AggregationName] | None = None,
         rsuffix: str = "covered",
+        use_spatial_index: bool = True,
     ) -> "GeoPromptFrame":
         """Count targets whose geometry satisfies a predicate with each self geometry.
 
@@ -979,6 +1089,7 @@ class GeoPromptFrame:
             targets._require_column(target_id_column)
         target_rows = list(targets._rows)
         target_bounds = [geometry_bounds(row[targets.geometry_column]) for row in target_rows]
+        target_index = targets.build_spatial_index() if use_spatial_index and target_rows else None
         predicate_bounds_filter = {
             "intersects": _bounds_intersect,
             "within": _bounds_within,
@@ -997,7 +1108,12 @@ class GeoPromptFrame:
             left_geometry = row[self.geometry_column]
             left_bounds = geometry_bounds(left_geometry)
             matched_rows: list[Record] = []
-            for target_row, target_bound in zip(target_rows, target_bounds, strict=True):
+            candidate_indices: Sequence[int] = range(len(target_rows))
+            if target_index is not None:
+                candidate_indices = target_index.query(left_bounds[0], left_bounds[1], left_bounds[2], left_bounds[3], mode="intersects")
+            for index in candidate_indices:
+                target_row = target_rows[index]
+                target_bound = target_bounds[index]
                 if not predicate_bounds_filter[predicate](left_bounds, target_bound):
                     continue
                 if matches(left_geometry, target_row[targets.geometry_column]):
@@ -1072,7 +1188,7 @@ class GeoPromptFrame:
         rows = [dict(self._rows[row_index]) for row_index in index.query(min_x, min_y, max_x, max_y, mode=mode)]
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
-    def set_crs(self, crs: str, allow_override: bool = False) -> "GeoPromptFrame":
+    def set_crs(self, crs: str | int, allow_override: bool = False) -> "GeoPromptFrame":
         """Attach a CRS label to the frame without transforming coordinates.
 
         Args:
@@ -1084,11 +1200,12 @@ class GeoPromptFrame:
         Returns:
             New :class:`GeoPromptFrame` with the CRS set.
         """
-        if self.crs is not None and self.crs != crs and not allow_override:
+        normalized_crs = _normalize_crs(crs)
+        if self.crs is not None and self.crs != normalized_crs and not allow_override:
             raise ValueError("frame already has a CRS; pass allow_override=True to replace it")
-        return GeoPromptFrame(rows=self.to_records(), geometry_column=self.geometry_column, crs=crs)
+        return GeoPromptFrame(rows=self.to_records(), geometry_column=self.geometry_column, crs=normalized_crs)
 
-    def to_crs(self, target_crs: str) -> "GeoPromptFrame":
+    def to_crs(self, target_crs: str | int) -> "GeoPromptFrame":
         """Reproject all geometries to a different CRS.
 
         Requires PyProj (``pip install -e .[projection]``).
@@ -1103,7 +1220,8 @@ class GeoPromptFrame:
         """
         if self.crs is None:
             raise ValueError("frame CRS is not set; call set_crs before reprojecting")
-        if self.crs == target_crs:
+        normalized_target_crs = _normalize_crs(target_crs)
+        if self.crs == normalized_target_crs:
             return GeoPromptFrame(rows=self.to_records(), geometry_column=self.geometry_column, crs=self.crs)
 
         try:
@@ -1111,7 +1229,7 @@ class GeoPromptFrame:
         except ImportError as exc:
             raise RuntimeError("Install projection support with 'pip install -e .[projection]' before calling to_crs.") from exc
 
-        transformer = pyproj.Transformer.from_crs(self.crs, target_crs, always_xy=True)
+        transformer = pyproj.Transformer.from_crs(self.crs, normalized_target_crs, always_xy=True)
 
         def reproject_coordinate(coordinate: Coordinate) -> Coordinate:
             x_value, y_value = transformer.transform(coordinate[0], coordinate[1])
@@ -1120,7 +1238,7 @@ class GeoPromptFrame:
         rows = self.to_records()
         for row in rows:
             row[self.geometry_column] = transform_geometry(row[self.geometry_column], reproject_coordinate)
-        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=target_crs)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=normalized_target_crs)
 
     def spatial_join(
         self,
@@ -1232,7 +1350,7 @@ class GeoPromptFrame:
             [row[mask.geometry_column] for row in mask_rows],
         )
         rows: list[Record] = []
-        for row, clipped_geometries in zip(self._rows, clipped_groups, strict=True):
+        for row, clipped_geometries in _zip_strict(self._rows, clipped_groups):
             for clipped_geometry in clipped_geometries:
                 clipped_row = dict(row)
                 clipped_row[self.geometry_column] = clipped_geometry
@@ -1354,7 +1472,7 @@ class GeoPromptFrame:
         if len(values) != len(self._rows):
             raise ValueError("column length must match the frame length")
         rows = self.to_records()
-        for row, value in zip(rows, values, strict=True):
+        for row, value in _zip_strict(rows, values):
             row[name] = value
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
@@ -1444,7 +1562,7 @@ class GeoPromptFrame:
                 "accessibility_score": score,
                 "decay_method": decay_method,
             }
-            for row, score in zip(self._rows, scores, strict=True)
+            for row, score in _zip_strict(self._rows, scores)
         )
 
     def gravity_interaction_series(
@@ -1502,7 +1620,7 @@ class GeoPromptFrame:
                 cost_column: float(row[cost_column]),
                 "gravity_interaction": value,
             }
-            for row, value in zip(self._rows, values, strict=True)
+            for row, value in _zip_strict(self._rows, values)
         )
 
     def service_probability_series(
@@ -1540,7 +1658,7 @@ class GeoPromptFrame:
                 **{column: float(row[column]) for column in predictor_columns},
                 "service_probability": probability,
             }
-            for row, probability in zip(self._rows, probabilities, strict=True)
+            for row, probability in _zip_strict(self._rows, probabilities)
         )
 
     def build_spatial_index(self, cell_size: float | None = None) -> GeoPromptSpatialIndex:
@@ -1550,6 +1668,201 @@ class GeoPromptFrame:
     def _require_column(self, name: str) -> None:
         if name not in self.columns:
             raise KeyError(f"column '{name}' is not present")
+
+    def catchment_competition(
+        self,
+        targets: "GeoPromptFrame",
+        distance: float,
+        target_id_column: str = "site_id",
+        distance_method: DistanceMethod = "euclidean",
+    ) -> "GeoPromptFrame":
+        """Summarize exclusive and contested target coverage by provider catchments."""
+        if distance < 0:
+            raise ValueError("distance must be zero or greater")
+        if self.crs and targets.crs and self.crs != targets.crs:
+            raise ValueError("frames must share the same CRS before catchment competition")
+        if targets._rows:
+            targets._require_column(target_id_column)
+
+        assignments: dict[int, list[Record]] = {index: [] for index in range(len(self._rows))}
+        contested: dict[int, list[str]] = {index: [] for index in range(len(self._rows))}
+        for target in targets._rows:
+            matches: list[tuple[int, float]] = []
+            target_centroid = geometry_centroid(target[targets.geometry_column])
+            for index, provider in enumerate(self._rows):
+                provider_centroid = geometry_centroid(provider[self.geometry_column])
+                gap = coordinate_distance(provider_centroid, target_centroid, method=distance_method)
+                if gap <= distance:
+                    matches.append((index, gap))
+            if len(matches) == 1:
+                assignments[matches[0][0]].append(target)
+            elif len(matches) > 1:
+                target_id = str(target[target_id_column])
+                for index, _ in matches:
+                    assignments[index].append(target)
+                    contested[index].append(target_id)
+
+        rows: list[Record] = []
+        for index, row in enumerate(self._rows):
+            matched = assignments[index]
+            contested_ids = sorted(set(contested[index]))
+            resolved = dict(row)
+            resolved[f"{target_id_column}s_competition"] = [str(item[target_id_column]) for item in matched]
+            resolved["count_competition"] = len(matched)
+            resolved["contested_target_ids_competition"] = contested_ids
+            resolved["exclusive_count_competition"] = max(0, len(matched) - len(contested_ids))
+            resolved["contested_count_competition"] = len(contested_ids)
+            rows.append(resolved)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or targets.crs)
+
+    def overlay_summary(
+        self,
+        other: "GeoPromptFrame",
+        target_id_column: str = "site_id",
+        rsuffix: str = "overlay",
+    ) -> "GeoPromptFrame":
+        """Summarize overlay results as counts and share metrics instead of raw intersections."""
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before overlay summaries")
+        if other._rows:
+            other._require_column(target_id_column)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            left_geometry = row[self.geometry_column]
+            left_area = geometry_area(left_geometry)
+            matched_rows: list[Record] = []
+            for other_row in other._rows:
+                if geometry_intersects(left_geometry, other_row[other.geometry_column]):
+                    matched_rows.append(other_row)
+            resolved = dict(row)
+            resolved[f"{target_id_column}s_{rsuffix}"] = [str(item[target_id_column]) for item in matched_rows]
+            resolved[f"count_{rsuffix}"] = len(matched_rows)
+            resolved[f"area_share_{rsuffix}"] = 1.0 if left_area > 0 and matched_rows else 0.0
+            rows.append(resolved)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or other.crs)
+
+    def corridor_reach(
+        self,
+        targets: "GeoPromptFrame",
+        max_distance: float,
+        target_id_column: str = "site_id",
+        rsuffix: str = "reach",
+    ) -> "GeoPromptFrame":
+        """Summarize which targets fall within a corridor-style reach distance of each geometry."""
+        if max_distance < 0:
+            raise ValueError("max_distance must be zero or greater")
+        if self.crs and targets.crs and self.crs != targets.crs:
+            raise ValueError("frames must share the same CRS before corridor reach")
+        if targets._rows:
+            targets._require_column(target_id_column)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            left_geometry = row[self.geometry_column]
+            matched_rows: list[Record] = []
+            left_bounds = geometry_bounds(left_geometry)
+            expanded_bounds = (
+                left_bounds[0] - max_distance,
+                left_bounds[1] - max_distance,
+                left_bounds[2] + max_distance,
+                left_bounds[3] + max_distance,
+            )
+            for target in targets._rows:
+                target_geometry = target[targets.geometry_column]
+                if not geometry_intersects_bounds(target_geometry, *expanded_bounds):
+                    continue
+                if geometry_intersects(left_geometry, target_geometry) or geometry_distance(left_geometry, target_geometry) <= max_distance:
+                    matched_rows.append(target)
+            resolved = dict(row)
+            resolved[f"{target_id_column}s_{rsuffix}"] = [str(item[target_id_column]) for item in matched_rows]
+            resolved[f"count_{rsuffix}"] = len(matched_rows)
+            rows.append(resolved)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or targets.crs)
+
+    def zone_fit_scoring(
+        self,
+        zones: "GeoPromptFrame",
+        zone_id_column: str = "site_id",
+        demand_column: str | None = None,
+        rsuffix: str = "zone_fit",
+    ) -> "GeoPromptFrame":
+        """Score how well each feature fits the nearest candidate zone."""
+        if self.crs and zones.crs and self.crs != zones.crs:
+            raise ValueError("frames must share the same CRS before zone fit scoring")
+        if zones._rows:
+            zones._require_column(zone_id_column)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            left_geometry = row[self.geometry_column]
+            left_area = max(geometry_area(left_geometry), 1e-9)
+            best_zone_id: str | None = None
+            best_score = -1.0
+            for zone in zones._rows:
+                zone_geometry = zone[zones.geometry_column]
+                distance_value = geometry_distance(left_geometry, zone_geometry)
+                similarity = area_similarity(
+                    origin_area=left_area,
+                    destination_area=max(geometry_area(zone_geometry), left_area),
+                    distance_value=distance_value,
+                    scale=1.0,
+                    power=1.0,
+                )
+                demand_factor = float(zone.get(demand_column, 1.0)) if demand_column is not None and demand_column in zone else 1.0
+                score = similarity * demand_factor
+                if score > best_score:
+                    best_score = score
+                    best_zone_id = str(zone[zone_id_column])
+            resolved = dict(row)
+            resolved[f"{zone_id_column}_{rsuffix}"] = best_zone_id
+            resolved[f"score_{rsuffix}"] = best_score if best_score >= 0 else None
+            resolved["zone_fit_score"] = best_score if best_score >= 0 else None
+            rows.append(resolved)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs or zones.crs)
+
+    def multi_scale_clustering(
+        self,
+        distance_threshold: float,
+        min_cluster_size: int = 1,
+        distance_method: DistanceMethod = "euclidean",
+    ) -> "GeoPromptFrame":
+        """Cluster nearby features using a simple deterministic connected-components approach."""
+        if distance_threshold < 0:
+            raise ValueError("distance_threshold must be zero or greater")
+        if min_cluster_size <= 0:
+            raise ValueError("min_cluster_size must be >= 1")
+
+        centroids = self._centroids()
+        cluster_ids = [-1] * len(self._rows)
+        current_cluster = 0
+        for index in range(len(self._rows)):
+            if cluster_ids[index] != -1:
+                continue
+            queue = [index]
+            members: list[int] = []
+            cluster_ids[index] = current_cluster
+            while queue:
+                current = queue.pop()
+                members.append(current)
+                for other in range(len(self._rows)):
+                    if cluster_ids[other] != -1:
+                        continue
+                    if coordinate_distance(centroids[current], centroids[other], method=distance_method) <= distance_threshold:
+                        cluster_ids[other] = current_cluster
+                        queue.append(other)
+            if len(members) < min_cluster_size:
+                for member in members:
+                    cluster_ids[member] = -1
+            else:
+                current_cluster += 1
+
+        rows = []
+        for row, cluster_id in _zip_strict(self._rows, cluster_ids):
+            resolved = dict(row)
+            resolved["cluster_id"] = cluster_id
+            rows.append(resolved)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def neighborhood_pressure(
         self,

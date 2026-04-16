@@ -57,6 +57,16 @@ def _graph_with_added_edges(graph: NetworkGraph, add_edges: list[dict[str, objec
     return build_network_graph(merged, directed=graph.directed)
 
 
+def _edge_headloss(edge: NetworkEdge) -> float:
+    if any(field in edge for field in {"length", "flow", "diameter", "roughness", "roughness_coefficient"}):
+        length = max(0.0, float(edge.get("length", edge.get("cost", 0.0))))
+        flow = max(0.0, float(edge.get("flow", edge.get("load", 0.0))))
+        diameter = max(1e-9, float(edge.get("diameter", 1.0)))
+        roughness = max(1e-9, float(edge.get("roughness_coefficient", edge.get("roughness", 130.0))))
+        return utility_headloss_hazen_williams(length, flow, diameter, roughness)
+    return max(0.0, float(edge.get("cost", 0.0)))
+
+
 def trace_electric_feeder(graph: NetworkGraph, source_nodes: list[str]) -> list[dict[str, Any]]:
     energized = _reachable_nodes(graph, source_nodes, respect_open_devices=True)
     rows: list[dict[str, Any]] = []
@@ -378,19 +388,48 @@ def resilience_capex_prioritization(
 
 def trace_water_pressure_zones(
     graph: NetworkGraph,
-    source_nodes: list[str],
-    max_headloss: float,
+    source_nodes: list[str] | None = None,
+    max_headloss: float | None = None,
+    *,
+    source_node: str | None = None,
+    supply_head: float | None = None,
+    min_residual_pressure: float = 0.0,
 ) -> list[dict[str, Any]]:
+    if source_nodes is None:
+        if source_node is None:
+            raise ValueError("source_nodes or source_node must be provided")
+        source_nodes = [source_node]
+    if not source_nodes:
+        raise ValueError("source_nodes must not be empty")
+    if min_residual_pressure < 0:
+        raise ValueError("min_residual_pressure must be zero or greater")
+    if max_headloss is None:
+        if supply_head is None:
+            raise ValueError("max_headloss or supply_head must be provided")
+        max_headloss = max(0.0, float(supply_head) - float(min_residual_pressure))
     if max_headloss < 0:
         raise ValueError("max_headloss must be zero or greater")
+
+    base_pressure = float(supply_head) if supply_head is not None else float(max_headloss)
     rows = service_area(graph, source_nodes, max_cost=math.inf)
     results: list[dict[str, Any]] = []
     for row in rows:
-        headloss = float(row["cost"])
+        node = str(row["node"])
+        assigned_source = str(row.get("assigned_origin", source_nodes[0]))
+        path = shortest_path(graph, assigned_source, node)
+        path_edges = list(path.get("path_edges", []))
+        if path_edges:
+            headloss = sum(_edge_headloss(graph.edge_attributes[edge_id]) for edge_id in path_edges)
+        else:
+            headloss = float(row["cost"])
+        residual_pressure = max(0.0, base_pressure - headloss)
         results.append(
             {
-                "node": row["node"],
+                "node": node,
+                "assigned_source": assigned_source,
                 "headloss": headloss,
+                "residual_pressure": residual_pressure,
+                "pressure_deficit": utility_service_deficit(base_pressure, residual_pressure),
                 "within_pressure_zone": headloss <= max_headloss,
             }
         )
@@ -429,8 +468,10 @@ def fire_flow_demand_check(
             {
                 "hydrant_node": hydrant,
                 "available_gpm": available,
+                "available_margin_gpm": available - float(demand_gpm),
                 "demand_gpm": float(demand_gpm),
                 "deficit_gpm": deficit,
+                "service_deficit": utility_service_deficit(float(demand_gpm), available),
                 "adequate_for_fire_flow": deficit <= 0.0,
             }
         )
@@ -442,14 +483,28 @@ def gas_pressure_drop_trace(
     source_node: str,
     inlet_pressure: float,
     drop_per_cost: float = 1.0,
+    minimum_required_pressure: float = 0.0,
 ) -> dict[str, Any]:
     rows = service_area(graph, [source_node], max_cost=math.inf)
     profile: list[dict[str, Any]] = []
     for row in rows:
         cost = float(row["cost"])
         pressure = max(0.0, float(inlet_pressure) - cost * drop_per_cost)
-        profile.append({"node": row["node"], "pressure": pressure})
-    return {"source_node": source_node, "zone_node_count": len(profile), "pressure_profile": profile}
+        profile.append(
+            {
+                "node": row["node"],
+                "pressure": pressure,
+                "pressure_deficit": utility_service_deficit(float(minimum_required_pressure), pressure),
+            }
+        )
+    min_pressure = min((float(item["pressure"]) for item in profile), default=0.0)
+    return {
+        "source_node": source_node,
+        "zone_node_count": len(profile),
+        "min_pressure": min_pressure,
+        "max_pressure": max((float(item["pressure"]) for item in profile), default=0.0),
+        "pressure_profile": profile,
+    }
 
 
 def gas_shutdown_impact(

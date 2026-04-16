@@ -241,13 +241,13 @@ Trace hydraulic head-loss from a source using a simplified Hazen-Williams model.
 ```python
 from geoprompt.network import trace_water_pressure_zones
 
-result = trace_water_pressure_zones(
+rows = trace_water_pressure_zones(
     graph,
     source_node="pump-station",
     supply_head=120.0,
     min_residual_pressure=20.0,
 )
-# result["low_pressure_nodes"], result["zone_pressure_profile"]
+# rows[0]["headloss"], rows[0]["residual_pressure"], rows[0]["within_pressure_zone"]
 ```
 
 ### `pipe_break_isolation_zones`

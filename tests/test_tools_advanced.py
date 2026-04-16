@@ -6,6 +6,7 @@ import json
 import pytest
 
 from geoprompt import GeoPromptFrame
+from geoprompt.table import PromptTable
 from geoprompt.equations import prompt_decay
 from geoprompt.interop import geopandas_available
 from geoprompt.tools import (
@@ -196,6 +197,26 @@ def test_batch_accessibility_scores_matches_scalar() -> None:
         for supplies, costs in zip(supply_rows, cost_rows)
     ]
     assert batch == pytest.approx(scalar)
+
+
+def test_prompt_table_supports_indexing_and_json_export(tmp_path) -> None:
+    table = PromptTable.from_records([
+        {"scenario": "a", "score": 10.0},
+        {"scenario": "b", "score": 20.0},
+    ])
+
+    assert table[0]["scenario"] == "a"
+    assert table[:1][0]["score"] == 10.0
+
+    output_path = tmp_path / "scores.json"
+    written = table.to_json(output_path)
+    assert written.endswith("scores.json")
+    assert '"scenario": "a"' in output_path.read_text(encoding="utf-8")
+
+    html_path = tmp_path / "scores.html"
+    html_written = table.to_html(html_path)
+    assert html_written.endswith("scores.html")
+    assert "<table>" in html_path.read_text(encoding="utf-8")
 
 
 def test_batch_tables_return_prompt_tables() -> None:

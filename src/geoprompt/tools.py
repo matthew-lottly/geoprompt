@@ -7,6 +7,7 @@ import random
 import statistics
 import time
 from html import escape
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -24,6 +25,18 @@ try:
     import numpy as _np
 except ImportError:  # pragma: no cover - optional dependency
     _np = None
+
+
+_ZIP_SENTINEL = object()
+
+
+def _zip_strict(*iterables: Sequence[Any]) -> list[tuple[Any, ...]]:
+    rows: list[tuple[Any, ...]] = []
+    for items in zip_longest(*iterables, fillvalue=_ZIP_SENTINEL):
+        if _ZIP_SENTINEL in items:
+            raise ValueError("zip() arguments must have equal length")
+        rows.append(items)
+    return rows
 
 
 def _validate_observed_pairs(observed_pairs: Sequence[tuple[float, float]]) -> tuple[list[float], list[float]]:
@@ -524,7 +537,7 @@ def batch_accessibility_table(
             "accessibility_score": score,
             "decay_method": decay_method,
         }
-        for row_id, score in zip(identifiers, scores, strict=True)
+        for row_id, score in _zip_strict(identifiers, scores)
     )
 
 
@@ -559,13 +572,12 @@ def gravity_interaction_table(
             "generalized_cost": float(cost),
             "gravity_interaction": value,
         }
-        for row_id, origin_mass, destination_mass, cost, value in zip(
+        for row_id, origin_mass, destination_mass, cost, value in _zip_strict(
             identifiers,
             origin_masses,
             destination_masses,
             generalized_costs,
             values,
-            strict=True,
         )
     )
 
@@ -582,7 +594,7 @@ def service_probability_table(
     if len(identifiers) != len(probabilities):
         raise ValueError("row_ids must match the number of predictor rows")
     rows: list[dict[str, float | str]] = []
-    for row_id, predictors, probability in zip(identifiers, predictor_rows, probabilities, strict=True):
+    for row_id, predictors, probability in _zip_strict(identifiers, predictor_rows, probabilities):
         row: dict[str, float | str] = {"row_id": row_id, "service_probability": probability}
         for key, value in predictors.items():
             row[key] = float(value)

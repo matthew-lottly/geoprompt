@@ -5,6 +5,7 @@ import importlib
 import statistics
 import time
 from dataclasses import dataclass
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Callable
 
@@ -30,6 +31,16 @@ class CorpusCase:
     join_path: Path | None = None
     feature_records: list[dict[str, Any]] | None = None
     join_records: list[dict[str, Any]] | None = None
+
+
+_ZIP_SENTINEL = object()
+
+
+def _zip_strict(*iterables: Any):
+    for items in zip_longest(*iterables, fillvalue=_ZIP_SENTINEL):
+        if _ZIP_SENTINEL in items:
+            raise ValueError("zip() arguments must have equal length")
+        yield items
 
 
 DEFAULT_CORPUS = [
@@ -307,13 +318,12 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
     )
 
     geometry_comparison: list[dict[str, Any]] = []
-    for record, geoprompt_length, geoprompt_area, geoprompt_centroid, shapely_geometry in zip(
+    for record, geoprompt_length, geoprompt_area, geoprompt_centroid, shapely_geometry in _zip_strict(
         records,
         geoprompt_lengths,
         geoprompt_areas,
         geoprompt_centroids,
         shapely_geometries,
-        strict=True,
     ):
         shapely_centroid = shapely_geometry.centroid
         geometry_comparison.append(
@@ -358,8 +368,8 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         region_geometries = [shape(_as_geojson_geometry(record["geometry"])) for record in regions.to_records()]
         region_ids = [str(record["region_id"]) for record in regions.to_records()]
         reference_pairs: list[str] = []
-        for region_id, region_geometry in zip(region_ids, region_geometries, strict=True):
-            for feature_id, feature_geometry in zip(feature_ids, shapely_geometries, strict=True):
+        for region_id, region_geometry in _zip_strict(region_ids, region_geometries):
+            for feature_id, feature_geometry in _zip_strict(feature_ids, shapely_geometries):
                 if region_geometry.intersects(feature_geometry):
                     reference_pairs.append(f"{region_id}->{feature_id}")
         join_report = {
@@ -419,8 +429,8 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             f"{case.name}.reference.spatial_join",
             lambda: [
                 f"{region_id}->{feature_id}"
-                for region_id, region_geometry in zip(region_ids, region_geometries, strict=True)
-                for feature_id, feature_geometry in zip(feature_ids, shapely_geometries, strict=True)
+                for region_id, region_geometry in _zip_strict(region_ids, region_geometries)
+                for feature_id, feature_geometry in _zip_strict(feature_ids, shapely_geometries)
                 if region_geometry.intersects(feature_geometry)
             ],
         )
@@ -466,10 +476,9 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
         "correctness": {
             "bounds_match": all(
                 abs(left - right) <= tolerance
-                for left, right in zip(
+                for left, right in _zip_strict(
                     [geoprompt_bounds["min_x"], geoprompt_bounds["min_y"], geoprompt_bounds["max_x"], geoprompt_bounds["max_y"]],
                     geopandas_bounds,
-                    strict=True,
                 )
             ),
             "nearest_neighbor_match": [item["neighbor"] for item in geoprompt_nearest] == [item["neighbor"] for item in reference_nearest],
@@ -483,10 +492,9 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
             ),
             "projected_bounds_match": all(
                 abs(left - right) <= projection_tolerance
-                for left, right in zip(
+                for left, right in _zip_strict(
                     [projected_bounds["min_x"], projected_bounds["min_y"], projected_bounds["max_x"], projected_bounds["max_y"]],
                     projected_reference_bounds,
-                    strict=True,
                 )
             ),
             "geometry_comparison": geometry_comparison,

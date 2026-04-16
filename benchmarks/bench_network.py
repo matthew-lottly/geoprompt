@@ -9,13 +9,15 @@ import time
 
 from geoprompt.network import (
     NetworkGraph,
+    NetworkRouter,
     build_network_graph,
+    gas_pressure_drop_trace,
     od_cost_matrix,
     run_utility_scenarios,
     service_area,
     shortest_path,
+    trace_water_pressure_zones,
     utility_bottlenecks,
-    NetworkRouter,
 )
 
 
@@ -92,6 +94,8 @@ def main() -> None:
             (f"n0_{c}", f"n{rows - 1}_{c}", 10.0) for c in range(min(4, cols))
         ]
         bench(f"utility_bottlenecks 4 OD ({size_label})", utility_bottlenecks, graph, od_demands)
+        bench(f"water pressure trace ({size_label})", trace_water_pressure_zones, graph, source_nodes=[origin], max_headloss=25.0)
+        bench(f"gas pressure trace ({size_label})", gas_pressure_drop_trace, graph, source_node=origin, inlet_pressure=100.0)
 
     # --- NetworkRouter caching comparison ---
     print("\n--- NetworkRouter cache benefit (20x20 grid) ---")

@@ -1,6 +1,6 @@
 # Geoprompt
 
-Custom spatial analysis package for point, line, and polygon workflows, GeoPandas-style frame access, GeoJSON-compatible inputs and outputs, CRS-aware reprojection, spatial joins, geographic distance options, and GeoPrompt-specific equations for influence, interaction, corridor strength, and neighborhood pressure.
+Custom spatial analysis package for point, line, polygon, and multi-part geometry workflows, GeoPandas-style frame access, GeoJSON-compatible inputs and outputs, CRS-aware reprojection, WKT-friendly tabular ingestion, spatial joins, geographic distance options, and GeoPrompt-specific equations for influence, interaction, corridor strength, and neighborhood pressure.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
@@ -27,13 +27,13 @@ Custom spatial analysis package for point, line, and polygon workflows, GeoPanda
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers, GeoJSON I/O, CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, reusable bounds indexing, indexed Euclidean joins (with optional non-indexed baseline mode), radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, PromptTable outputs for model/report workflows (filter/join/pivot/summarize), single- and multi-scenario report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers with multi-part support, GeoJSON and WKT-friendly I/O, normalized CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, reusable bounds indexing, indexed Euclidean joins (with optional non-indexed baseline mode), radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition, corridor reach, overlay summaries, zone-fit scoring, multi-scale clustering, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, PromptTable outputs for model/report workflows (filter/join/pivot/summarize/JSON/HTML export), single- and multi-scenario report tooling, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
 This project starts a reusable spatial package lane instead of another one-off analysis repo. The goal is to build a custom package that users can import directly, similar to how they would reach for GeoPandas, but focused first on a small and clear set of spatial equations that can grow over time.
 
-The initial version still stays intentionally simple, but it now goes beyond points: the frame can work with points, lines, and polygons represented through a small GeoJSON-like geometry mapping. That keeps the package small enough to iterate on while still showing a real package design direction.
+The initial version still stays intentionally simple, but it now goes beyond points: the frame can work with points, lines, polygons, and multi-part geometry represented through a small GeoJSON-like geometry mapping. It also accepts common WKT geometry strings in tabular inputs. That keeps the package small enough to iterate on while still showing a real package design direction.
 
 ## What It Demonstrates
 
@@ -64,7 +64,7 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 
 ## Example Usage
 
-Unified data-loading example (GeoJSON, CSV/TSV, and optional geospatial files):
+Unified data-loading example (GeoJSON, CSV/TSV, WKT-backed tables, and optional geospatial files):
 
 ```python
 import geoprompt as gp
@@ -79,6 +79,12 @@ points = gp.read_data(
     y_column="latitude",
     use_columns=["asset_id", "longitude", "latitude", "demand"],
     sample_step=2,
+)
+
+# Tabular WKT geometry column
+shapes = gp.read_table(
+    "assets_with_wkt.csv",
+    geometry_column="shape",
 )
 
 # Optional geospatial formats (requires geopandas extras): .shp, .gpkg, .gdb, .fgb
@@ -162,6 +168,9 @@ scores = gp.batch_accessibility_scores(
 index = frame.build_spatial_index()
 window = frame.query_bounds_indexed(-112.0, 40.6, -111.8, 40.8, spatial_index=index)
 joined = frame.proximity_join(frame, max_distance=0.08)
+ranked = frame.sort_values("site_id")
+filtered = frame.where(site_id="a")
+frame.to_json("outputs/frame.json")
 ```
 
 ```python
@@ -194,6 +203,8 @@ print(features.query_bounds(-111.97, 40.68, -111.84, 40.79).head())
 projected = features.set_crs("EPSG:4326").to_crs("EPSG:3857")
 print(projected.bounds())
 print(features.nearest_neighbors(k=2)[:4])
+clusters = features.multi_scale_clustering(distance_threshold=0.08)
+print(clusters.head(2))
 ```
 
 Spatial join example:
@@ -216,7 +227,7 @@ import geoprompt as gp
 assets = gp.read_features("data/benchmark_features.json", crs="EPSG:4326")
 regions = gp.read_features("data/benchmark_regions.json", crs="EPSG:4326")
 
-nearby = assets.query_radius(anchor="alpha-point", max_distance=0.06)
+nearby = assets.query_radius(anchor="alpha-point", max_distance=0.06, use_spatial_index=True)
 proximity = regions.proximity_join(assets, max_distance=0.08)
 
 print(nearby.head(3))

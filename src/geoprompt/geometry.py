@@ -30,28 +30,55 @@ def _normalize_ring(values: Any) -> tuple[Coordinate, ...]:
     return ring
 
 
+def _normalize_line(values: Any) -> tuple[Coordinate, ...]:
+    if not isinstance(values, (list, tuple)) or len(values) < 2:
+        raise TypeError("line geometry must contain at least two coordinates")
+    return tuple(_normalize_coordinate(coord) for coord in values)
+
+
+def _normalize_polygon(values: Any) -> tuple[Coordinate, ...]:
+    if not isinstance(values, (list, tuple)) or not values:
+        raise TypeError("polygon geometry must contain at least one ring")
+    first_value = values[0]
+    if isinstance(first_value, (list, tuple)) and len(first_value) == 2 and all(isinstance(item, (int, float)) for item in first_value):
+        return _normalize_ring(values)
+    return _normalize_ring(first_value)
+
+
 def normalize_geometry(value: Any) -> Geometry:
     if isinstance(value, dict):
         geometry_type = value.get("type")
         coordinates = value.get("coordinates")
         if geometry_type == "Point":
             return {"type": "Point", "coordinates": _normalize_coordinate(coordinates)}
-        if geometry_type == "LineString":
-            if not isinstance(coordinates, (list, tuple)) or len(coordinates) < 2:
-                raise TypeError("line geometry must contain at least two coordinates")
+        if geometry_type == "MultiPoint":
+            if not isinstance(coordinates, (list, tuple)) or not coordinates:
+                raise TypeError("multi-point geometry must contain at least one coordinate")
             return {
-                "type": "LineString",
+                "type": "MultiPoint",
                 "coordinates": tuple(_normalize_coordinate(coord) for coord in coordinates),
             }
-        if geometry_type == "Polygon":
+        if geometry_type == "LineString":
+            return {
+                "type": "LineString",
+                "coordinates": _normalize_line(coordinates),
+            }
+        if geometry_type == "MultiLineString":
             if not isinstance(coordinates, (list, tuple)) or not coordinates:
-                raise TypeError("polygon geometry must contain at least one ring")
-            first_value = coordinates[0]
-            if isinstance(first_value, (list, tuple)) and len(first_value) == 2 and all(isinstance(item, (int, float)) for item in first_value):
-                ring = _normalize_ring(coordinates)
-            else:
-                ring = _normalize_ring(first_value)
-            return {"type": "Polygon", "coordinates": ring}
+                raise TypeError("multi-line geometry must contain at least one line")
+            return {
+                "type": "MultiLineString",
+                "coordinates": tuple(_normalize_line(line) for line in coordinates),
+            }
+        if geometry_type == "Polygon":
+            return {"type": "Polygon", "coordinates": _normalize_polygon(coordinates)}
+        if geometry_type == "MultiPolygon":
+            if not isinstance(coordinates, (list, tuple)) or not coordinates:
+                raise TypeError("multi-polygon geometry must contain at least one polygon")
+            return {
+                "type": "MultiPolygon",
+                "coordinates": tuple(_normalize_polygon(polygon) for polygon in coordinates),
+            }
         raise TypeError("unsupported geometry type")
 
     if isinstance(value, (list, tuple)) and len(value) == 2 and all(isinstance(item, (int, float)) for item in value):
@@ -64,22 +91,63 @@ def geometry_type(geometry: Geometry) -> str:
     return str(geometry["type"])
 
 
+def _component_geometries(geometry: Geometry) -> tuple[Geometry, ...]:
+    geometry_kind = geometry_type(geometry)
+    coordinates = geometry["coordinates"]
+    if geometry_kind in {"Point", "LineString", "Polygon"}:
+        return (geometry,)
+    if geometry_kind == "MultiPoint":
+        return tuple({"type": "Point", "coordinates": coordinate} for coordinate in coordinates)  # type: ignore[arg-type]
+    if geometry_kind == "MultiLineString":
+        return tuple({"type": "LineString", "coordinates": tuple(line)} for line in coordinates)  # type: ignore[arg-type]
+    if geometry_kind == "MultiPolygon":
+        return tuple({"type": "Polygon", "coordinates": tuple(polygon)} for polygon in coordinates)  # type: ignore[arg-type]
+    raise TypeError("unsupported geometry type")
+
+
 def geometry_vertices(geometry: Geometry) -> tuple[Coordinate, ...]:
     geometry_kind = geometry_type(geometry)
     coordinates = geometry["coordinates"]
     if geometry_kind == "Point":
         return (coordinates,)  # type: ignore[return-value]
-    return tuple(coordinates)  # type: ignore[return-value]
+    if geometry_kind in {"LineString", "Polygon", "MultiPoint"}:
+        return tuple(coordinates)  # type: ignore[return-value]
+    if geometry_kind == "MultiLineString":
+        return tuple(vertex for line in coordinates for vertex in line)  # type: ignore[return-value]
+    if geometry_kind == "MultiPolygon":
+        return tuple(vertex for polygon in coordinates for vertex in polygon)  # type: ignore[return-value]
+    raise TypeError("unsupported geometry type")
 
 
 def transform_geometry(geometry: Geometry, transform: Callable[[Coordinate], Coordinate]) -> Geometry:
     geometry_kind = geometry_type(geometry)
     if geometry_kind == "Point":
         return {"type": "Point", "coordinates": transform(geometry_vertices(geometry)[0])}
+    if geometry_kind == "MultiPoint":
+        return {
+            "type": "MultiPoint",
+            "coordinates": tuple(transform(vertex) for vertex in geometry_vertices(geometry)),
+        }
     if geometry_kind == "LineString":
         return {"type": "LineString", "coordinates": tuple(transform(vertex) for vertex in geometry_vertices(geometry))}
+    if geometry_kind == "MultiLineString":
+        return {
+            "type": "MultiLineString",
+            "coordinates": tuple(
+                tuple(transform(vertex) for vertex in part["coordinates"])
+                for part in _component_geometries(geometry)
+            ),
+        }
     if geometry_kind == "Polygon":
         return {"type": "Polygon", "coordinates": tuple(transform(vertex) for vertex in geometry_vertices(geometry))}
+    if geometry_kind == "MultiPolygon":
+        return {
+            "type": "MultiPolygon",
+            "coordinates": tuple(
+                tuple(transform(vertex) for vertex in part["coordinates"])
+                for part in _component_geometries(geometry)
+            ),
+        }
     raise TypeError("unsupported geometry type")
 
 
@@ -185,6 +253,15 @@ def _point_in_polygon(point: Coordinate, polygon: Geometry) -> bool:
 
 
 def geometry_intersects(origin: Geometry, destination: Geometry) -> bool:
+    origin_parts = _component_geometries(origin)
+    destination_parts = _component_geometries(destination)
+    if len(origin_parts) > 1 or len(destination_parts) > 1:
+        return any(
+            geometry_intersects(origin_part, destination_part)
+            for origin_part in origin_parts
+            for destination_part in destination_parts
+        )
+
     origin_type = geometry_type(origin)
     destination_type = geometry_type(destination)
 
@@ -227,11 +304,21 @@ def geometry_intersects(origin: Geometry, destination: Geometry) -> bool:
 
 
 def geometry_within(candidate: Geometry, container: Geometry) -> bool:
+    candidate_parts = _component_geometries(candidate)
+    container_parts = _component_geometries(container)
+    if len(candidate_parts) > 1:
+        return all(geometry_within(part, container) for part in candidate_parts)
+    if len(container_parts) > 1:
+        return any(geometry_within(candidate, part) for part in container_parts)
+
     candidate_type = geometry_type(candidate)
     container_type = geometry_type(container)
 
     if container_type == "Polygon":
-        return all(_point_in_polygon(vertex, container) for vertex in geometry_vertices(candidate))
+        vertices = geometry_vertices(candidate)
+        if candidate_type == "Polygon":
+            vertices = vertices[:-1]
+        return all(_point_in_polygon(vertex, container) for vertex in vertices)
     if candidate_type == "Point" and container_type == "LineString":
         point = geometry_vertices(candidate)[0]
         return any(_point_on_segment(point, start, end) for start, end in _segments(geometry_vertices(container)))
@@ -252,6 +339,11 @@ def geometry_contains(container: Geometry, candidate: Geometry) -> bool:
 
 
 def geometry_length(geometry: Geometry) -> float:
+    geometry_kind = geometry_type(geometry)
+    if geometry_kind in {"Point", "MultiPoint"}:
+        return 0.0
+    if geometry_kind in {"MultiLineString", "MultiPolygon"}:
+        return sum(geometry_length(part) for part in _component_geometries(geometry))
     vertices = geometry_vertices(geometry)
     if len(vertices) < 2:
         return 0.0
@@ -259,7 +351,10 @@ def geometry_length(geometry: Geometry) -> float:
 
 
 def geometry_area(geometry: Geometry) -> float:
-    if geometry_type(geometry) != "Polygon":
+    geometry_kind = geometry_type(geometry)
+    if geometry_kind == "MultiPolygon":
+        return sum(geometry_area(part) for part in _component_geometries(geometry))
+    if geometry_kind != "Polygon":
         return 0.0
     ring = geometry_vertices(geometry)
     area = 0.0
@@ -271,10 +366,18 @@ def geometry_area(geometry: Geometry) -> float:
 
 
 def geometry_centroid(geometry: Geometry) -> Coordinate:
-    if geometry_type(geometry) == "Point":
+    geometry_kind = geometry_type(geometry)
+    if geometry_kind == "Point":
         return geometry["coordinates"]  # type: ignore[return-value]
 
-    if geometry_type(geometry) == "LineString":
+    if geometry_kind == "MultiPoint":
+        vertices = geometry_vertices(geometry)
+        return (
+            sum(coord[0] for coord in vertices) / len(vertices),
+            sum(coord[1] for coord in vertices) / len(vertices),
+        )
+
+    if geometry_kind == "LineString":
         vertices = geometry_vertices(geometry)
         total_length = 0.0
         centroid_x = 0.0
@@ -291,7 +394,18 @@ def geometry_centroid(geometry: Geometry) -> Coordinate:
         if total_length != 0.0:
             return (centroid_x / total_length, centroid_y / total_length)
 
-    if geometry_type(geometry) == "Polygon":
+    if geometry_kind == "MultiLineString":
+        parts = _component_geometries(geometry)
+        weights = [geometry_length(part) for part in parts]
+        total_weight = sum(weights)
+        if total_weight != 0.0:
+            centroids = [geometry_centroid(part) for part in parts]
+            return (
+                sum(centroid[0] * weight for centroid, weight in zip(centroids, weights)) / total_weight,
+                sum(centroid[1] * weight for centroid, weight in zip(centroids, weights)) / total_weight,
+            )
+
+    if geometry_kind == "Polygon":
         ring = geometry_vertices(geometry)
         area_factor = 0.0
         centroid_x = 0.0
@@ -306,6 +420,17 @@ def geometry_centroid(geometry: Geometry) -> Coordinate:
         if area_factor != 0.0:
             factor = 1.0 / (3.0 * area_factor)
             return (centroid_x * factor, centroid_y * factor)
+
+    if geometry_kind == "MultiPolygon":
+        parts = _component_geometries(geometry)
+        weights = [geometry_area(part) for part in parts]
+        total_weight = sum(weights)
+        if total_weight != 0.0:
+            centroids = [geometry_centroid(part) for part in parts]
+            return (
+                sum(centroid[0] * weight for centroid, weight in zip(centroids, weights)) / total_weight,
+                sum(centroid[1] * weight for centroid, weight in zip(centroids, weights)) / total_weight,
+            )
 
     vertices = geometry_vertices(geometry)
     return (

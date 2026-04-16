@@ -45,6 +45,77 @@ def _validate_read_options(
         raise ValueError("chunk_size must be >= 1")
 
 
+def _parse_coordinate_pairs(body: str) -> list[list[float]] | None:
+    coordinates: list[list[float]] = []
+    for pair in body.split(","):
+        parts = pair.strip().split()
+        if len(parts) < 2:
+            return None
+        try:
+            coordinates.append([float(parts[0]), float(parts[1])])
+        except ValueError:
+            return None
+    return coordinates or None
+
+
+def _split_wkt_groups(body: str) -> list[str]:
+    groups: list[str] = []
+    depth = 0
+    start: int | None = None
+    for index, char in enumerate(body):
+        if char == "(":
+            if depth == 0:
+                start = index + 1
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0 and start is not None:
+                groups.append(body[start:index].strip())
+                start = None
+    return groups
+
+
+def _split_top_level_parts(body: str) -> list[str]:
+    parts: list[str] = []
+    depth = 0
+    token: list[str] = []
+    for char in body:
+        if char == "," and depth == 0:
+            part = "".join(token).strip()
+            if part:
+                parts.append(part)
+            token = []
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+        token.append(char)
+    part = "".join(token).strip()
+    if part:
+        parts.append(part)
+    return parts
+
+
+def _strip_outer_group(body: str) -> str:
+    text = body.strip()
+    while text.startswith("(") and text.endswith(")"):
+        depth = 0
+        wrapped = True
+        for index, char in enumerate(text):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+            if depth == 0 and index < len(text) - 1:
+                wrapped = False
+                break
+        if not wrapped:
+            break
+        text = text[1:-1].strip()
+    return text
+
+
 def _parse_point_wkt(value: str) -> dict[str, Any] | None:
     text = value.strip()
     upper = text.upper()
@@ -53,15 +124,88 @@ def _parse_point_wkt(value: str) -> dict[str, Any] | None:
     if "(" not in text or ")" not in text:
         return None
     body = text[text.find("(") + 1 : text.rfind(")")].strip()
-    parts = body.split()
-    if len(parts) < 2:
+    coordinates = _parse_coordinate_pairs(body)
+    if not coordinates:
         return None
-    try:
-        x_value = float(parts[0])
-        y_value = float(parts[1])
-    except ValueError:
-        return None
+    x_value, y_value = coordinates[0]
     return {"type": "Point", "coordinates": [x_value, y_value]}
+
+
+def _parse_linestring_wkt(value: str) -> dict[str, Any] | None:
+    text = value.strip()
+    upper = text.upper()
+    if not upper.startswith("LINESTRING"):
+        return None
+    if "(" not in text or ")" not in text:
+        return None
+    body = text[text.find("(") + 1 : text.rfind(")")].strip()
+    coordinates = _parse_coordinate_pairs(body)
+    if not coordinates or len(coordinates) < 2:
+        return None
+    return {"type": "LineString", "coordinates": coordinates}
+
+
+def _parse_polygon_wkt(value: str) -> dict[str, Any] | None:
+    text = value.strip()
+    upper = text.upper()
+    if not upper.startswith("POLYGON"):
+        return None
+    if "((" not in text or "))" not in text:
+        return None
+    body = text[text.find("((") + 2 : text.rfind("))")].strip()
+    ring_text = body.split("),(", 1)[0]
+    coordinates = _parse_coordinate_pairs(ring_text)
+    if not coordinates or len(coordinates) < 3:
+        return None
+    return {"type": "Polygon", "coordinates": [coordinates]}
+
+
+def _parse_multipoint_wkt(value: str) -> dict[str, Any] | None:
+    text = value.strip()
+    upper = text.upper()
+    if not upper.startswith("MULTIPOINT"):
+        return None
+    if "(" not in text or ")" not in text:
+        return None
+    body = text[text.find("(") + 1 : text.rfind(")")].replace("(", "").replace(")", "").strip()
+    coordinates = _parse_coordinate_pairs(body)
+    if not coordinates:
+        return None
+    return {"type": "MultiPoint", "coordinates": coordinates}
+
+
+def _parse_multilinestring_wkt(value: str) -> dict[str, Any] | None:
+    text = value.strip()
+    upper = text.upper()
+    if not upper.startswith("MULTILINESTRING"):
+        return None
+    if "(" not in text or ")" not in text:
+        return None
+    body = _strip_outer_group(text[text.find("(") : text.rfind(")") + 1])
+    lines = [_parse_coordinate_pairs(_strip_outer_group(group)) for group in _split_top_level_parts(body)]
+    if not lines or any(line is None or len(line) < 2 for line in lines):
+        return None
+    return {"type": "MultiLineString", "coordinates": lines}
+
+
+def _parse_multipolygon_wkt(value: str) -> dict[str, Any] | None:
+    text = value.strip()
+    upper = text.upper()
+    if not upper.startswith("MULTIPOLYGON"):
+        return None
+    if "(" not in text or ")" not in text:
+        return None
+    body = _strip_outer_group(text[text.find("(") : text.rfind(")") + 1])
+    polygons: list[list[list[float]]] = []
+    for group in _split_top_level_parts(body):
+        ring_text = _strip_outer_group(group)
+        coordinates = _parse_coordinate_pairs(ring_text)
+        if not coordinates or len(coordinates) < 3:
+            return None
+        polygons.append(coordinates)
+    if not polygons:
+        return None
+    return {"type": "MultiPolygon", "coordinates": [[polygon] for polygon in polygons]}
 
 
 def _coerce_geometry_value(value: Any) -> dict[str, Any] | None:
@@ -79,7 +223,14 @@ def _coerce_geometry_value(value: Any) -> dict[str, Any] | None:
             parsed = None
         if isinstance(parsed, dict) and "type" in parsed and "coordinates" in parsed:
             return parsed
-    return _parse_point_wkt(text)
+    return (
+        _parse_point_wkt(text)
+        or _parse_multipoint_wkt(text)
+        or _parse_linestring_wkt(text)
+        or _parse_multilinestring_wkt(text)
+        or _parse_polygon_wkt(text)
+        or _parse_multipolygon_wkt(text)
+    )
 
 
 def _feature_to_record(feature: dict[str, Any], geometry: str) -> dict[str, Any]:
@@ -682,8 +833,9 @@ def iter_csv_points(
 def read_table(
     path: str | Path,
     *,
-    x_column: str,
-    y_column: str,
+    x_column: str | None = None,
+    y_column: str | None = None,
+    geometry_column: str | None = None,
     geometry: str = "geometry",
     crs: str | None = None,
     use_columns: Sequence[str] | None = None,
@@ -692,13 +844,14 @@ def read_table(
     delimiter: str = ",",
     encoding: str = "utf-8",
 ) -> GeoPromptFrame:
-    """Simple tabular reader wrapper for point-based CSV/TSV data."""
+    """Simple tabular reader wrapper for point-based or geometry-column CSV/TSV data."""
     return read_data(
         path,
         geometry=geometry,
         crs=crs,
         x_column=x_column,
         y_column=y_column,
+        geometry_column=geometry_column,
         use_columns=use_columns,
         limit_rows=limit_rows,
         sample_step=sample_step,
@@ -727,10 +880,16 @@ def _as_geojson_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
     coordinates = geometry["coordinates"]
     if geometry_kind == "Point":
         return {"type": "Point", "coordinates": list(coordinates)}
+    if geometry_kind == "MultiPoint":
+        return {"type": "MultiPoint", "coordinates": [list(coord) for coord in coordinates]}
     if geometry_kind == "LineString":
         return {"type": "LineString", "coordinates": [list(coord) for coord in coordinates]}
+    if geometry_kind == "MultiLineString":
+        return {"type": "MultiLineString", "coordinates": [[list(coord) for coord in line] for line in coordinates]}
     if geometry_kind == "Polygon":
         return {"type": "Polygon", "coordinates": [[list(coord) for coord in coordinates]]}
+    if geometry_kind == "MultiPolygon":
+        return {"type": "MultiPolygon", "coordinates": [[[list(coord) for coord in polygon]] for polygon in coordinates]}
     raise TypeError(f"unsupported geometry type: {geometry_kind}")
 
 

@@ -99,7 +99,7 @@ The package-level batch helpers also have table-returning companions:
 - `gravity_interaction_table(...)`
 - `service_probability_table(...)`
 
-`PromptTable` also supports lightweight grouped summaries for reporting workflows:
+`PromptTable` also supports lightweight grouped summaries plus direct JSON and HTML export for reporting workflows:
 
 ```python
 import geoprompt as gp
@@ -112,6 +112,8 @@ table = gp.batch_accessibility_table(
 
 summary = table.summarize("row_id", {"accessibility_score": "mean"})
 print(summary.to_markdown())
+table.to_json("outputs/accessibility.json")
+table.to_html("outputs/accessibility.html")
 ```
 
 ## Indexed Bounds Queries

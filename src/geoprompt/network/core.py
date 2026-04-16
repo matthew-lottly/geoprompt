@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NotRequired, Required, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
+
+try:
+    from typing import NotRequired, Required
+except ImportError:  # pragma: no cover - Python < 3.11 fallback
+    from typing_extensions import NotRequired, Required
 
 if TYPE_CHECKING:
     from collections.abc import Iterable

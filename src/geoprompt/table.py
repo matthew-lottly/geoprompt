@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 
@@ -23,6 +24,11 @@ class PromptTable:
 
     def __iter__(self):
         return iter(self._rows)
+
+    def __getitem__(self, item: int | slice) -> Record | list[Record]:
+        if isinstance(item, slice):
+            return [dict(row) for row in self._rows[item]]
+        return dict(self._rows[item])
 
     @property
     def columns(self) -> list[str]:
@@ -196,6 +202,27 @@ class PromptTable:
             writer = csv.DictWriter(handle, fieldnames=self.columns)
             writer.writeheader()
             writer.writerows(self._rows)
+        return str(path)
+
+    def to_json(self, output_path: str | Path, indent: int = 2) -> str:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(self._rows, indent=indent), encoding="utf-8")
+        return str(path)
+
+    def to_html(self, output_path: str | Path) -> str:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._rows:
+            html = "<table></table>"
+        else:
+            header = "".join(f"<th>{column}</th>" for column in self.columns)
+            body = "".join(
+                "<tr>" + "".join(f"<td>{row.get(column, '')}</td>" for column in self.columns) + "</tr>"
+                for row in self._rows
+            )
+            html = f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+        path.write_text(html, encoding="utf-8")
         return str(path)
 
 

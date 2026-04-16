@@ -700,6 +700,21 @@ class TestTraceWaterPressureZones:
         rows = trace_water_pressure_zones(g, source_nodes=["A"], max_headloss=1e6)
         assert all(r["within_pressure_zone"] for r in rows)
 
+    def test_uses_pipe_attributes_for_hydraulic_profile(self):
+        g = build_network_graph(
+            [
+                {"edge_id": "p1", "from_node": "A", "to_node": "B", "cost": 1.0, "length": 500.0, "flow": 250.0, "diameter": 12.0},
+                {"edge_id": "p2", "from_node": "B", "to_node": "C", "cost": 1.0, "length": 500.0, "flow": 250.0, "diameter": 12.0},
+            ],
+            directed=False,
+        )
+        rows = trace_water_pressure_zones(g, source_nodes=["A"], max_headloss=10.0)
+        by_node = {row["node"]: row for row in rows}
+
+        assert "residual_pressure" in by_node["B"]
+        assert by_node["C"]["headloss"] >= by_node["B"]["headloss"]
+        assert by_node["A"]["residual_pressure"] >= by_node["C"]["residual_pressure"]
+
     def test_negative_headloss_raises(self):
         g = _linear_graph()
         with pytest.raises(ValueError):
@@ -721,6 +736,7 @@ class TestFireFlowDemand:
         )
         results = fire_flow_demand_check(g, hydrant_nodes=["H"], demand_gpm=1000.0)
         assert results[0]["adequate_for_fire_flow"] is True
+        assert results[0]["service_deficit"] == 0.0
 
     def test_deficit(self):
         g = build_network_graph(
@@ -730,6 +746,8 @@ class TestFireFlowDemand:
         results = fire_flow_demand_check(g, hydrant_nodes=["H"], demand_gpm=1000.0)
         assert results[0]["adequate_for_fire_flow"] is False
         assert results[0]["deficit_gpm"] > 0
+        assert results[0]["service_deficit"] > 0.0
+        assert "available_margin_gpm" in results[0]
 
 
 # ─── Gas Domain ──────────────────────────────────────────────────────────────
@@ -740,6 +758,8 @@ class TestGasPressureDrop:
         g = _linear_graph(3)
         result = gas_pressure_drop_trace(g, source_node="A", inlet_pressure=100.0)
         assert result["zone_node_count"] >= 2
+        assert "min_pressure" in result
+        assert "pressure_deficit" in result["pressure_profile"][0]
 
 
 class TestGasShutdownImpact:

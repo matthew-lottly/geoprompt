@@ -7,7 +7,7 @@ name = "geoprompt"
 version = "0.1.7"
 description = "Custom spatial analysis package with GeoPandas-style frame workflows and GeoPrompt equations."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.9"
 license = "MIT"
 keywords = ["spatial-analysis", "gis", "geojson", "geometry"]
 classifiers = [
@@ -21,6 +21,7 @@ classifiers = [
 ]
 dependencies = [
     "matplotlib>=3.9,<4.0",
+    "typing-extensions>=4.8; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
