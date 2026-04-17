@@ -27,6 +27,7 @@ BoundsQueryMode = Literal["intersects", "within", "centroid"]
 SpatialJoinPredicate = Literal["intersects", "within", "contains"]
 SpatialJoinMode = Literal["inner", "left"]
 AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
+FillMethod = Literal["ffill", "bfill"]
 
 
 Coordinate = tuple[float, float]
@@ -2259,5 +2260,681 @@ class GeoPromptFrame:
                 interactions.append(record)
         return interactions
 
+    # --- Analyst ergonomics methods ---
 
-__all__ = ["Bounds", "GeoPromptFrame", "GeoPromptSpatialIndex"]
+    def groupby(self, by: str | Sequence[str]) -> "GroupedGeoPromptFrame":
+        """Group rows by one or more columns for aggregation.
+
+        Args:
+            by: Column name or sequence of column names to group by.
+
+        Returns:
+            :class:`GroupedGeoPromptFrame` supporting ``.agg()`` calls.
+        """
+        group_columns = [by] if isinstance(by, str) else list(by)
+        if not group_columns:
+            raise ValueError("groupby requires at least one column")
+        for col in group_columns:
+            self._require_column(col)
+        return GroupedGeoPromptFrame(self._rows, group_columns, self.geometry_column, self.crs)
+
+    def pivot(
+        self,
+        index: str,
+        columns: str,
+        values: str,
+        agg: str = "sum",
+    ) -> PromptTable:
+        """Pivot the frame into a cross-tabulated :class:`PromptTable`.
+
+        Args:
+            index: Column whose unique values become rows.
+            columns: Column whose unique values become new columns.
+            values: Column to aggregate.
+            agg: Aggregation function name.
+
+        Returns:
+            A :class:`PromptTable` with the pivoted data.
+        """
+        for col in [index, columns, values]:
+            self._require_column(col)
+        table = PromptTable(self.to_records())
+        return table.pivot(index=index, columns=columns, values=values, agg=agg)
+
+    def value_counts(self, column: str, normalize: bool = False, dropna: bool = True) -> PromptTable:
+        """Count unique values in a column.
+
+        Args:
+            column: Column to count.
+            normalize: If ``True``, return shares instead of counts.
+            dropna: If ``True``, exclude ``None`` values.
+
+        Returns:
+            A :class:`PromptTable` with value counts.
+        """
+        self._require_column(column)
+        table = PromptTable(self.to_records())
+        return table.value_counts(column=column, normalize=normalize, dropna=dropna)
+
+    def describe(self, columns: Sequence[str] | None = None) -> PromptTable:
+        """Return descriptive statistics for selected columns.
+
+        Args:
+            columns: List of columns to describe.  Defaults to all
+                non-geometry columns.
+
+        Returns:
+            A :class:`PromptTable` with per-column statistics.
+        """
+        selected = list(columns) if columns is not None else [c for c in self.columns if c != self.geometry_column]
+        table = PromptTable(self.to_records())
+        return table.describe(columns=selected)
+
+    def fillna(self, value: Any = None, column: str | None = None, method: FillMethod | None = None) -> "GeoPromptFrame":
+        """Fill null values in the frame.
+
+        Args:
+            value: Scalar replacement value, or a dict mapping column names to
+                replacement values.
+            column: If given, only fill nulls in this column.
+            method: ``"ffill"`` (forward fill) or ``"bfill"`` (backward fill).
+
+        Returns:
+            New :class:`GeoPromptFrame` with nulls replaced.
+        """
+        rows = self.to_records()
+        if method == "ffill":
+            last: dict[str, Any] = {}
+            for row in rows:
+                targets = [column] if column else [k for k in row if k != self.geometry_column]
+                for col in targets:
+                    if row.get(col) is None and col in last:
+                        row[col] = last[col]
+                    elif row.get(col) is not None:
+                        last[col] = row[col]
+            return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        if method == "bfill":
+            last = {}
+            for row in reversed(rows):
+                targets = [column] if column else [k for k in row if k != self.geometry_column]
+                for col in targets:
+                    if row.get(col) is None and col in last:
+                        row[col] = last[col]
+                    elif row.get(col) is not None:
+                        last[col] = row[col]
+            return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+        fill_map: dict[str, Any] = {}
+        if isinstance(value, dict):
+            fill_map = value
+        elif column is not None:
+            fill_map = {column: value}
+        else:
+            for col in (self.columns if self._rows else []):
+                if col != self.geometry_column:
+                    fill_map[col] = value
+
+        for row in rows:
+            for col, fill_val in fill_map.items():
+                if row.get(col) is None:
+                    row[col] = fill_val
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def dropna(self, subset: Sequence[str] | None = None, how: str = "any") -> "GeoPromptFrame":
+        """Drop rows with null values.
+
+        Args:
+            subset: Columns to check for nulls.  Defaults to all
+                non-geometry columns.
+            how: ``"any"`` drops rows with any null; ``"all"`` drops only
+                rows where every checked column is null.
+
+        Returns:
+            New :class:`GeoPromptFrame` with null rows removed.
+        """
+        if how not in {"any", "all"}:
+            raise ValueError("how must be 'any' or 'all'")
+        check_cols = list(subset) if subset else [c for c in self.columns if c != self.geometry_column]
+        rows: list[Record] = []
+        for row in self._rows:
+            nulls = [row.get(c) is None for c in check_cols]
+            if how == "any" and any(nulls):
+                continue
+            if how == "all" and all(nulls):
+                continue
+            rows.append(dict(row))
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def rename_columns(self, mapping: dict[str, str]) -> "GeoPromptFrame":
+        """Return a new frame with columns renamed according to ``mapping``.
+
+        The geometry column name is updated if it appears in the mapping.
+
+        Args:
+            mapping: Dict mapping old column names to new names.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        new_geom = mapping.get(self.geometry_column, self.geometry_column)
+        rows: list[Record] = []
+        for row in self._rows:
+            rows.append({mapping.get(k, k): v for k, v in row.items()})
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=new_geom, crs=self.crs)
+
+    def drop_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
+        """Return a new frame with the specified columns removed.
+
+        The geometry column cannot be dropped.
+
+        Args:
+            columns: Column names to remove.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        drop_set = set(columns)
+        if self.geometry_column in drop_set:
+            raise ValueError("cannot drop the geometry column")
+        rows = [{k: v for k, v in row.items() if k not in drop_set} for row in self._rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def reorder_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
+        """Return a new frame with columns reordered.
+
+        Any columns not listed are appended in their original order.
+        The geometry column is always preserved.
+
+        Args:
+            columns: Desired column order.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        ordered = list(columns)
+        remaining = [c for c in self.columns if c not in ordered]
+        full_order = ordered + remaining
+        if self.geometry_column not in full_order:
+            full_order.append(self.geometry_column)
+        rows = [{col: row.get(col) for col in full_order if col in row} for row in self._rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def astype(self, column: str, dtype: str) -> "GeoPromptFrame":
+        """Cast a column to a new type.
+
+        Args:
+            column: Column to cast.
+            dtype: Target type name — ``"int"``, ``"float"``, ``"str"``, or ``"bool"``.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        self._require_column(column)
+        converters = {"int": int, "float": float, "str": str, "bool": bool}
+        if dtype not in converters:
+            raise ValueError(f"unsupported dtype: {dtype}")
+        converter = converters[dtype]
+        rows = self.to_records()
+        for row in rows:
+            if row.get(column) is not None:
+                row[column] = converter(row[column])
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def replace(self, column: str, mapping: dict[Any, Any]) -> "GeoPromptFrame":
+        """Replace values in a column according to a mapping.
+
+        Args:
+            column: Column to apply replacements to.
+            mapping: Dict mapping old values to new values.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        self._require_column(column)
+        rows = self.to_records()
+        for row in rows:
+            val = row.get(column)
+            if val in mapping:
+                row[column] = mapping[val]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def set_index(self, column: str) -> "GeoPromptFrame":
+        """Set a column as an index-like identifier, stored in ``_index_column``.
+
+        This does not restructure the data but records which column acts as
+        the logical row identifier for downstream operations.
+
+        Args:
+            column: Column to designate as the index.
+
+        Returns:
+            New :class:`GeoPromptFrame` with ``_index_column`` set.
+        """
+        self._require_column(column)
+        frame = GeoPromptFrame._from_internal_rows(
+            [dict(r) for r in self._rows],
+            geometry_column=self.geometry_column,
+            crs=self.crs,
+        )
+        frame._index_column = column  # type: ignore[attr-defined]
+        return frame
+
+    def reset_index(self, drop: bool = False) -> "GeoPromptFrame":
+        """Reset the index column.
+
+        If the frame has an ``_index_column`` set by :meth:`set_index`, this
+        method clears it.  When ``drop`` is ``False`` a numeric ``"index"``
+        column is added.
+
+        Args:
+            drop: If ``True`` remove the index entirely.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        rows = self.to_records()
+        if not drop:
+            for i, row in enumerate(rows):
+                row.setdefault("index", i)
+        frame = GeoPromptFrame._from_internal_rows(
+            rows, geometry_column=self.geometry_column, crs=self.crs,
+        )
+        frame._index_column = None  # type: ignore[attr-defined]
+        return frame
+
+    def crosstab(
+        self,
+        index: str,
+        columns: str,
+        values: str | None = None,
+        agg: str = "count",
+    ) -> PromptTable:
+        """Cross-tabulate two categorical columns.
+
+        When *values* is ``None``, cells contain counts of co-occurrences.
+
+        Args:
+            index: Column whose unique values become rows.
+            columns: Column whose unique values become new columns.
+            values: Optional numeric column to aggregate.
+            agg: Aggregation function (default ``"count"``).
+
+        Returns:
+            A :class:`PromptTable` with cross-tabulated results.
+        """
+        self._require_column(index)
+        self._require_column(columns)
+        if values is not None:
+            self._require_column(values)
+
+        buckets: dict[Any, dict[Any, list[Any]]] = {}
+        col_values: set[Any] = set()
+        for row in self._rows:
+            idx = row.get(index)
+            col = row.get(columns)
+            col_values.add(col)
+            bucket = buckets.setdefault(idx, {})
+            bucket.setdefault(col, []).append(row.get(values, 1))
+
+        sorted_cols = sorted(col_values, key=str)
+        result_rows: list[Record] = []
+        for idx_val, cols_bucket in buckets.items():
+            result: Record = {index: idx_val}
+            for cv in sorted_cols:
+                vals = cols_bucket.get(cv, [])
+                if not vals:
+                    result[str(cv)] = 0 if agg == "count" else None
+                elif agg == "count":
+                    result[str(cv)] = len(vals)
+                elif agg == "sum":
+                    result[str(cv)] = sum(float(v) for v in vals if v is not None)
+                elif agg == "mean":
+                    numeric = [float(v) for v in vals if v is not None]
+                    result[str(cv)] = (sum(numeric) / len(numeric)) if numeric else None
+                elif agg == "min":
+                    result[str(cv)] = min(vals)
+                elif agg == "max":
+                    result[str(cv)] = max(vals)
+                elif agg == "first":
+                    result[str(cv)] = vals[0]
+                else:
+                    raise ValueError(f"unsupported aggregation: {agg}")
+            result_rows.append(result)
+        return PromptTable(result_rows)
+
+    def merge(
+        self,
+        other: "GeoPromptFrame",
+        on: str,
+        how: str = "inner",
+        rsuffix: str = "right",
+    ) -> "GeoPromptFrame":
+        """Merge with another frame on a shared key column.
+
+        Args:
+            other: Right frame.
+            on: Column name to join on.
+            how: ``"inner"`` or ``"left"``.
+            rsuffix: Suffix for colliding right column names.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        self._require_column(on)
+        other._require_column(on)
+        if how not in {"inner", "left"}:
+            raise ValueError("how must be 'inner' or 'left'")
+
+        right_index: dict[Any, list[Record]] = {}
+        for row in other._rows:
+            right_index.setdefault(row[on], []).append(row)
+
+        right_columns = [c for c in other.columns if c != on and c != other.geometry_column]
+        rows: list[Record] = []
+        for left_row in self._rows:
+            key = left_row.get(on)
+            right_rows = right_index.get(key, [])
+            if not right_rows and how == "left":
+                merged = dict(left_row)
+                for col in right_columns:
+                    target = col if col not in merged else f"{col}_{rsuffix}"
+                    merged[target] = None
+                rows.append(merged)
+            for right_row in right_rows:
+                merged = dict(left_row)
+                for col in right_columns:
+                    target = col if col not in merged else f"{col}_{rsuffix}"
+                    merged[target] = right_row[col]
+                rows.append(merged)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    @staticmethod
+    def concat(frames: Sequence["GeoPromptFrame"]) -> "GeoPromptFrame":
+        """Concatenate multiple frames into one.
+
+        All frames should share the same geometry column name.  The CRS of the
+        first frame is used.
+
+        Args:
+            frames: Sequence of frames to concatenate.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        if not frames:
+            return GeoPromptFrame([], geometry_column="geometry")
+        geom_col = frames[0].geometry_column
+        crs = frames[0].crs
+        all_rows: list[Record] = []
+        for frame in frames:
+            all_rows.extend(frame.to_records())
+        return GeoPromptFrame._from_internal_rows(all_rows, geometry_column=geom_col, crs=crs)
+
+    def sample(self, n: int, seed: int | None = None) -> "GeoPromptFrame":
+        """Return a random sample of ``n`` rows.
+
+        Args:
+            n: Number of rows to sample.
+            seed: Optional random seed for reproducibility.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        import random
+        rng = random.Random(seed)
+        n = min(n, len(self._rows))
+        sampled = rng.sample(self._rows, n)
+        return GeoPromptFrame._from_internal_rows(sampled, geometry_column=self.geometry_column, crs=self.crs)
+
+    def unique(self, column: str) -> list[Any]:
+        """Return unique values from a column.
+
+        Args:
+            column: Column name.
+
+        Returns:
+            List of unique values.
+        """
+        self._require_column(column)
+        seen: set[str] = set()
+        result: list[Any] = []
+        for row in self._rows:
+            val = row.get(column)
+            key = json.dumps(val, sort_keys=True, default=str)
+            if key not in seen:
+                seen.add(key)
+                result.append(val)
+        return result
+
+    def set_geometry(self, column: str) -> "GeoPromptFrame":
+        """Return a new frame with a different active geometry column.
+
+        Args:
+            column: Name of the column to use as the geometry column.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        if not self._rows or column not in self._rows[0]:
+            raise KeyError(f"column '{column}' is not present")
+        return GeoPromptFrame._from_internal_rows(
+            [dict(row) for row in self._rows],
+            geometry_column=column,
+            crs=self.crs,
+        )
+
+    def to_prompt_table(self, drop_geometry: bool = True) -> PromptTable:
+        """Convert to a :class:`PromptTable`, optionally dropping geometry.
+
+        Args:
+            drop_geometry: If ``True``, remove the geometry column.
+
+        Returns:
+            A :class:`PromptTable`.
+        """
+        if drop_geometry:
+            rows = [{k: v for k, v in row.items() if k != self.geometry_column} for row in self._rows]
+        else:
+            rows = self.to_records()
+        return PromptTable(rows)
+
+    # --- Geometry convenience methods ---
+
+    def simplify(self, tolerance: float) -> "GeoPromptFrame":
+        """Simplify all geometries using the Douglas-Peucker algorithm.
+
+        Requires Shapely (``pip install -e .[overlay]``).
+
+        Args:
+            tolerance: Maximum distance a simplified edge may deviate from
+                the original geometry.
+
+        Returns:
+            New :class:`GeoPromptFrame` with simplified geometries.
+        """
+        from .overlay import geometry_to_shapely, geometry_from_shapely
+        rows: list[Record] = []
+        for row in self._rows:
+            geom = row[self.geometry_column]
+            shape = geometry_to_shapely(geom)
+            simplified = shape.simplify(tolerance)
+            parts = geometry_from_shapely(simplified)
+            if parts:
+                for part in parts:
+                    new_row = dict(row)
+                    new_row[self.geometry_column] = part
+                    rows.append(new_row)
+            else:
+                rows.append(dict(row))
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def convex_hull(self) -> "GeoPromptFrame":
+        """Replace each geometry with its convex hull.
+
+        Requires Shapely (``pip install -e .[overlay]``).
+
+        Returns:
+            New :class:`GeoPromptFrame` with convex hull geometries.
+        """
+        from .overlay import geometry_to_shapely, geometry_from_shapely
+        rows: list[Record] = []
+        for row in self._rows:
+            shape = geometry_to_shapely(row[self.geometry_column])
+            hull = shape.convex_hull
+            parts = geometry_from_shapely(hull)
+            if parts:
+                new_row = dict(row)
+                new_row[self.geometry_column] = parts[0]
+                rows.append(new_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def envelope(self) -> "GeoPromptFrame":
+        """Replace each geometry with its bounding-box rectangle.
+
+        Returns:
+            New :class:`GeoPromptFrame` with envelope polygons.
+        """
+        rows: list[Record] = []
+        for row in self._rows:
+            min_x, min_y, max_x, max_y = geometry_bounds(row[self.geometry_column])
+            env = {
+                "type": "Polygon",
+                "coordinates": (
+                    (min_x, min_y), (max_x, min_y), (max_x, max_y),
+                    (min_x, max_y), (min_x, min_y),
+                ),
+            }
+            new_row = dict(row)
+            new_row[self.geometry_column] = env
+            rows.append(new_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    # --- Overlay convenience methods ---
+
+    def difference(self, other: "GeoPromptFrame") -> "GeoPromptFrame":
+        """Compute the geometric difference of each geometry against the union of ``other``.
+
+        Requires Shapely (``pip install -e .[overlay]``).
+
+        Args:
+            other: Frame whose geometries are subtracted.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before difference operations")
+        from .overlay import geometry_to_shapely, geometry_from_shapely, _load_shapely
+        _, _, unary_union, _ = _load_shapely()
+        mask = unary_union([geometry_to_shapely(row[other.geometry_column]) for row in other._rows])
+        rows: list[Record] = []
+        for row in self._rows:
+            shape = geometry_to_shapely(row[self.geometry_column])
+            diff = shape.difference(mask)
+            parts = geometry_from_shapely(diff)
+            for part in parts:
+                new_row = dict(row)
+                new_row[self.geometry_column] = part
+                rows.append(new_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def symmetric_difference(self, other: "GeoPromptFrame") -> "GeoPromptFrame":
+        """Compute the symmetric difference between the union of geometries in both frames.
+
+        Requires Shapely (``pip install -e .[overlay]``).
+
+        Args:
+            other: Other frame.
+
+        Returns:
+            New :class:`GeoPromptFrame` with symmetric-difference geometries.
+        """
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before symmetric difference operations")
+        from .overlay import geometry_to_shapely, geometry_from_shapely, _load_shapely
+        _, _, unary_union, _ = _load_shapely()
+        left_union = unary_union([geometry_to_shapely(row[self.geometry_column]) for row in self._rows])
+        right_union = unary_union([geometry_to_shapely(row[other.geometry_column]) for row in other._rows])
+        result = left_union.symmetric_difference(right_union)
+        parts = geometry_from_shapely(result)
+        rows: list[Record] = []
+        for part in parts:
+            rows.append({self.geometry_column: part})
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def union(self, other: "GeoPromptFrame") -> "GeoPromptFrame":
+        """Compute the geometric union of both frames.
+
+        Requires Shapely (``pip install -e .[overlay]``).
+
+        Args:
+            other: Other frame.
+
+        Returns:
+            New :class:`GeoPromptFrame` with union geometries.
+        """
+        if self.crs and other.crs and self.crs != other.crs:
+            raise ValueError("frames must share the same CRS before union operations")
+        from .overlay import geometry_to_shapely, geometry_from_shapely, _load_shapely
+        _, _, unary_union, _ = _load_shapely()
+        all_shapes = [geometry_to_shapely(row[self.geometry_column]) for row in self._rows]
+        all_shapes += [geometry_to_shapely(row[other.geometry_column]) for row in other._rows]
+        merged = unary_union(all_shapes)
+        parts = geometry_from_shapely(merged)
+        rows: list[Record] = []
+        for part in parts:
+            rows.append({self.geometry_column: part})
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+
+class GroupedGeoPromptFrame:
+    """Grouped spatial frame rows with aggregation support preserving geometry."""
+
+    def __init__(
+        self,
+        rows: Sequence[Record],
+        group_columns: Sequence[str],
+        geometry_column: str,
+        crs: str | None,
+    ) -> None:
+        self._rows = list(rows)
+        self._group_columns = list(group_columns)
+        self._geometry_column = geometry_column
+        self._crs = crs
+
+    def agg(self, aggregations: dict[str, str | Sequence[str]]) -> "GeoPromptFrame":
+        """Aggregate each group and return a new :class:`GeoPromptFrame`.
+
+        The geometry of each group is taken from the first row in the group.
+
+        Args:
+            aggregations: Dict mapping column names to aggregation operation(s).
+
+        Returns:
+            New :class:`GeoPromptFrame` with one row per group.
+        """
+        from .table import _apply_aggregation
+
+        grouped: dict[tuple[Any, ...], list[Record]] = {}
+        for row in self._rows:
+            key = tuple(row.get(col) for col in self._group_columns)
+            grouped.setdefault(key, []).append(row)
+
+        result_rows: list[Record] = []
+        for key, group_rows in grouped.items():
+            summary: Record = {col: val for col, val in zip(self._group_columns, key)}
+            summary["row_count"] = len(group_rows)
+            summary[self._geometry_column] = group_rows[0][self._geometry_column]
+            for col, ops in aggregations.items():
+                op_list = [ops] if isinstance(ops, str) else list(ops)
+                values = [row.get(col) for row in group_rows if col in row]
+                for op in op_list:
+                    summary[f"{col}_{op}"] = _apply_aggregation(values, op)
+            result_rows.append(summary)
+
+        return GeoPromptFrame._from_internal_rows(
+            result_rows, geometry_column=self._geometry_column, crs=self._crs,
+        )
+
+
+__all__ = ["Bounds", "GeoPromptFrame", "GeoPromptSpatialIndex", "GroupedGeoPromptFrame"]

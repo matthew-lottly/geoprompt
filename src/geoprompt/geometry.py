@@ -564,6 +564,223 @@ def geometry_distance(origin: Geometry, destination: Geometry, method: DistanceM
     return coordinate_distance(geometry_centroid(origin), geometry_centroid(destination), method=method)
 
 
+def geometry_touches(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when *origin* and *destination* share boundary points but their interiors do not intersect.
+
+    Two geometries "touch" if they have at least one boundary point in common
+    but no interior points in common.
+    """
+    origin_parts = _component_geometries(origin)
+    destination_parts = _component_geometries(destination)
+    if len(origin_parts) > 1 or len(destination_parts) > 1:
+        return any(
+            geometry_touches(op, dp)
+            for op in origin_parts
+            for dp in destination_parts
+        )
+
+    if not geometry_intersects(origin, destination):
+        return False
+
+    origin_type = geometry_type(origin)
+    destination_type = geometry_type(destination)
+
+    # Point-Point: touching means identical (boundary is the point itself)
+    if origin_type == "Point" and destination_type == "Point":
+        return geometry_vertices(origin)[0] == geometry_vertices(destination)[0]
+
+    # Point-LineString: touches if on an endpoint only
+    if origin_type == "Point" and destination_type == "LineString":
+        pt = geometry_vertices(origin)[0]
+        line_verts = geometry_vertices(destination)
+        return pt in (line_verts[0], line_verts[-1]) and not _interior_point_on_line(pt, line_verts)
+
+    if origin_type == "LineString" and destination_type == "Point":
+        return geometry_touches(destination, origin)
+
+    # Point-Polygon: touches if on boundary ring
+    if origin_type == "Point" and destination_type == "Polygon":
+        pt = geometry_vertices(origin)[0]
+        ring = geometry_vertices(destination)
+        return any(_point_on_segment(pt, s, e) for s, e in _segments(ring)) and not _strict_point_in_polygon(pt, destination)
+
+    if origin_type == "Polygon" and destination_type == "Point":
+        return geometry_touches(destination, origin)
+
+    # LineString-LineString: share boundary but not interior
+    if origin_type == "LineString" and destination_type == "LineString":
+        o_verts = geometry_vertices(origin)
+        d_verts = geometry_vertices(destination)
+        o_endpoints = {o_verts[0], o_verts[-1]}
+        d_endpoints = {d_verts[0], d_verts[-1]}
+        shared_endpoints = o_endpoints & d_endpoints
+        if not shared_endpoints:
+            return False
+        # Check no interior crossing
+        o_segs = _segments(o_verts)
+        d_segs = _segments(d_verts)
+        for os_s, os_e in o_segs:
+            for ds_s, ds_e in d_segs:
+                if _segments_cross_properly(os_s, os_e, ds_s, ds_e):
+                    return False
+        return True
+
+    # Polygon-Polygon: share boundary but interiors disjoint
+    if origin_type == "Polygon" and destination_type == "Polygon":
+        o_ring = geometry_vertices(origin)
+        d_ring = geometry_vertices(destination)
+        # If any vertex of one is strictly inside the other, interiors overlap
+        if any(_strict_point_in_polygon(v, destination) for v in o_ring[:-1]):
+            return False
+        if any(_strict_point_in_polygon(v, origin) for v in d_ring[:-1]):
+            return False
+        return True
+
+    # LineString-Polygon: line touches polygon boundary only
+    if origin_type == "LineString" and destination_type == "Polygon":
+        o_verts = geometry_vertices(origin)
+        if any(_strict_point_in_polygon(v, destination) for v in o_verts):
+            return False
+        return True
+
+    if origin_type == "Polygon" and destination_type == "LineString":
+        return geometry_touches(destination, origin)
+
+    return False
+
+
+def geometry_crosses(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when *origin* crosses *destination*.
+
+    Two geometries cross if they share interior points but neither is
+    contained in the other.  Crossing is meaningful for line/line and
+    line/polygon combinations.
+    """
+    origin_parts = _component_geometries(origin)
+    destination_parts = _component_geometries(destination)
+    if len(origin_parts) > 1 or len(destination_parts) > 1:
+        return any(
+            geometry_crosses(op, dp)
+            for op in origin_parts
+            for dp in destination_parts
+        )
+
+    origin_type = geometry_type(origin)
+    destination_type = geometry_type(destination)
+
+    # Line-Line: cross if segments properly cross at least once
+    if origin_type == "LineString" and destination_type == "LineString":
+        o_segs = _segments(geometry_vertices(origin))
+        d_segs = _segments(geometry_vertices(destination))
+        return any(
+            _segments_cross_properly(os_s, os_e, ds_s, ds_e)
+            for os_s, os_e in o_segs
+            for ds_s, ds_e in d_segs
+        )
+
+    # Line-Polygon: line crosses polygon if part is inside and part is outside
+    if origin_type == "LineString" and destination_type == "Polygon":
+        verts = geometry_vertices(origin)
+        has_inside = any(_strict_point_in_polygon(v, destination) for v in verts)
+        ring = geometry_vertices(destination)
+        has_outside = any(not _point_in_polygon(v, destination) for v in verts)
+        return has_inside and has_outside
+
+    if origin_type == "Polygon" and destination_type == "LineString":
+        return geometry_crosses(destination, origin)
+
+    return False
+
+
+def geometry_overlaps(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when *origin* and *destination* overlap.
+
+    Two geometries of the same dimension overlap if they share some but
+    not all interior points.
+    """
+    origin_parts = _component_geometries(origin)
+    destination_parts = _component_geometries(destination)
+    if len(origin_parts) > 1 or len(destination_parts) > 1:
+        return any(
+            geometry_overlaps(op, dp)
+            for op in origin_parts
+            for dp in destination_parts
+        )
+
+    origin_type = geometry_type(origin)
+    destination_type = geometry_type(destination)
+
+    # Overlaps applies to same-dimension geometries
+    # Polygon-Polygon
+    if origin_type == "Polygon" and destination_type == "Polygon":
+        o_ring = geometry_vertices(origin)
+        d_ring = geometry_vertices(destination)
+        o_in_d = any(_strict_point_in_polygon(v, destination) for v in o_ring[:-1])
+        d_in_o = any(_strict_point_in_polygon(v, origin) for v in d_ring[:-1])
+        o_all_in_d = all(_point_in_polygon(v, destination) for v in o_ring[:-1])
+        d_all_in_o = all(_point_in_polygon(v, origin) for v in d_ring[:-1])
+        return (o_in_d or d_in_o) and not o_all_in_d and not d_all_in_o
+
+    # LineString-LineString: share some interior but neither contained in other
+    if origin_type == "LineString" and destination_type == "LineString":
+        if not geometry_intersects(origin, destination):
+            return False
+        if geometry_within(origin, destination) or geometry_within(destination, origin):
+            return False
+        # They intersect and neither is contained — they overlap
+        return True
+
+    return False
+
+
+def _interior_point_on_line(point: Coordinate, vertices: tuple[Coordinate, ...]) -> bool:
+    """Return True if *point* lies on the interior (not endpoints) of a line."""
+    for i in range(1, len(vertices)):
+        start, end = vertices[i - 1], vertices[i]
+        if _point_on_segment(point, start, end) and point != start and point != end:
+            return True
+    return False
+
+
+def _strict_point_in_polygon(point: Coordinate, polygon: Geometry) -> bool:
+    """Return True if *point* is strictly inside *polygon* (not on boundary)."""
+    ring = geometry_vertices(polygon)
+    for start, end in _segments(ring):
+        if _point_on_segment(point, start, end):
+            return False
+
+    inside = False
+    for index in range(len(ring) - 1):
+        start_x, start_y = ring[index]
+        end_x, end_y = ring[index + 1]
+        intersects = (start_y > point[1]) != (end_y > point[1])
+        if not intersects:
+            continue
+        edge_x = ((end_x - start_x) * (point[1] - start_y) / (end_y - start_y)) + start_x
+        if point[0] <= edge_x:
+            inside = not inside
+    return inside
+
+
+def _segments_cross_properly(
+    first_start: Coordinate,
+    first_end: Coordinate,
+    second_start: Coordinate,
+    second_end: Coordinate,
+    tolerance: float = 1e-9,
+) -> bool:
+    """Return True if two segments cross at an interior point (proper crossing)."""
+    o1 = _cross_product(first_start, first_end, second_start)
+    o2 = _cross_product(first_start, first_end, second_end)
+    o3 = _cross_product(second_start, second_end, first_start)
+    o4 = _cross_product(second_start, second_end, first_end)
+
+    return (
+        ((o1 > tolerance and o2 < -tolerance) or (o1 < -tolerance and o2 > tolerance))
+        and ((o3 > tolerance and o4 < -tolerance) or (o3 < -tolerance and o4 > tolerance))
+    )
+
+
 __all__ = [
     "Coordinate",
     "Geometry",
@@ -571,10 +788,13 @@ __all__ = [
     "geometry_bounds",
     "geometry_centroid",
     "geometry_contains",
+    "geometry_crosses",
     "geometry_intersects_bounds",
     "geometry_intersects",
     "geometry_distance",
     "geometry_length",
+    "geometry_overlaps",
+    "geometry_touches",
     "geometry_type",
     "geometry_vertices",
     "geometry_within",

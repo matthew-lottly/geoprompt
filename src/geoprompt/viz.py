@@ -1,0 +1,577 @@
+"""Visualization module for interactive maps and static plots.
+
+Provides helpers for creating Folium maps, choropleths, and quick static
+plots from GeoPromptFrame data.  All mapping dependencies (folium, branca,
+matplotlib) are optional and lazily imported.
+"""
+from __future__ import annotations
+
+import importlib
+import json
+from pathlib import Path
+from typing import Any, Sequence
+
+from .geometry import Geometry, geometry_bounds, geometry_centroid, geometry_type
+from .tools import compare_scenarios
+
+
+Record = dict[str, Any]
+
+
+def _load_folium() -> Any:
+    try:
+        return importlib.import_module("folium")
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install visualization support with 'pip install folium' before using map functions."
+        ) from exc
+
+
+def _geojson_coords(geometry: Geometry) -> Any:
+    """Convert internal geometry dict to GeoJSON-compatible structure."""
+    gtype = str(geometry.get("type", ""))
+    coords = geometry.get("coordinates")
+    if gtype == "Point":
+        return {"type": "Point", "coordinates": list(coords)}
+    if gtype == "LineString":
+        return {"type": "LineString", "coordinates": [list(c) for c in coords]}
+    if gtype == "Polygon":
+        return {"type": "Polygon", "coordinates": [[list(c) for c in coords]]}
+    if gtype == "MultiPoint":
+        return {"type": "MultiPoint", "coordinates": [list(c) for c in coords]}
+    if gtype == "MultiLineString":
+        return {"type": "MultiLineString", "coordinates": [[list(c) for c in line] for line in coords]}
+    if gtype == "MultiPolygon":
+        return {"type": "MultiPolygon", "coordinates": [[[list(c) for c in poly]] for poly in coords]}
+    return {"type": gtype, "coordinates": coords}
+
+
+def _frame_bounds(rows: Sequence[Record], geometry_column: str) -> tuple[float, float, float, float]:
+    """Return (min_x, min_y, max_x, max_y) across all rows."""
+    xs, ys = [], []
+    for row in rows:
+        min_x, min_y, max_x, max_y = geometry_bounds(row[geometry_column])
+        xs.extend([min_x, max_x])
+        ys.extend([min_y, max_y])
+    if not xs:
+        return (0.0, 0.0, 0.0, 0.0)
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def to_folium_map(
+    frame: Any,
+    *,
+    color: str = "blue",
+    fill_color: str | None = None,
+    weight: float = 2,
+    fill_opacity: float = 0.4,
+    tooltip_columns: Sequence[str] | None = None,
+    popup_columns: Sequence[str] | None = None,
+    style_column: str | None = None,
+    style_map: dict[Any, dict[str, Any]] | None = None,
+    tiles: str = "OpenStreetMap",
+    zoom_start: int | None = None,
+    width: str | int = "100%",
+    height: str | int = 600,
+    add_layer_control: bool = True,
+) -> Any:
+    """Create a Folium map from a GeoPromptFrame.
+
+    Args:
+        frame: A :class:`~geoprompt.frame.GeoPromptFrame`.
+        color: Stroke color for features.
+        fill_color: Fill color; defaults to ``color`` for polygons.
+        weight: Stroke width.
+        fill_opacity: Polygon fill opacity (0-1).
+        tooltip_columns: Columns to show on hover.
+        popup_columns: Columns to show on click.
+        style_column: Column used to pick per-feature style from ``style_map``.
+        style_map: Dict mapping style_column values to folium style kwargs.
+        tiles: Tile layer name.
+        zoom_start: Initial zoom level; auto-fit if ``None``.
+        width: Map width (CSS value or pixels).
+        height: Map height (CSS value or pixels).
+
+    Returns:
+        A ``folium.Map`` object.
+    """
+    folium = _load_folium()
+    rows = list(frame)
+    geometry_column = frame.geometry_column
+
+    if not rows:
+        return folium.Map(location=[0, 0], zoom_start=2, tiles=tiles, width=width, height=height)
+
+    min_x, min_y, max_x, max_y = _frame_bounds(rows, geometry_column)
+    center_lat = (min_y + max_y) / 2
+    center_lon = (min_x + max_x) / 2
+
+    m = folium.Map(
+        location=[center_lat, center_lon],
+        tiles=tiles,
+        width=width,
+        height=height,
+    )
+
+    if zoom_start is not None:
+        m.zoom_start = zoom_start
+    else:
+        m.fit_bounds([[min_y, min_x], [max_y, max_x]])
+
+    feature_group = folium.FeatureGroup(name="features")
+
+    for row in rows:
+        geom = row[geometry_column]
+        gtype = geometry_type(geom)
+        feat_color = color
+        feat_fill = fill_color or color
+        feat_weight = weight
+        feat_fill_opacity = fill_opacity
+
+        if style_column and style_map and row.get(style_column) in style_map:
+            style = style_map[row[style_column]]
+            feat_color = style.get("color", feat_color)
+            feat_fill = style.get("fill_color", feat_fill)
+            feat_weight = style.get("weight", feat_weight)
+            feat_fill_opacity = style.get("fill_opacity", feat_fill_opacity)
+
+        tooltip_text = None
+        if tooltip_columns:
+            parts = [f"<b>{c}</b>: {row.get(c, '')}" for c in tooltip_columns if c != geometry_column]
+            tooltip_text = "<br>".join(parts) if parts else None
+
+        popup_text = None
+        if popup_columns:
+            parts = [f"<b>{c}</b>: {row.get(c, '')}" for c in popup_columns if c != geometry_column]
+            popup_text = "<br>".join(parts) if parts else None
+
+        tooltip = folium.Tooltip(tooltip_text) if tooltip_text else None
+        popup = folium.Popup(popup_text, max_width=300) if popup_text else None
+
+        if gtype == "Point":
+            coords = geom["coordinates"]
+            folium.CircleMarker(
+                location=[coords[1], coords[0]],
+                radius=6,
+                color=feat_color,
+                fill=True,
+                fill_color=feat_fill,
+                fill_opacity=feat_fill_opacity,
+                weight=feat_weight,
+                tooltip=tooltip,
+                popup=popup,
+            ).add_to(feature_group)
+        else:
+            geojson = _geojson_coords(geom)
+            folium.GeoJson(
+                {"type": "Feature", "geometry": geojson, "properties": {}},
+                style_function=lambda _f, _c=feat_color, _fc=feat_fill, _w=feat_weight, _fo=feat_fill_opacity: {
+                    "color": _c,
+                    "fillColor": _fc,
+                    "weight": _w,
+                    "fillOpacity": _fo,
+                },
+                tooltip=tooltip,
+                popup=popup,
+            ).add_to(feature_group)
+
+    feature_group.add_to(m)
+    if add_layer_control:
+        folium.LayerControl().add_to(m)
+
+    return m
+
+
+def to_choropleth(
+    frame: Any,
+    value_column: str,
+    *,
+    id_column: str = "site_id",
+    fill_color: str = "YlOrRd",
+    fill_opacity: float = 0.7,
+    line_opacity: float = 0.3,
+    legend_name: str | None = None,
+    tiles: str = "OpenStreetMap",
+    width: str | int = "100%",
+    height: str | int = 600,
+) -> Any:
+    """Create a choropleth map colored by a numeric column.
+
+    Args:
+        frame: A :class:`~geoprompt.frame.GeoPromptFrame`.
+        value_column: Numeric column to use for coloring.
+        id_column: Column to use as feature identifiers.
+        fill_color: Color scale name (e.g. ``"YlOrRd"``, ``"BuGn"``).
+        fill_opacity: Polygon fill opacity.
+        line_opacity: Border line opacity.
+        legend_name: Legend title; defaults to ``value_column``.
+        tiles: Tile layer name.
+        width: Map width.
+        height: Map height.
+
+    Returns:
+        A ``folium.Map`` object with choropleth layer.
+    """
+    folium = _load_folium()
+    rows = list(frame)
+    geometry_column = frame.geometry_column
+
+    features = []
+    for row in rows:
+        geojson_geom = _geojson_coords(row[geometry_column])
+        features.append({
+            "type": "Feature",
+            "id": str(row.get(id_column, "")),
+            "geometry": geojson_geom,
+            "properties": {k: v for k, v in row.items() if k != geometry_column},
+        })
+
+    geojson_collection = {"type": "FeatureCollection", "features": features}
+
+    min_x, min_y, max_x, max_y = _frame_bounds(rows, geometry_column)
+    center = [(min_y + max_y) / 2, (min_x + max_x) / 2]
+
+    m = folium.Map(location=center, tiles=tiles, width=width, height=height)
+    m.fit_bounds([[min_y, min_x], [max_y, max_x]])
+
+    data = {str(row.get(id_column, "")): float(row.get(value_column, 0)) for row in rows}
+
+    try:
+        import pandas as pd
+        series = pd.Series(data, name=value_column)
+    except ImportError:
+        series = data
+
+    folium.Choropleth(
+        geo_data=geojson_collection,
+        data=series if not isinstance(series, dict) else None,
+        key_on="feature.id",
+        fill_color=fill_color,
+        fill_opacity=fill_opacity,
+        line_opacity=line_opacity,
+        legend_name=legend_name or value_column,
+    ).add_to(m)
+
+    return m
+
+
+def save_map(folium_map: Any, output_path: str | Path) -> str:
+    """Save a Folium map to an HTML file.
+
+    Args:
+        folium_map: A ``folium.Map`` object.
+        output_path: File path.
+
+    Returns:
+        The resolved output path string.
+    """
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    folium_map.save(str(path))
+    return str(path)
+
+
+def plot_scenario_dashboard(
+    baseline_metrics: dict[str, float],
+    candidate_metrics: dict[str, float],
+    *,
+    higher_is_better: Sequence[str] | None = None,
+    title: str | None = None,
+    output_path: str | Path | None = None,
+) -> Any:
+    """Create a simple side-by-side scenario dashboard figure."""
+    plt = importlib.import_module("matplotlib.pyplot")
+    comparison = compare_scenarios(
+        baseline_metrics,
+        candidate_metrics,
+        higher_is_better=higher_is_better,
+    )
+    metrics = list(comparison.keys())
+    baseline = [float(comparison[m]["baseline"]) for m in metrics]
+    candidate = [float(comparison[m]["candidate"]) for m in metrics]
+    deltas = [float(comparison[m]["delta_percent"]) for m in metrics]
+    colors = ["#2b8a3e" if comparison[m]["direction"] == "improved" else "#c92a2a" for m in metrics]
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, max(4, len(metrics) * 1.2)))
+    ax_left, ax_right = axes
+
+    positions = list(range(len(metrics)))
+    width = 0.38
+    ax_left.barh([p - width / 2 for p in positions], baseline, height=width, label="baseline", color="#94a3b8")
+    ax_left.barh([p + width / 2 for p in positions], candidate, height=width, label="candidate", color="#2563eb")
+    ax_left.set_yticks(positions)
+    ax_left.set_yticklabels(metrics)
+    ax_left.set_title("Metric values")
+    ax_left.legend()
+    ax_left.grid(True, axis="x", alpha=0.25)
+
+    ax_right.barh(positions, deltas, color=colors)
+    ax_right.set_yticks(positions)
+    ax_right.set_yticklabels(metrics)
+    ax_right.axvline(0, color="#555", linewidth=1)
+    ax_right.set_title("Percent change")
+    ax_right.grid(True, axis="x", alpha=0.25)
+
+    if title:
+        fig.suptitle(title)
+    fig.tight_layout()
+
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(path), bbox_inches="tight", dpi=150)
+
+    return fig
+
+
+# --- Resilience styling presets ---
+
+RESILIENCE_STYLE_PRESETS: dict[str, dict[str, Any]] = {
+    "critical": {"color": "#c92a2a", "fill_color": "#ff6b6b", "weight": 3, "fill_opacity": 0.6},
+    "high": {"color": "#e8590c", "fill_color": "#ff922b", "weight": 2.5, "fill_opacity": 0.5},
+    "medium": {"color": "#e67700", "fill_color": "#fcc419", "weight": 2, "fill_opacity": 0.4},
+    "low": {"color": "#2b8a3e", "fill_color": "#51cf66", "weight": 1.5, "fill_opacity": 0.3},
+    "minimal": {"color": "#1971c2", "fill_color": "#4dabf7", "weight": 1, "fill_opacity": 0.2},
+}
+
+
+def resilience_style_map(tier_column: str = "risk_tier") -> tuple[str, dict[str, dict[str, Any]]]:
+    """Return a ``(style_column, style_map)`` tuple for use with :func:`to_folium_map`.
+
+    The returned mapping colours features by resilience tier using the
+    built-in :data:`RESILIENCE_STYLE_PRESETS`.
+
+    Args:
+        tier_column: Column name containing tier labels.
+
+    Returns:
+        Tuple of ``(tier_column, style_map)`` ready for ``to_folium_map``.
+    """
+    return tier_column, dict(RESILIENCE_STYLE_PRESETS)
+
+
+def to_outage_overlay_map(
+    frame: Any,
+    *,
+    outage_column: str = "is_outage",
+    restored_column: str | None = None,
+    tooltip_columns: Sequence[str] | None = None,
+    tiles: str = "OpenStreetMap",
+    width: str | int = "100%",
+    height: str | int = 600,
+) -> Any:
+    """Create a Folium map with outage / restored overlay colouring.
+
+    Features where *outage_column* is truthy are shown in red.
+    Features where *restored_column* is truthy are shown in green.
+    All other features appear grey.
+
+    Args:
+        frame: A :class:`~geoprompt.frame.GeoPromptFrame`.
+        outage_column: Boolean column indicating an outage.
+        restored_column: Optional boolean column for restored features.
+        tooltip_columns: Columns to show on hover.
+        tiles: Tile layer name.
+        width: Map width.
+        height: Map height.
+
+    Returns:
+        A ``folium.Map`` with outage/restored colour coding.
+    """
+    folium = _load_folium()
+    rows = list(frame)
+    geometry_column = frame.geometry_column
+
+    if not rows:
+        return folium.Map(location=[0, 0], zoom_start=2, tiles=tiles, width=width, height=height)
+
+    min_x, min_y, max_x, max_y = _frame_bounds(rows, geometry_column)
+    center = [(min_y + max_y) / 2, (min_x + max_x) / 2]
+    m = folium.Map(location=center, tiles=tiles, width=width, height=height)
+    m.fit_bounds([[min_y, min_x], [max_y, max_x]])
+
+    outage_group = folium.FeatureGroup(name="Outage")
+    restored_group = folium.FeatureGroup(name="Restored")
+    normal_group = folium.FeatureGroup(name="Normal")
+
+    for row in rows:
+        geom = row[geometry_column]
+        gtype = geometry_type(geom)
+
+        is_outage = bool(row.get(outage_column))
+        is_restored = bool(row.get(restored_column)) if restored_column else False
+
+        if is_outage and not is_restored:
+            feat_color, feat_fill, opacity, target = "#c92a2a", "#ff6b6b", 0.6, outage_group
+        elif is_restored:
+            feat_color, feat_fill, opacity, target = "#2b8a3e", "#51cf66", 0.5, restored_group
+        else:
+            feat_color, feat_fill, opacity, target = "#868e96", "#adb5bd", 0.3, normal_group
+
+        tooltip = None
+        if tooltip_columns:
+            parts = [f"<b>{c}</b>: {row.get(c, '')}" for c in tooltip_columns if c != geometry_column]
+            tooltip = folium.Tooltip("<br>".join(parts)) if parts else None
+
+        if gtype == "Point":
+            coords = geom["coordinates"]
+            folium.CircleMarker(
+                location=[coords[1], coords[0]],
+                radius=6,
+                color=feat_color,
+                fill=True,
+                fill_color=feat_fill,
+                fill_opacity=opacity,
+                tooltip=tooltip,
+            ).add_to(target)
+        else:
+            geojson = _geojson_coords(geom)
+            folium.GeoJson(
+                {"type": "Feature", "geometry": geojson, "properties": {}},
+                style_function=lambda _f, _c=feat_color, _fc=feat_fill, _o=opacity: {
+                    "color": _c,
+                    "fillColor": _fc,
+                    "weight": 2,
+                    "fillOpacity": _o,
+                },
+                tooltip=tooltip,
+            ).add_to(target)
+
+    outage_group.add_to(m)
+    restored_group.add_to(m)
+    normal_group.add_to(m)
+    folium.LayerControl().add_to(m)
+    return m
+
+
+def plot_restoration_timeline(
+    events: Sequence[dict[str, Any]],
+    *,
+    time_column: str = "restored_at",
+    label_column: str = "node_id",
+    title: str | None = None,
+    output_path: str | Path | None = None,
+) -> Any:
+    """Plot a horizontal timeline of restoration events.
+
+    Each event dict should have at least *time_column* (numeric hours or
+    a sortable value) and *label_column*.
+
+    Args:
+        events: Sequence of event dicts.
+        time_column: Column with the time value.
+        label_column: Column with the event label.
+        title: Optional title.
+        output_path: Save path.
+
+    Returns:
+        A ``matplotlib.figure.Figure``.
+    """
+    plt = importlib.import_module("matplotlib.pyplot")
+    sorted_events = sorted(events, key=lambda e: float(e.get(time_column, 0)))
+    labels = [str(e.get(label_column, "")) for e in sorted_events]
+    times = [float(e.get(time_column, 0)) for e in sorted_events]
+
+    fig, ax = plt.subplots(figsize=(10, max(3, len(labels) * 0.5)))
+    colors = ["#2b8a3e" if i < len(times) // 2 else "#e67700" for i in range(len(times))]
+    ax.barh(range(len(labels)), times, color=colors, edgecolor="#333")
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Time")
+    ax.set_title(title or "Restoration Timeline")
+    ax.grid(True, axis="x", alpha=0.3)
+    fig.tight_layout()
+
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(path), bbox_inches="tight", dpi=150)
+
+    return fig
+
+
+def quickplot(
+    frame: Any,
+    *,
+    color: str = "steelblue",
+    edge_color: str = "black",
+    figsize: tuple[int, int] = (10, 8),
+    title: str | None = None,
+    label_column: str | None = None,
+    output_path: str | Path | None = None,
+) -> Any:
+    """Create a quick static matplotlib plot of frame geometries.
+
+    Args:
+        frame: A :class:`~geoprompt.frame.GeoPromptFrame`.
+        color: Fill color for geometries.
+        edge_color: Edge color for geometries.
+        figsize: Figure size as ``(width, height)`` inches.
+        title: Plot title.
+        label_column: Column name for point labels.
+        output_path: If given, save the figure to this path.
+
+    Returns:
+        A ``matplotlib.figure.Figure`` object.
+    """
+    plt = importlib.import_module("matplotlib.pyplot")
+    fig, ax = plt.subplots(figsize=figsize)
+
+    rows = list(frame)
+    geometry_column = frame.geometry_column
+
+    for row in rows:
+        geom = row[geometry_column]
+        gtype = geometry_type(geom)
+        coords = geom.get("coordinates")
+
+        if gtype == "Point":
+            ax.plot(coords[0], coords[1], "o", color=color, markersize=6, markeredgecolor=edge_color)
+            if label_column and label_column in row:
+                ax.annotate(str(row[label_column]), (coords[0], coords[1]), fontsize=8, ha="left", va="bottom")
+        elif gtype == "MultiPoint":
+            for pt in coords:
+                ax.plot(pt[0], pt[1], "o", color=color, markersize=6, markeredgecolor=edge_color)
+        elif gtype == "LineString":
+            xs = [c[0] for c in coords]
+            ys = [c[1] for c in coords]
+            ax.plot(xs, ys, "-", color=color, linewidth=1.5)
+        elif gtype == "MultiLineString":
+            for line in coords:
+                xs = [c[0] for c in line]
+                ys = [c[1] for c in line]
+                ax.plot(xs, ys, "-", color=color, linewidth=1.5)
+        elif gtype == "Polygon":
+            xs = [c[0] for c in coords]
+            ys = [c[1] for c in coords]
+            ax.fill(xs, ys, color=color, alpha=0.4, edgecolor=edge_color, linewidth=1)
+        elif gtype == "MultiPolygon":
+            for poly in coords:
+                xs = [c[0] for c in poly]
+                ys = [c[1] for c in poly]
+                ax.fill(xs, ys, color=color, alpha=0.4, edgecolor=edge_color, linewidth=1)
+
+    ax.set_aspect("equal")
+    if title:
+        ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(str(path), bbox_inches="tight", dpi=150)
+
+    return fig
+
+
+__all__ = [
+    "RESILIENCE_STYLE_PRESETS",
+    "plot_restoration_timeline",
+    "plot_scenario_dashboard",
+    "quickplot",
+    "resilience_style_map",
+    "save_map",
+    "to_choropleth",
+    "to_folium_map",
+    "to_outage_overlay_map",
+]

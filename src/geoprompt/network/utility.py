@@ -777,6 +777,7 @@ def outage_impact_report(
         "impacted_demand": impacted_demand,
         "critical_node_count": len(critical_impacted),
         "critical_impacted_nodes": critical_impacted,
+        "outage_hours": float(outage_hours),
         "customer_hours_interrupted": customer_hours,
         "demand_hours_interrupted": demand_hours,
         "estimated_cost": estimated_cost,
@@ -784,6 +785,81 @@ def outage_impact_report(
         "severity_tier": severity_tier,
         "failed_edge_count": len(failed_edges),
     }
+
+
+def reliability_indices(
+    outage_events: list[dict[str, Any]],
+    total_customers: int,
+    period_hours: float = 8760.0,
+) -> dict[str, Any]:
+    """Compute standard utility reliability indices from outage events.
+
+    Each outage event can be a dict returned by ``outage_impact_report`` or any
+    mapping containing ``impacted_customer_count`` plus either
+    ``customer_hours_interrupted`` or ``outage_hours``.
+    """
+    if total_customers <= 0:
+        raise ValueError("total_customers must be greater than zero")
+    if period_hours <= 0:
+        raise ValueError("period_hours must be greater than zero")
+
+    events = outage_events or []
+    customer_interruptions = 0.0
+    customer_hours_interrupted = 0.0
+
+    for event in events:
+        impacted = max(0.0, float(event.get("impacted_customer_count", 0)))
+        customer_interruptions += impacted
+        if "customer_hours_interrupted" in event:
+            customer_hours_interrupted += max(0.0, float(event.get("customer_hours_interrupted", 0.0)))
+        else:
+            duration = max(0.0, float(event.get("outage_hours", 1.0)))
+            customer_hours_interrupted += impacted * duration
+
+    saifi = customer_interruptions / float(total_customers)
+    saidi = customer_hours_interrupted / float(total_customers)
+    caidi = saidi / saifi if saifi > 0 else 0.0
+    asai = 1.0 - (customer_hours_interrupted / (float(total_customers) * float(period_hours)))
+    asai = max(0.0, min(1.0, asai))
+    asui = 1.0 - asai
+
+    return {
+        "event_count": len(events),
+        "customers_served": int(total_customers),
+        "customer_interruptions": round(customer_interruptions, 4),
+        "customer_hours_interrupted": round(customer_hours_interrupted, 4),
+        "SAIFI": round(saifi, 6),
+        "SAIDI": round(saidi, 6),
+        "CAIDI": round(caidi, 6),
+        "ASAI": round(asai, 8),
+        "ASUI": round(asui, 8),
+    }
+
+
+def reliability_scenario_report(
+    scenarios: dict[str, list[dict[str, Any]]],
+    total_customers: int,
+    period_hours: float = 8760.0,
+    baseline: str | None = None,
+) -> list[dict[str, Any]]:
+    """Compare reliability indices across named outage scenarios."""
+    rows: list[dict[str, Any]] = []
+    baseline_metrics: dict[str, Any] | None = None
+
+    if baseline is not None and baseline in scenarios:
+        baseline_metrics = reliability_indices(scenarios[baseline], total_customers, period_hours=period_hours)
+
+    for name, events in scenarios.items():
+        metrics = reliability_indices(events, total_customers, period_hours=period_hours)
+        row = {"scenario": name, **metrics}
+        if baseline_metrics is not None:
+            row["delta_SAIDI"] = round(float(metrics["SAIDI"]) - float(baseline_metrics["SAIDI"]), 6)
+            row["delta_SAIFI"] = round(float(metrics["SAIFI"]) - float(baseline_metrics["SAIFI"]), 6)
+            row["delta_ASAI"] = round(float(metrics["ASAI"]) - float(baseline_metrics["ASAI"]), 8)
+        rows.append(row)
+
+    rows.sort(key=lambda item: (-float(item["ASAI"]), float(item["SAIDI"]), str(item["scenario"])))
+    return rows
 
 
 def gas_shutdown_impact(
@@ -1194,3 +1270,170 @@ def attribute_aware_headloss(
         "mean_pressure": sum(pressures) / len(pressures) if pressures else 0.0,
         "pressure_profile": profile,
     }
+
+
+# --- Facility siting and capital planning ---
+
+
+def facility_siting_score(
+    graph: NetworkGraph,
+    candidate_nodes: list[str],
+    demand_nodes: list[str],
+    *,
+    demand_weights: dict[str, float] | None = None,
+    max_cost: float = math.inf,
+) -> list[dict[str, Any]]:
+    """Score candidate facility locations by weighted demand coverage.
+
+    For each candidate the function computes a service-area tree and
+    accumulates the demand it can reach.
+
+    Args:
+        graph: Network graph.
+        candidate_nodes: Node ids that are potential facility sites.
+        demand_nodes: Node ids representing demand locations.
+        demand_weights: Per-node demand weight (defaults to 1 per node).
+        max_cost: Maximum cost (distance/time) for service reach.
+
+    Returns:
+        List of dicts sorted best-first with keys ``node``,
+        ``reachable_demand_nodes``, ``total_weighted_demand``,
+        ``mean_cost``.
+    """
+    weights = demand_weights or {}
+    demand_set = set(demand_nodes)
+    results: list[dict[str, Any]] = []
+    for cand in candidate_nodes:
+        sa = service_area(graph, origins=[cand], max_cost=max_cost)
+        sa_map = {str(r["node"]): float(r["cost"]) for r in sa}
+        reached = [n for n in demand_nodes if n in sa_map]
+        total_w = sum(weights.get(n, 1.0) for n in reached)
+        costs = [sa_map[n] for n in reached]
+        results.append({
+            "node": cand,
+            "reachable_demand_nodes": len(reached),
+            "total_demand_nodes": len(demand_set),
+            "coverage_ratio": len(reached) / max(len(demand_set), 1),
+            "total_weighted_demand": total_w,
+            "mean_cost": (sum(costs) / len(costs)) if costs else math.inf,
+        })
+    results.sort(key=lambda r: (-r["total_weighted_demand"], r["mean_cost"]))
+    return results
+
+
+def capital_planning_prioritization(
+    projects: list[dict[str, Any]],
+    *,
+    benefit_column: str = "benefit",
+    cost_column: str = "cost",
+    risk_column: str | None = None,
+    budget: float | None = None,
+) -> list[dict[str, Any]]:
+    """Rank and prioritize capital investment projects.
+
+    Each project dict should contain at least the *benefit_column* and
+    *cost_column* fields.  Projects are ranked by benefit-cost ratio and
+    optionally filtered to fit within *budget* using a greedy knapsack.
+
+    Args:
+        projects: List of project dicts.
+        benefit_column: Column with estimated benefit.
+        cost_column: Column with estimated cost.
+        risk_column: Optional column with a risk score (0-1, higher = riskier).
+        budget: If given, select projects greedily up to this total cost.
+
+    Returns:
+        Ranked list of project dicts with added ``bcr`` (benefit-cost
+        ratio), ``risk_adjusted_bcr``, ``cumulative_cost``, and
+        ``selected`` fields.
+    """
+    scored: list[dict[str, Any]] = []
+    for proj in projects:
+        cost = max(float(proj.get(cost_column, 0)), 1e-9)
+        benefit = float(proj.get(benefit_column, 0))
+        risk = float(proj.get(risk_column, 0)) if risk_column and risk_column in proj else 0.0
+        bcr = benefit / cost
+        risk_adj = bcr * (1.0 - risk)
+        scored.append({
+            **proj,
+            "bcr": round(bcr, 4),
+            "risk_adjusted_bcr": round(risk_adj, 4),
+        })
+
+    scored.sort(key=lambda p: -p["risk_adjusted_bcr"])
+
+    cumulative = 0.0
+    for proj in scored:
+        cumulative += float(proj.get(cost_column, 0))
+        proj["cumulative_cost"] = round(cumulative, 2)
+        if budget is not None:
+            proj["selected"] = cumulative <= budget
+        else:
+            proj["selected"] = True
+
+    return scored
+
+
+def pressure_scenario_sweep(
+    graph: NetworkGraph,
+    source_node: str,
+    inlet_pressures: list[float],
+    *,
+    low_pressure_threshold: float = 20.0,
+) -> list[dict[str, Any]]:
+    """Run multiple pressure traces at different inlet pressures.
+
+    Args:
+        graph: Network graph.
+        source_node: Pressure source node.
+        inlet_pressures: List of inlet pressure values to test.
+        low_pressure_threshold: Threshold below which a node is low-pressure.
+
+    Returns:
+        List of scenario result dicts with keys ``inlet_pressure``,
+        ``min_pressure``, ``mean_pressure``, ``low_pressure_count``,
+        ``zone_node_count``.
+    """
+    results: list[dict[str, Any]] = []
+    for ip in inlet_pressures:
+        trace = attribute_aware_headloss(graph, source_node, ip)
+        profile = trace.get("pressure_profile", [])
+        low_count = sum(1 for p in profile if float(p.get("pressure", 0)) < low_pressure_threshold)
+        results.append({
+            "inlet_pressure": ip,
+            "min_pressure": trace["min_pressure"],
+            "max_pressure": trace["max_pressure"],
+            "mean_pressure": trace["mean_pressure"],
+            "zone_node_count": trace["zone_node_count"],
+            "low_pressure_count": low_count,
+        })
+    return results
+
+
+def dependency_graph_overlay(
+    graphs: dict[str, NetworkGraph],
+    shared_nodes: list[str],
+) -> list[dict[str, Any]]:
+    """Identify cross-utility dependencies at shared infrastructure nodes.
+
+    Args:
+        graphs: Mapping of utility name to network graph (e.g.
+            ``{"water": water_graph, "electric": elec_graph}``).
+        shared_nodes: Node ids that appear in multiple utility graphs.
+
+    Returns:
+        List of dicts per shared node showing which utilities it connects.
+    """
+    results: list[dict[str, Any]] = []
+    for node in shared_nodes:
+        connected: list[str] = []
+        for name, g in graphs.items():
+            if node in g.adjacency:
+                connected.append(name)
+        results.append({
+            "node": node,
+            "connected_utilities": connected,
+            "utility_count": len(connected),
+            "is_cross_dependency": len(connected) > 1,
+        })
+    return results

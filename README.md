@@ -13,15 +13,31 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 - Benchmarks and proof: [docs/benchmarks.md](docs/benchmarks.md)
 - Network recipes: [docs/network-scenario-recipes.md](docs/network-scenario-recipes.md)
 - Interop and reporting: [docs/geopandas-interop-and-reporting.md](docs/geopandas-interop-and-reporting.md)
+- Migration guide: [docs/migration-from-geopandas.md](docs/migration-from-geopandas.md)
+- Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
+- Tool-selection guide: [docs/when-to-use-geoprompt.md](docs/when-to-use-geoprompt.md)
 
 ## Install Profiles
 
 - Core install: `pip install geoprompt`
 - Developer tooling: `pip install geoprompt[dev]`
 - Network-heavy workloads: `pip install geoprompt[network]`
+- Visualization stack: `pip install geoprompt[viz]`
 - Geospatial IO stack: `pip install geoprompt[io]`
+- Excel helpers: `pip install geoprompt[excel]`
+- Database connectors: `pip install geoprompt[db]`
 - Overlay and geometry operations: `pip install geoprompt[overlay]`
+- Comparison and benchmark extras: `pip install geoprompt[compare]`
 - Full feature stack: `pip install geoprompt[all]`
+
+## Container Quick Start
+
+A starter [Dockerfile](Dockerfile) is included for reproducible runs:
+
+```bash
+docker build -t geoprompt .
+docker run --rm geoprompt geoprompt-demo --help
+```
 
 ## Snapshot
 

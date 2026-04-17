@@ -292,20 +292,112 @@ class PromptTable:
         path.write_text(json.dumps(self._rows, indent=indent), encoding="utf-8")
         return str(path)
 
-    def to_html(self, output_path: str | Path) -> str:
+    def to_html(self, output_path: str | Path, conditional: dict[str, Any] | None = None) -> str:
+        """Write the table to an HTML file.
+
+        Args:
+            output_path: Destination file path.
+            conditional: Optional formatting rules.  Supported keys:
+
+                ``"column"``
+                    Column to evaluate.
+                ``"low_color"``
+                    Background color for values below ``threshold`` (default
+                    ``"#fca5a5"``).
+                ``"high_color"``
+                    Background color for values at or above ``threshold``
+                    (default ``"#86efac"``).
+                ``"threshold"``
+                    Numeric threshold (default ``0``).
+
+        Returns:
+            The resolved output path string.
+        """
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         if not self._rows:
             html = "<table></table>"
         else:
+            cond_col = conditional.get("column") if conditional else None
+            low_color = (conditional or {}).get("low_color", "#fca5a5")
+            high_color = (conditional or {}).get("high_color", "#86efac")
+            threshold = float((conditional or {}).get("threshold", 0))
+
             header = "".join(f"<th>{column}</th>" for column in self.columns)
-            body = "".join(
-                "<tr>" + "".join(f"<td>{row.get(column, '')}</td>" for column in self.columns) + "</tr>"
-                for row in self._rows
-            )
+            body_parts: list[str] = []
+            for row in self._rows:
+                cells: list[str] = []
+                for column in self.columns:
+                    val = row.get(column, "")
+                    style = ""
+                    if cond_col and column == cond_col and _is_numeric_value(val):
+                        bg = high_color if float(val) >= threshold else low_color
+                        style = f' style="background:{bg}"'
+                    cells.append(f"<td{style}>{val}</td>")
+                body_parts.append("<tr>" + "".join(cells) + "</tr>")
+            body = "".join(body_parts)
             html = f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
         path.write_text(html, encoding="utf-8")
         return str(path)
+
+    def crosstab(
+        self,
+        index: str,
+        columns: str,
+        values: str | None = None,
+        agg: str = "count",
+    ) -> "PromptTable":
+        """Cross-tabulate two categorical columns.
+
+        Args:
+            index: Column whose unique values become rows.
+            columns: Column whose unique values become new columns.
+            values: Optional column to aggregate (counts by default).
+            agg: Aggregation function name.
+
+        Returns:
+            A new :class:`PromptTable`.
+        """
+        for col in [index, columns]:
+            if col not in self.columns:
+                raise KeyError(f"column '{col}' is not present")
+        if values is not None and values not in self.columns:
+            raise KeyError(f"column '{values}' is not present")
+
+        buckets: dict[Any, dict[Any, list[Any]]] = {}
+        col_values: set[Any] = set()
+        for row in self._rows:
+            idx = row.get(index)
+            col = row.get(columns)
+            col_values.add(col)
+            bucket = buckets.setdefault(idx, {})
+            bucket.setdefault(col, []).append(row.get(values, 1))
+
+        sorted_cols = sorted(col_values, key=str)
+        result_rows: list[Record] = []
+        for idx_val, cols_bucket in buckets.items():
+            result: Record = {index: idx_val}
+            for cv in sorted_cols:
+                vals = cols_bucket.get(cv, [])
+                if not vals:
+                    result[str(cv)] = 0 if agg == "count" else None
+                elif agg == "count":
+                    result[str(cv)] = len(vals)
+                elif agg == "sum":
+                    result[str(cv)] = sum(float(v) for v in vals if v is not None)
+                elif agg == "mean":
+                    numeric = [float(v) for v in vals if v is not None]
+                    result[str(cv)] = (sum(numeric) / len(numeric)) if numeric else None
+                elif agg == "min":
+                    result[str(cv)] = min(vals)
+                elif agg == "max":
+                    result[str(cv)] = max(vals)
+                elif agg == "first":
+                    result[str(cv)] = vals[0]
+                else:
+                    raise ValueError(f"unsupported aggregation: {agg}")
+            result_rows.append(result)
+        return PromptTable(result_rows)
 
 
 class GroupedPromptTable:

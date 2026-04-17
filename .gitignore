@@ -4,4 +4,6 @@ __pycache__/
 build/
 dist/
 outputs/
+private/
+*.private.md
 src/geoprompt.egg-info/

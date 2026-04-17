@@ -68,6 +68,19 @@ What it shows:
 - Stakeholder-ready HTML resilience summary output
 - Portfolio ranking across baseline versus upgrade scenarios
 
+## Reliability Dashboard Example
+
+Run:
+
+```bash
+python examples/network/reliability_dashboard.py
+```
+
+What it shows:
+- SAIDI, SAIFI, and ASAI comparison by scenario
+- a lightweight dashboard image for stakeholder review
+- a reproducible starter for resilience scorecards
+
 ## Notes
 
 - These recipes are intentionally small and deterministic.

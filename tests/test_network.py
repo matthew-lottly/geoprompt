@@ -49,6 +49,8 @@ from geoprompt.network import (
     supply_redundancy_audit,
     multi_source_service_audit,
     outage_impact_report,
+    reliability_indices,
+    reliability_scenario_report,
     demand_weighted_restoration_ranking,
     cross_utility_dependency_score,
     attribute_aware_headloss,
@@ -1097,6 +1099,45 @@ class TestCriticalityRanking:
         g = _linear_graph()
         results = criticality_ranking_by_node_removal(g)
         assert len(results) == 5
+
+
+class TestReliabilityMetrics:
+    def test_reliability_indices_basic(self):
+        events = [
+            {"impacted_customer_count": 100, "outage_hours": 2.0},
+            {"impacted_customer_count": 50, "customer_hours_interrupted": 25.0},
+        ]
+        result = reliability_indices(events, total_customers=1000, period_hours=24.0)
+        assert result["SAIFI"] == 0.15
+        assert result["SAIDI"] == 0.225
+        assert result["CAIDI"] == 1.5
+        assert 0.0 < result["ASAI"] < 1.0
+
+    def test_reliability_scenario_report(self):
+        rows = reliability_scenario_report(
+            {
+                "baseline": [{"impacted_customer_count": 100, "outage_hours": 2.0}],
+                "hardened": [{"impacted_customer_count": 20, "outage_hours": 1.0}],
+            },
+            total_customers=1000,
+            period_hours=24.0,
+            baseline="baseline",
+        )
+        by_name = {row["scenario"]: row for row in rows}
+        assert by_name["hardened"]["SAIDI"] < by_name["baseline"]["SAIDI"]
+        assert by_name["hardened"]["delta_SAIDI"] < 0
+
+    def test_outage_impact_report_includes_outage_hours(self):
+        g = _linear_graph()
+        result = outage_impact_report(
+            g,
+            source_nodes=["A"],
+            failed_edges=["e0"],
+            customer_count_by_node={"B": 10, "C": 10, "D": 10, "E": 10},
+            outage_hours=3.0,
+        )
+        assert result["outage_hours"] == 3.0
+        assert result["customer_hours_interrupted"] == 120.0
 
 
 # ─── Large Graph Stress Tests ───────────────────────────────────────────────

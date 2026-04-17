@@ -33,11 +33,16 @@ network = [
 ]
 viz = [
     "matplotlib>=3.9,<4.0",
+    "folium>=0.15,<1.0",
 ]
 io = [
     "pandas>=2.2,<3.0",
     "pyarrow>=16,<20",
     "geopandas>=1.0,<2.0",
+]
+excel = [
+    "pandas>=2.2,<3.0",
+    "openpyxl>=3.1,<4.0",
 ]
 compare = [
     "geopandas>=1.0,<2.0",
@@ -50,17 +55,25 @@ overlay = [
 projection = [
     "pyproj>=3.6,<4.0",
 ]
+db = [
+    "sqlalchemy>=2.0,<3.0",
+]
+stats = []
 all = [
     "numpy>=1.26,<3.0",
     "matplotlib>=3.9,<4.0",
+    "folium>=0.15,<1.0",
     "pandas>=2.2,<3.0",
     "pyarrow>=16,<20",
+    "openpyxl>=3.1,<4.0",
     "geopandas>=1.0,<2.0",
     "pyproj>=3.6,<4.0",
     "shapely>=2.0,<3.0",
+    "sqlalchemy>=2.0,<3.0",
 ]
 
 [project.scripts]
+geoprompt = "geoprompt.cli:main"
 geoprompt-demo = "geoprompt.demo:main"
 geoprompt-compare = "geoprompt.compare:main"
 

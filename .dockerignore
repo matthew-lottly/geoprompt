@@ -1,0 +1,11 @@
+.git
+.github
+.pytest_cache
+.venv
+.venv-1
+__pycache__/
+*.pyc
+outputs/
+private/
+projects/
+benchmarks/

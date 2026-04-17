@@ -11,6 +11,8 @@ import csv
 import json
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.request import urlopen
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_type
@@ -26,6 +28,36 @@ WORKLOAD_PRESETS: dict[str, dict[str, int | None]] = {
 
 def _read_json(path: str | Path) -> Any:
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def _is_url_source(path: str | Path) -> bool:
+    if isinstance(path, Path):
+        return False
+    parsed = urlparse(str(path))
+    return parsed.scheme in {"http", "https", "file"}
+
+
+def _resolve_service_url(url: str) -> str:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return url
+    if not any(token in parsed.path for token in ("FeatureServer", "MapServer")):
+        return url
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if "f" not in query:
+        query.setdefault("where", "1=1")
+        query.setdefault("outFields", "*")
+        query["f"] = "json"
+        return urlunparse(parsed._replace(query=urlencode(query)))
+    return url
+
+
+def _read_json_source(path: str | Path, *, timeout: float = 30.0) -> Any:
+    if _is_url_source(path):
+        resolved = _resolve_service_url(str(path))
+        with urlopen(resolved, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    return _read_json(path)
 
 
 def _validate_read_options(
@@ -254,6 +286,77 @@ def _extract_crs(payload: Any) -> str | None:
         if isinstance(properties, dict) and "name" in properties:
             return str(properties["name"])
     return None
+
+
+def _extract_service_crs(payload: Any) -> str | None:
+    crs = _extract_crs(payload)
+    if crs:
+        return crs
+    if not isinstance(payload, dict):
+        return None
+    spatial_reference = payload.get("spatialReference")
+    if isinstance(spatial_reference, dict):
+        wkid = spatial_reference.get("latestWkid", spatial_reference.get("wkid"))
+        if wkid is not None:
+            return f"EPSG:{wkid}"
+    return None
+
+
+def _arcgis_geometry_to_internal(geometry: Any) -> dict[str, Any] | None:
+    if not isinstance(geometry, dict):
+        return None
+    if "type" in geometry and "coordinates" in geometry:
+        return dict(geometry)
+    if "x" in geometry and "y" in geometry:
+        return {"type": "Point", "coordinates": [float(geometry["x"]), float(geometry["y"])]}
+    if "points" in geometry:
+        return {"type": "MultiPoint", "coordinates": [[float(x), float(y)] for x, y in geometry["points"]]}
+    if "paths" in geometry:
+        paths = geometry.get("paths") or []
+        if len(paths) == 1:
+            return {"type": "LineString", "coordinates": [[float(x), float(y)] for x, y in paths[0]]}
+        return {
+            "type": "MultiLineString",
+            "coordinates": [
+                [[float(x), float(y)] for x, y in path]
+                for path in paths
+            ],
+        }
+    if "rings" in geometry:
+        rings = geometry.get("rings") or []
+        if len(rings) == 1:
+            return {"type": "Polygon", "coordinates": [[float(x), float(y)] for x, y in rings[0]]}
+        return {
+            "type": "MultiPolygon",
+            "coordinates": [
+                [[[float(x), float(y)] for x, y in ring]]
+                for ring in rings
+            ],
+        }
+    return None
+
+
+def _records_from_service_payload(payload: Any, geometry: str = "geometry") -> list[dict[str, Any]]:
+    try:
+        return _records_from_payload(payload, geometry=geometry)
+    except TypeError:
+        pass
+
+    if isinstance(payload, dict) and isinstance(payload.get("features"), list):
+        rows: list[dict[str, Any]] = []
+        for feature in payload["features"]:
+            if not isinstance(feature, dict):
+                continue
+            attributes = dict(feature.get("attributes") or feature.get("properties") or {})
+            resolved_geometry = _arcgis_geometry_to_internal(feature.get("geometry"))
+            if resolved_geometry is not None:
+                attributes[geometry] = resolved_geometry
+            if geometry in attributes and attributes[geometry] is not None:
+                rows.append(attributes)
+        if rows:
+            return rows
+
+    raise TypeError("service payload must be GeoJSON or ArcGIS feature JSON")
 
 
 def _records_from_payload(payload: Any, geometry: str = "geometry") -> list[dict[str, Any]]:
@@ -510,6 +613,16 @@ def read_data(
     - ``use_columns``: read selected attributes only
     - ``bbox`` and ``layer`` for geospatial stores
     """
+    if _is_url_source(path):
+        return read_service_url(
+            str(path),
+            geometry=geometry,
+            crs=crs,
+            use_columns=use_columns,
+            limit_rows=limit_rows,
+            sample_step=sample_step,
+        )
+
     data_path = Path(path)
     _validate_read_options(
         data_path=data_path,
@@ -627,6 +740,26 @@ def iter_data(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterable[GeoPromptFrame]:
     """Yield data as chunked ``GeoPromptFrame`` batches for large datasets."""
+    if _is_url_source(path):
+        frame = read_service_url(
+            str(path),
+            geometry=geometry,
+            crs=crs,
+            use_columns=use_columns,
+            limit_rows=limit_rows,
+            sample_step=sample_step,
+        )
+        for chunk in _iter_frame_chunks(
+            frame.to_records(),
+            geometry=geometry,
+            crs=frame.crs,
+            chunk_size=chunk_size,
+            limit_rows=limit_rows,
+        ):
+            _notify(chunk)
+            yield chunk
+        return
+
     data_path = Path(path)
     _validate_read_options(
         data_path=data_path,
@@ -873,6 +1006,31 @@ def read_features(path: str | Path, geometry: str = "geometry", crs: str | None 
 
 def read_geojson(path: str | Path, geometry: str = "geometry", crs: str | None = None) -> GeoPromptFrame:
     return read_data(path, geometry=geometry, crs=crs)
+
+
+def read_service_url(
+    url: str,
+    *,
+    geometry: str = "geometry",
+    crs: str | None = None,
+    use_columns: Sequence[str] | None = None,
+    limit_rows: int | None = None,
+    sample_step: int = 1,
+    timeout: float = 30.0,
+) -> GeoPromptFrame:
+    """Read GeoJSON or ArcGIS-style feature JSON directly from a URL or URI."""
+    if sample_step <= 0:
+        raise ValueError("sample_step must be >= 1")
+    if limit_rows is not None and limit_rows <= 0:
+        raise ValueError("limit_rows must be >= 1 when provided")
+
+    payload = _read_json_source(url, timeout=timeout)
+    rows = _records_from_service_payload(payload, geometry=geometry)
+    rows = _apply_row_limits(rows, limit_rows=limit_rows, sample_step=sample_step)
+    if use_columns:
+        keep = set(use_columns)
+        rows = [{**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]} for row in rows]
+    return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs or _extract_service_crs(payload))
 
 
 def _as_geojson_geometry(geometry: dict[str, Any]) -> dict[str, Any]:
@@ -1180,6 +1338,368 @@ def read_geoparquet_metadata(path: str | Path) -> dict[str, Any]:
             ) from exc
 
 
+# ---------------------------------------------------------------------------
+# Excel helpers
+# ---------------------------------------------------------------------------
+
+def read_excel(
+    path: str | Path,
+    x_column: str = "x",
+    y_column: str = "y",
+    sheet_name: str | int = 0,
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    """Read point data from an Excel file.
+
+    Requires ``openpyxl`` (for .xlsx) or ``xlrd`` (for .xls) via pandas.
+
+    Args:
+        path: Path to the Excel file.
+        x_column: Column name containing X (longitude) values.
+        y_column: Column name containing Y (latitude) values.
+        sheet_name: Sheet name or index to read.
+        crs: Optional CRS string.
+
+    Returns:
+        A :class:`GeoPromptFrame` with point geometries.
+    """
+    import importlib
+    pd = importlib.import_module("pandas")
+
+    df = pd.read_excel(path, sheet_name=sheet_name)
+    rows = []
+    for _, row in df.iterrows():
+        record = row.to_dict()
+        x = float(record.pop(x_column))
+        y = float(record.pop(y_column))
+        record["geometry"] = {"type": "Point", "coordinates": [x, y]}
+        rows.append(record)
+    return GeoPromptFrame(rows, geometry_column="geometry", crs=crs)
+
+
+def write_excel(
+    frame: GeoPromptFrame,
+    path: str | Path,
+    sheet_name: str = "Sheet1",
+    include_wkt: bool = True,
+) -> str:
+    """Write frame data to an Excel file.
+
+    Geometries are exported as WKT strings in a ``geometry_wkt`` column.
+    Requires ``openpyxl`` via pandas.
+
+    Args:
+        frame: Frame to export.
+        path: Output file path.
+        sheet_name: Target sheet name.
+        include_wkt: If ``True``, include a WKT representation of geometries.
+
+    Returns:
+        The resolved output path string.
+    """
+    import importlib
+    pd = importlib.import_module("pandas")
+
+    records = frame.to_records()
+    for record in records:
+        geom = record.pop(frame.geometry_column, None)
+        if include_wkt and geom:
+            record["geometry_wkt"] = _geometry_to_wkt(geom)
+
+    df = pd.DataFrame(records)
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    df.to_excel(str(out), sheet_name=sheet_name, index=False)
+    return str(out)
+
+
+# ---------------------------------------------------------------------------
+# GeoPackage helpers
+# ---------------------------------------------------------------------------
+
+def read_geopackage(
+    path: str | Path,
+    layer: str | None = None,
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    """Read spatial data from a GeoPackage file.
+
+    Requires ``geopandas`` and ``fiona``.
+
+    Args:
+        path: Path to the .gpkg file.
+        layer: Layer name to read; defaults to the first layer.
+        crs: Optional CRS override.
+
+    Returns:
+        A :class:`GeoPromptFrame`.
+    """
+    import importlib
+    gpd = importlib.import_module("geopandas")
+
+    gdf = gpd.read_file(str(path), layer=layer)
+    from .interop import from_geopandas
+    frame = from_geopandas(gdf)
+    if crs:
+        frame = frame.set_crs(crs, allow_override=True)
+    return frame
+
+
+def write_geopackage(
+    frame: GeoPromptFrame,
+    path: str | Path,
+    layer: str = "layer",
+) -> str:
+    """Write frame data to a GeoPackage file.
+
+    Requires ``geopandas``.
+
+    Args:
+        frame: Frame to export.
+        path: Output file path.
+        layer: Layer name.
+
+    Returns:
+        The resolved output path string.
+    """
+    from .interop import to_geopandas
+    gdf = to_geopandas(frame)
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(str(out), layer=layer, driver="GPKG")
+    return str(out)
+
+
+# ---------------------------------------------------------------------------
+# Shapefile helpers
+# ---------------------------------------------------------------------------
+
+def read_shapefile(
+    path: str | Path,
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    """Read spatial data from a Shapefile.
+
+    Requires ``geopandas`` and ``fiona``.
+
+    Args:
+        path: Path to the .shp file.
+        crs: Optional CRS override.
+
+    Returns:
+        A :class:`GeoPromptFrame`.
+    """
+    import importlib
+    gpd = importlib.import_module("geopandas")
+
+    gdf = gpd.read_file(str(path))
+    from .interop import from_geopandas
+    frame = from_geopandas(gdf)
+    if crs:
+        frame = frame.set_crs(crs, allow_override=True)
+    return frame
+
+
+def write_shapefile(
+    frame: GeoPromptFrame,
+    path: str | Path,
+) -> str:
+    """Write frame data to a Shapefile.
+
+    Requires ``geopandas``.
+
+    Args:
+        frame: Frame to export.
+        path: Output file path (.shp).
+
+    Returns:
+        The resolved output path string.
+    """
+    from .interop import to_geopandas
+    gdf = to_geopandas(frame)
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    gdf.to_file(str(out), driver="ESRI Shapefile")
+    return str(out)
+
+
+# ---------------------------------------------------------------------------
+# Internal geometry WKT helper
+# ---------------------------------------------------------------------------
+
+def _geometry_to_wkt(geom: dict) -> str:
+    """Convert internal geometry dict to WKT string."""
+    gtype = geom.get("type", "")
+    coords = geom.get("coordinates", [])
+
+    if gtype == "Point":
+        return f"POINT ({coords[0]} {coords[1]})"
+    if gtype == "LineString":
+        pts = ", ".join(f"{c[0]} {c[1]}" for c in coords)
+        return f"LINESTRING ({pts})"
+    if gtype == "Polygon":
+        if isinstance(coords[0], (list, tuple)) and isinstance(coords[0][0], (int, float)):
+            pts = ", ".join(f"{c[0]} {c[1]}" for c in coords)
+            return f"POLYGON (({pts}))"
+        rings = []
+        for ring in coords:
+            pts = ", ".join(f"{c[0]} {c[1]}" for c in ring)
+            rings.append(f"({pts})")
+        return f"POLYGON ({', '.join(rings)})"
+    if gtype == "MultiPoint":
+        pts = ", ".join(f"({c[0]} {c[1]})" for c in coords)
+        return f"MULTIPOINT ({pts})"
+    if gtype == "MultiLineString":
+        lines = []
+        for line in coords:
+            pts = ", ".join(f"{c[0]} {c[1]}" for c in line)
+            lines.append(f"({pts})")
+        return f"MULTILINESTRING ({', '.join(lines)})"
+    if gtype == "MultiPolygon":
+        polys = []
+        for poly in coords:
+            if isinstance(poly[0], (int, float)):
+                pts = ", ".join(f"{c[0]} {c[1]}" for c in poly)
+                polys.append(f"(({pts}))")
+            else:
+                pts = ", ".join(f"{c[0]} {c[1]}" for c in poly)
+                polys.append(f"(({pts}))")
+        return f"MULTIPOLYGON ({', '.join(polys)})"
+    return f"GEOMETRYCOLLECTION EMPTY"
+
+
+def schema_report(records: list[dict[str, object]] | Any) -> dict[str, Any]:
+    """Generate a schema report for a collection of records.
+
+    Inspects all rows to determine column names, types, null counts, and
+    unique value counts.
+
+    Args:
+        records: A list of dicts, or a :class:`~geoprompt.frame.GeoPromptFrame`.
+
+    Returns:
+        Dict with ``"columns"`` list and overall ``"row_count"``.
+    """
+    if hasattr(records, "to_records"):
+        rows: list[dict[str, object]] = records.to_records()
+    else:
+        rows = list(records)
+
+    if not rows:
+        return {"row_count": 0, "columns": []}
+
+    all_keys: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                seen.add(k)
+                all_keys.append(k)
+
+    columns: list[dict[str, Any]] = []
+    for key in all_keys:
+        values = [row.get(key) for row in rows]
+        non_null = [v for v in values if v is not None]
+        types = {type(v).__name__ for v in non_null}
+        columns.append({
+            "name": key,
+            "types": sorted(types),
+            "null_count": len(values) - len(non_null),
+            "non_null_count": len(non_null),
+            "unique_count": len({str(v) for v in non_null}),
+            "sample": non_null[0] if non_null else None,
+        })
+
+    return {"row_count": len(rows), "columns": columns}
+
+
+def validate_schema(
+    records: list[dict[str, object]] | Any,
+    expected: dict[str, str],
+    *,
+    strict: bool = False,
+) -> dict[str, Any]:
+    """Validate records against an expected schema.
+
+    Args:
+        records: List of dicts or a frame.
+        expected: Dict mapping column names to expected type names
+            (e.g. ``{"name": "str", "population": "int"}``).
+        strict: If ``True``, extra columns cause a violation.
+
+    Returns:
+        Dict with ``"valid"`` bool and ``"violations"`` detail list.
+    """
+    report = schema_report(records)
+    col_lookup: dict[str, dict[str, Any]] = {c["name"]: c for c in report["columns"]}
+
+    violations: list[str] = []
+    for col_name, expected_type in expected.items():
+        if col_name not in col_lookup:
+            violations.append(f"missing column: {col_name}")
+            continue
+        col = col_lookup[col_name]
+        if expected_type not in col["types"] and col["non_null_count"] > 0:
+            violations.append(
+                f"column '{col_name}' expected type '{expected_type}', found {col['types']}"
+            )
+
+    if strict:
+        extra = set(col_lookup) - set(expected)
+        for col_name in sorted(extra):
+            violations.append(f"unexpected column: {col_name}")
+
+    return {"valid": len(violations) == 0, "violations": violations}
+
+
+def read_cloud_json(
+    url: str,
+    *,
+    geometry_column: str = "geometry",
+    headers: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Read a JSON or GeoJSON file from a cloud object URL.
+
+    Supports S3 pre-signed URLs, Azure Blob SAS URLs, GCS public URLs,
+    or any HTTPS endpoint returning JSON.  This is a convenience wrapper
+    around URL fetching with optional headers.
+
+    Args:
+        url: Full URL to the JSON/GeoJSON resource.
+        geometry_column: Name for the geometry column.
+        headers: Optional HTTP headers (e.g. for auth tokens).
+
+    Returns:
+        List of record dicts.
+    """
+    from urllib.request import Request, urlopen
+
+    req = Request(url)
+    if headers:
+        for key, val in headers.items():
+            req.add_header(key, val)
+
+    with urlopen(req, timeout=60) as resp:  # noqa: S310
+        raw = resp.read()
+
+    import json as _json
+    payload = _json.loads(raw)
+
+    # GeoJSON FeatureCollection
+    if isinstance(payload, dict) and payload.get("type") == "FeatureCollection":
+        return _records_from_payload(payload, geometry_column)
+
+    # Plain list of records
+    if isinstance(payload, list):
+        return list(payload)
+
+    # ArcGIS-style features
+    if isinstance(payload, dict) and "features" in payload:
+        return _records_from_service_payload(payload, geometry_column)
+
+    return [payload]
+
+
 __all__ = [
     "discover_layers",
     "frame_to_geojson",
@@ -1187,17 +1707,27 @@ __all__ = [
     "iter_data",
     "iter_data_with_preset",
     "iter_csv_points",
+    "read_cloud_json",
     "read_csv_points",
     "read_data",
     "read_data_with_preset",
+    "read_excel",
     "read_features",
     "read_geojson",
+    "read_geopackage",
     "read_geoparquet_metadata",
     "read_points",
+    "read_service_url",
+    "read_shapefile",
     "read_table",
+    "schema_report",
+    "validate_schema",
     "WORKLOAD_PRESETS",
     "write_data",
+    "write_excel",
     "write_geojson",
+    "write_geopackage",
     "write_geoparquet",
     "write_json",
+    "write_shapefile",
 ]
