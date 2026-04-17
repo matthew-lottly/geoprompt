@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import html
 import importlib
 import statistics
 import time
@@ -13,6 +14,7 @@ from .frame import GeoPromptFrame
 from .geometry import geometry_centroid
 from .overlay import geometry_from_shapely, geometry_to_shapely
 from .io import read_features, write_json
+from .table import PromptTable
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -170,6 +172,204 @@ def _stress_feature_records() -> list[dict[str, Any]]:
     )
 
     return records
+
+
+def _large_stress_feature_records(scale: int = 4) -> list[dict[str, Any]]:
+    """Generate a larger stress corpus by scaling the base generator.
+
+    ``scale=4`` produces ~372 features (4× the base 93).  The generator
+    tiles across a wider geographic extent to avoid overlapping the base
+    corpus.
+    """
+    records: list[dict[str, Any]] = []
+    base_min_x = -112.5
+    base_min_y = 40.3
+    point_step_x = 0.015
+    point_step_y = 0.015
+
+    def coord(value: float) -> float:
+        return round(value, 6)
+
+    grid_side = 8 * scale
+    for row in range(grid_side):
+        for column in range(grid_side):
+            if row % scale != 0 and column % scale != 0:
+                continue
+            x_value = coord(base_min_x + (column * point_step_x))
+            y_value = coord(base_min_y + (row * point_step_y))
+            records.append({
+                "site_id": f"lg-point-{row:03d}-{column:03d}",
+                "name": f"Large Point {row:03d}-{column:03d}",
+                "geometry": {"type": "Point", "coordinates": [x_value, y_value]},
+                "demand_index": round(0.5 + (row * 0.004) + (column * 0.002), 3),
+                "capacity_index": round(0.6 + (column * 0.003), 3),
+                "priority_index": round(0.7 + (row * 0.005), 3),
+            })
+
+    line_count = 6 * scale
+    for row in range(line_count):
+        y_value = coord(base_min_y + 0.01 + (row * 0.018))
+        records.append({
+            "site_id": f"lg-hline-{row:03d}",
+            "name": f"Large Horizontal Line {row:03d}",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [base_min_x, y_value],
+                    [coord(base_min_x + 0.15), coord(y_value + 0.002)],
+                    [coord(base_min_x + 0.3), y_value],
+                ],
+            },
+            "demand_index": round(0.65 + (row * 0.008), 3),
+            "capacity_index": round(0.75 + (row * 0.005), 3),
+            "priority_index": round(0.85 + (row * 0.006), 3),
+        })
+
+    for column in range(line_count):
+        x_value = coord(base_min_x + 0.01 + (column * 0.02))
+        records.append({
+            "site_id": f"lg-vline-{column:03d}",
+            "name": f"Large Vertical Line {column:03d}",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [
+                    [x_value, base_min_y],
+                    [coord(x_value + 0.002), coord(base_min_y + 0.15)],
+                    [x_value, coord(base_min_y + 0.3)],
+                ],
+            },
+            "demand_index": round(0.62 + (column * 0.007), 3),
+            "capacity_index": round(0.72 + (column * 0.004), 3),
+            "priority_index": round(0.82 + (column * 0.005), 3),
+        })
+
+    poly_side = 4 * scale
+    for row in range(poly_side):
+        for column in range(poly_side):
+            if row % scale != 0 and column % scale != 0:
+                continue
+            min_polygon_x = coord(base_min_x + (column * 0.025))
+            min_polygon_y = coord(base_min_y + (row * 0.025))
+            max_polygon_x = coord(min_polygon_x + 0.018)
+            max_polygon_y = coord(min_polygon_y + 0.018)
+            records.append({
+                "site_id": f"lg-polygon-{row:03d}-{column:03d}",
+                "name": f"Large Polygon {row:03d}-{column:03d}",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [min_polygon_x, min_polygon_y],
+                        [max_polygon_x, min_polygon_y],
+                        [max_polygon_x, max_polygon_y],
+                        [min_polygon_x, max_polygon_y],
+                    ]],
+                },
+                "demand_index": round(0.7 + (row * 0.005) + (column * 0.003), 3),
+                "capacity_index": round(0.73 + (column * 0.004), 3),
+                "priority_index": round(0.9 + (row * 0.006), 3),
+            })
+
+    # Multi-geometry entries
+    for idx in range(4):
+        records.append({
+            "site_id": f"lg-multipoint-{idx:03d}",
+            "name": f"Large MultiPoint {idx:03d}",
+            "geometry": {
+                "type": "MultiPoint",
+                "coordinates": [
+                    [coord(base_min_x + idx * 0.05), coord(base_min_y + idx * 0.04)],
+                    [coord(base_min_x + idx * 0.05 + 0.01), coord(base_min_y + idx * 0.04 + 0.01)],
+                ],
+            },
+            "demand_index": round(0.55 + idx * 0.03, 3),
+            "capacity_index": round(0.65 + idx * 0.02, 3),
+            "priority_index": round(0.75 + idx * 0.04, 3),
+        })
+
+    records.append({
+        "site_id": "lg-remote-point",
+        "name": "Large Remote Point",
+        "geometry": {"type": "Point", "coordinates": [-111.5, 41.0]},
+        "demand_index": 0.45,
+        "capacity_index": 0.55,
+        "priority_index": 0.65,
+    })
+
+    return records
+
+
+def _large_stress_region_records(scale: int = 4) -> list[dict[str, Any]]:
+    """Generate a larger region corpus for the stress benchmark."""
+    records: list[dict[str, Any]] = []
+    min_x = -112.55
+    min_y = 40.25
+    cell_width = 0.04
+    cell_height = 0.04
+
+    def coord(value: float) -> float:
+        return round(value, 6)
+
+    grid_side = 4 * scale
+    for row in range(grid_side):
+        for column in range(grid_side):
+            if row % scale != 0 and column % scale != 0:
+                continue
+            region_min_x = coord(min_x + (column * cell_width))
+            region_min_y = coord(min_y + (row * cell_height))
+            region_max_x = coord(region_min_x + cell_width)
+            region_max_y = coord(region_min_y + cell_height)
+            records.append({
+                "region_id": f"lg-sector-{row:03d}-{column:03d}",
+                "region_name": f"Large Sector {row:03d}-{column:03d}",
+                "region_band": "north" if row >= grid_side // 2 else "south",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [region_min_x, region_min_y],
+                        [region_max_x, region_min_y],
+                        [region_max_x, region_max_y],
+                        [region_min_x, region_max_y],
+                    ]],
+                },
+            })
+
+    return records
+
+
+def save_benchmark_snapshot(
+    output_dir: str | Path = DEFAULT_OUTPUT_DIR,
+    *,
+    tolerance: float = 1e-7,
+    include_large_corpus: bool = True,
+) -> dict[str, Path]:
+    """Run the full comparison and save a reproducible benchmark snapshot.
+
+    Writes JSON, Markdown, and HTML reports. If ``include_large_corpus`` is True,
+    also runs and saves results for the large stress corpus.
+    """
+    report = build_comparison_report(output_dir=output_dir, tolerance=tolerance)
+    result = export_comparison_bundle(report, output_dir)
+    paths: dict[str, Path] = {k: Path(v) for k, v in result.items()}
+
+    if include_large_corpus:
+        large_dir = Path(output_dir) / "large-stress"
+        large_dir.mkdir(parents=True, exist_ok=True)
+        large_features = _large_stress_feature_records()
+        large_regions = _large_stress_region_records()
+        snapshot = {
+            "corpus": "large-stress",
+            "feature_count": len(large_features),
+            "region_count": len(large_regions),
+            "geometry_types": sorted({
+                str(r["geometry"]["type"]) for r in large_features if "geometry" in r
+            }),
+        }
+        snapshot_path = large_dir / "large_stress_snapshot.json"
+        from .io import write_json as _write_json
+        _write_json(snapshot_path, snapshot)
+        paths["large_stress_snapshot"] = snapshot_path
+
+    return paths
 
 
 def _stress_region_records() -> list[dict[str, Any]]:
@@ -506,6 +706,159 @@ def _dataset_report(case: CorpusCase, tolerance: float) -> dict[str, Any]:
     }
 
 
+def _parse_benchmark_operation(operation: str, dataset_name: str | None = None) -> tuple[str, str, str]:
+    parts = str(operation).split(".")
+    if len(parts) >= 3:
+        return parts[0], parts[1], ".".join(parts[2:])
+    if len(parts) == 2:
+        return dataset_name or parts[0], "unknown", parts[1]
+    return dataset_name or "unknown", "unknown", str(operation)
+
+
+def benchmark_summary_table(report: dict[str, Any]) -> PromptTable:
+    rows_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    for dataset in report.get("datasets", []):
+        dataset_name = str(dataset.get("dataset", "unknown"))
+        for benchmark in dataset.get("benchmarks", []):
+            benchmark_dataset, engine, operation = _parse_benchmark_operation(
+                str(benchmark.get("operation", "unknown")),
+                dataset_name=dataset_name,
+            )
+            row = rows_by_key.setdefault(
+                (benchmark_dataset, operation),
+                {
+                    "dataset": benchmark_dataset,
+                    "operation": operation,
+                    "geoprompt_median_seconds": None,
+                    "reference_median_seconds": None,
+                    "winner": "unknown",
+                    "speedup_ratio": None,
+                    "relative_status": "not compared",
+                },
+            )
+            row[f"{engine}_median_seconds"] = float(benchmark.get("median_seconds", 0.0))
+
+    summary_rows: list[dict[str, Any]] = []
+    for _, row in sorted(rows_by_key.items(), key=lambda item: item[0]):
+        geoprompt_seconds = row.get("geoprompt_median_seconds")
+        reference_seconds = row.get("reference_median_seconds")
+        if isinstance(geoprompt_seconds, float) and isinstance(reference_seconds, float) and geoprompt_seconds > 0 and reference_seconds > 0:
+            speedup_ratio = reference_seconds / geoprompt_seconds
+            row["speedup_ratio"] = speedup_ratio
+            if abs(speedup_ratio - 1.0) <= 0.05:
+                row["winner"] = "tie"
+                row["relative_status"] = "roughly equal"
+            elif speedup_ratio > 1.0:
+                row["winner"] = "geoprompt"
+                row["relative_status"] = f"{speedup_ratio:.2f}x faster"
+            else:
+                row["winner"] = "reference"
+                row["relative_status"] = f"{(1.0 / speedup_ratio):.2f}x slower"
+        summary_rows.append(row)
+
+    return PromptTable(summary_rows)
+
+
+def correctness_summary_table(report: dict[str, Any]) -> PromptTable:
+    rows: list[dict[str, Any]] = []
+    for dataset in report.get("datasets", []):
+        correctness = dataset.get("correctness", {})
+        checks = {
+            "bounds_match": bool(correctness.get("bounds_match")),
+            "nearest_neighbor_match": bool(correctness.get("nearest_neighbor_match")),
+            "bounds_query_match": bool(correctness.get("bounds_query_match")),
+            "geometry_metrics_match": bool(correctness.get("geometry_metrics_within_tolerance")),
+            "projected_bounds_match": bool(correctness.get("projected_bounds_match")),
+            "clip_match": correctness.get("clip") is None or bool(correctness.get("clip", {}).get("feature_count_match")),
+            "dissolve_match": correctness.get("dissolve") is None or (
+                bool(correctness.get("dissolve", {}).get("feature_count_match"))
+                and bool(correctness.get("dissolve", {}).get("bands_match"))
+            ),
+            "spatial_join_match": correctness.get("spatial_join") is None or bool(correctness.get("spatial_join", {}).get("pair_match")),
+        }
+        rows.append(
+            {
+                "dataset": str(dataset.get("dataset", "unknown")),
+                "feature_count": int(dataset.get("feature_count", 0)),
+                **checks,
+                "all_checks_passed": all(checks.values()),
+            }
+        )
+    return PromptTable(rows)
+
+
+def _html_table(table: PromptTable) -> str:
+    rows = table.to_records()
+    if not rows:
+        return "<table></table>"
+    columns = table.columns
+    header = "".join(f"<th>{html.escape(str(column))}</th>" for column in columns)
+    body = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(str(row.get(column, '')))}</td>" for column in columns) + "</tr>"
+        for row in rows
+    )
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def render_comparison_markdown(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    benchmark_table = benchmark_summary_table(report)
+    correctness_table = correctness_summary_table(report)
+    pass_count = sum(1 for value in summary.values() if bool(value))
+    total_count = len(summary)
+    lines = [
+        "# GeoPrompt Comparison Summary",
+        "",
+        f"- Checks passed: {pass_count}/{total_count}",
+        f"- Corpus: {', '.join(str(item) for item in report.get('comparison', {}).get('corpus', []))}",
+        f"- Engines: {', '.join(str(item) for item in report.get('comparison', {}).get('engines', []))}",
+        "",
+        "## Correctness Overview",
+        "",
+        correctness_table.to_markdown(),
+        "## Benchmark Overview",
+        "",
+        benchmark_table.to_markdown(),
+    ]
+    return "\n".join(lines).strip() + "\n"
+
+
+def render_comparison_html(report: dict[str, Any]) -> str:
+    summary = report.get("summary", {})
+    pass_count = sum(1 for value in summary.values() if bool(value))
+    total_count = len(summary)
+    correctness_table = _html_table(correctness_summary_table(report))
+    benchmark_table = _html_table(benchmark_summary_table(report))
+    return (
+        "<html><head><meta charset='utf-8'><title>GeoPrompt Comparison Summary</title>"
+        "<style>body{font-family:Arial,sans-serif;margin:24px;}table{border-collapse:collapse;width:100%;margin:16px 0;}"
+        "th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}th{background:#f6f8fa;}</style>"
+        "</head><body>"
+        "<h1>GeoPrompt Comparison Summary</h1>"
+        f"<p><strong>Checks passed:</strong> {pass_count}/{total_count}</p>"
+        f"<p><strong>Corpus:</strong> {html.escape(', '.join(str(item) for item in report.get('comparison', {}).get('corpus', [])))}</p>"
+        "<h2>Correctness Overview</h2>"
+        f"{correctness_table}"
+        "<h2>Benchmark Overview</h2>"
+        f"{benchmark_table}"
+        "</body></html>"
+    )
+
+
+def export_comparison_bundle(report: dict[str, Any], output_dir: Path = DEFAULT_OUTPUT_DIR) -> dict[str, str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_path = write_json(output_dir / "geoprompt_comparison_report.json", report)
+    markdown_path = output_dir / "geoprompt_comparison_summary.md"
+    html_path = output_dir / "geoprompt_comparison_summary.html"
+    markdown_path.write_text(render_comparison_markdown(report), encoding="utf-8")
+    html_path.write_text(render_comparison_html(report), encoding="utf-8")
+    return {
+        "json": str(json_path),
+        "markdown": str(markdown_path),
+        "html": str(html_path),
+    }
+
+
 def build_comparison_report(
     input_path: Path | None = None,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
@@ -581,11 +934,23 @@ def main() -> None:
         crs=args.crs,
         join_path=args.join_path,
     )
-    report_path = write_json(args.output_dir / "geoprompt_comparison_report.json", report)
-    print(f"Wrote GeoPrompt comparison report to {report_path}")
+    written = export_comparison_bundle(report, args.output_dir)
+    print("Wrote GeoPrompt comparison bundle:")
+    print(f"- JSON: {written['json']}")
+    print(f"- Markdown: {written['markdown']}")
+    print(f"- HTML: {written['html']}")
 
 
-__all__ = ["build_comparison_report", "main"]
+__all__ = [
+    "benchmark_summary_table",
+    "build_comparison_report",
+    "correctness_summary_table",
+    "export_comparison_bundle",
+    "main",
+    "render_comparison_html",
+    "render_comparison_markdown",
+    "save_benchmark_snapshot",
+]
 
 
 if __name__ == "__main__":

@@ -972,6 +972,364 @@ def export_multi_scenario_report(
     return str(path)
 
 
+def _resilience_summary_svg(report: dict[str, Any]) -> str:
+    summary = dict(report.get("summary", {}))
+    metrics = [
+        ("single_source_nodes", float(summary.get("single_source_nodes", 0.0))),
+        ("critical_single_source_nodes", float(summary.get("critical_single_source_nodes", 0.0))),
+        ("low_resilience_nodes", float(summary.get("low_resilience_nodes", 0.0))),
+        ("impacted_customers", float(summary.get("impacted_customer_count", 0.0))),
+    ]
+    max_value = max((value for _, value in metrics), default=1.0) or 1.0
+    width = 560
+    height = 36 * len(metrics) + 24
+    rows: list[str] = []
+    for index, (label, value) in enumerate(metrics):
+        y = 18 + index * 32
+        bar_width = (value / max_value) * 320.0 if max_value else 0.0
+        rows.append(
+            f"<text x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"#1f2937\">{escape(label)}</text>"
+            f"<rect x=\"180\" y=\"{y}\" width=\"{bar_width:.1f}\" height=\"18\" fill=\"#2563eb\" rx=\"4\" />"
+            f"<text x=\"510\" y=\"{y + 12}\" font-size=\"12\" fill=\"#4b5563\">{value:.1f}</text>"
+        )
+    return f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\">{''.join(rows)}</svg>"
+
+
+def _restoration_summary_svg(stages: Sequence[dict[str, Any]]) -> str:
+    if not stages:
+        return ""
+    max_value = max(float(stage.get("cumulative_restored_demand", 0.0)) for stage in stages) or 1.0
+    width = 560
+    height = 36 * len(stages) + 24
+    rows: list[str] = []
+    for index, stage in enumerate(stages):
+        value = float(stage.get("cumulative_restored_demand", 0.0))
+        y = 18 + index * 32
+        bar_width = (value / max_value) * 320.0
+        rows.append(
+            f"<text x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"#1f2937\">step {int(stage.get('step', index + 1))}: {escape(str(stage.get('repair_edge_id', '')))}</text>"
+            f"<rect x=\"180\" y=\"{y}\" width=\"{bar_width:.1f}\" height=\"18\" fill=\"#1d8f6a\" rx=\"4\" />"
+            f"<text x=\"510\" y=\"{y + 12}\" font-size=\"12\" fill=\"#4b5563\">{value:.1f}</text>"
+        )
+    return f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\">{''.join(rows)}</svg>"
+
+
+def build_resilience_summary_report(
+    redundancy_rows: Sequence[dict[str, Any]],
+    *,
+    outage_report: dict[str, Any] | None = None,
+    restoration_report: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rows = [dict(row) for row in redundancy_rows]
+    outage = dict(outage_report or {})
+    restoration = dict(restoration_report or {})
+    single_source = sum(1 for row in rows if bool(row.get("single_source_dependency")))
+    critical_single_source = sum(
+        1 for row in rows if bool(row.get("single_source_dependency")) and bool(row.get("is_critical"))
+    )
+    low_resilience = sum(1 for row in rows if str(row.get("resilience_tier", "")).lower() == "low")
+    high_resilience = sum(1 for row in rows if str(row.get("resilience_tier", "")).lower() == "high")
+
+    return {
+        "metadata": dict(metadata or {}),
+        "summary": {
+            "node_count": len(rows),
+            "single_source_nodes": single_source,
+            "critical_single_source_nodes": critical_single_source,
+            "low_resilience_nodes": low_resilience,
+            "high_resilience_nodes": high_resilience,
+            "impacted_node_count": int(outage.get("impacted_node_count", 0)),
+            "impacted_customer_count": int(outage.get("impacted_customer_count", 0)),
+            "estimated_cost": float(outage.get("estimated_cost", 0.0)),
+            "severity_tier": str(outage.get("severity_tier", "unknown")),
+            "restoration_steps": int(restoration.get("total_steps", 0)),
+        },
+        "redundancy_rows": rows,
+        "outage_report": outage,
+        "restoration_report": restoration,
+    }
+
+
+def export_resilience_summary_report(
+    report: dict[str, Any],
+    output_path: str | Path,
+    format: str | None = None,
+) -> str:
+    path = Path(output_path)
+    resolved_format = (format or path.suffix.lstrip(".")).lower()
+    if resolved_format == "md":
+        resolved_format = "markdown"
+    if resolved_format not in {"json", "csv", "markdown", "html"}:
+        raise ValueError("format must be one of: json, csv, markdown, html")
+
+    summary = dict(report.get("summary", {}))
+    rows = [dict(row) for row in report.get("redundancy_rows", [])]
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if resolved_format == "json":
+        path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        return str(path)
+
+    if resolved_format == "csv":
+        fieldnames = sorted({key for row in rows for key in row.keys()}) if rows else ["node", "single_source_dependency", "resilience_tier"]
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return str(path)
+
+    if resolved_format == "markdown":
+        lines = [
+            "# Resilience Summary Report",
+            "",
+            f"- Nodes reviewed: {int(summary.get('node_count', 0))}",
+            f"- Single-source nodes: {int(summary.get('single_source_nodes', 0))}",
+            f"- Critical single-source nodes: {int(summary.get('critical_single_source_nodes', 0))}",
+            f"- Low-resilience nodes: {int(summary.get('low_resilience_nodes', 0))}",
+            f"- Impacted customers: {int(summary.get('impacted_customer_count', 0))}",
+            f"- Estimated cost: {float(summary.get('estimated_cost', 0.0)):.2f}",
+            f"- Severity tier: {summary.get('severity_tier', 'unknown')}",
+            "",
+            "| Node | Single Source | Critical | Tier |",
+            "| --- | --- | --- | --- |",
+        ]
+        lines.extend(
+            f"| {row.get('node', '')} | {row.get('single_source_dependency', False)} | {row.get('is_critical', False)} | {row.get('resilience_tier', '')} |"
+            for row in rows
+        )
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(path)
+
+    summary_svg = _resilience_summary_svg(report)
+    restoration_svg = _restoration_summary_svg(report.get("restoration_report", {}).get("stages", []))
+    row_html = "".join(
+        "<tr>"
+        f"<td>{escape(str(row.get('node', '')))}</td>"
+        f"<td>{escape(str(row.get('single_source_dependency', False)))}</td>"
+        f"<td>{escape(str(row.get('is_critical', False)))}</td>"
+        f"<td>{escape(str(row.get('resilience_tier', '')))}</td>"
+        "</tr>"
+        for row in rows
+    )
+    html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <title>Resilience Summary Report</title>
+  <style>
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
+    th, td {{ border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }}
+    th {{ background: #f3f4f6; }}
+    .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
+  </style>
+</head>
+<body>
+  <h1>Resilience Summary Report</h1>
+  <p><span class=\"pill\">nodes: {int(summary.get('node_count', 0))}</span>
+  <span class=\"pill\">single-source: {int(summary.get('single_source_nodes', 0))}</span>
+  <span class=\"pill\">critical single-source: {int(summary.get('critical_single_source_nodes', 0))}</span>
+  <span class=\"pill\">severity: {escape(str(summary.get('severity_tier', 'unknown')))}</span></p>
+  <h2>Risk Overview</h2>
+  {summary_svg}
+  <h2>Restoration Progression</h2>
+  {restoration_svg}
+  <h2>Node Detail</h2>
+  <table>
+    <thead><tr><th>Node</th><th>Single Source</th><th>Critical</th><th>Tier</th></tr></thead>
+    <tbody>{row_html}</tbody>
+  </table>
+</body>
+</html>
+"""
+    path.write_text(html, encoding="utf-8")
+    return str(path)
+
+
+def _resilience_portfolio_svg(rows: Sequence[dict[str, Any]]) -> str:
+    if not rows:
+        return ""
+    scores = [float(row.get("resilience_score", 0.0)) for row in rows]
+    min_score = min(scores)
+    max_score = max(scores)
+    span = max(max_score - min_score, 1.0)
+    width = 620
+    height = 36 * len(rows) + 24
+    svg_rows: list[str] = []
+    for index, row in enumerate(rows):
+        name = str(row.get("scenario_name", f"scenario_{index + 1}"))
+        value = float(row.get("resilience_score", 0.0))
+        y = 18 + index * 32
+        bar_width = ((value - min_score) / span) * 320.0 if span else 0.0
+        color = "#1d8f6a" if value >= 0 else "#d97706"
+        svg_rows.append(
+            f"<text x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"#1f2937\">{escape(name)}</text>"
+            f"<rect x=\"220\" y=\"{y}\" width=\"{bar_width:.1f}\" height=\"18\" fill=\"{color}\" rx=\"4\" />"
+            f"<text x=\"560\" y=\"{y + 12}\" font-size=\"12\" fill=\"#4b5563\">{value:.2f}</text>"
+        )
+    return f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\">{''.join(svg_rows)}</svg>"
+
+
+def build_resilience_portfolio_report(
+    scenario_reports: dict[str, dict[str, Any]],
+    *,
+    scenario_order: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Build a ranked cross-scenario resilience dashboard.
+
+    Each input item should be a report from ``build_resilience_summary_report``.
+    The output ranks scenarios by a composite resilience score and keeps the
+    per-scenario metrics ready for export to JSON, CSV, Markdown, or HTML.
+    """
+    if not scenario_reports:
+        raise ValueError("scenario_reports must not be empty")
+
+    severity_penalty = {
+        "low": 0.0,
+        "medium": 2.0,
+        "high": 5.0,
+        "extreme": 10.0,
+        "unknown": 1.0,
+    }
+    ordered_names = list(scenario_order or scenario_reports.keys())
+    rows: list[dict[str, Any]] = []
+    for scenario_name in ordered_names:
+        report = dict(scenario_reports[scenario_name])
+        summary = dict(report.get("summary", {}))
+        restoration = dict(report.get("restoration_report", {}))
+        stages = list(restoration.get("stages", []))
+        final_restored_demand = max((float(stage.get("cumulative_restored_demand", 0.0)) for stage in stages), default=0.0)
+        severity = str(summary.get("severity_tier", "unknown")).lower()
+        score = (
+            (float(summary.get("high_resilience_nodes", 0.0)) * 3.0)
+            - (float(summary.get("low_resilience_nodes", 0.0)) * 4.0)
+            - (float(summary.get("critical_single_source_nodes", 0.0)) * 5.0)
+            - (float(summary.get("impacted_customer_count", 0.0)) / 50.0)
+            - (float(summary.get("estimated_cost", 0.0)) / 1000.0)
+            - severity_penalty.get(severity, 1.0)
+            + (final_restored_demand / 25.0)
+            - float(summary.get("restoration_steps", 0.0))
+        )
+        rows.append(
+            {
+                "scenario_name": scenario_name,
+                "resilience_score": round(score, 4),
+                "severity_tier": str(summary.get("severity_tier", "unknown")),
+                "high_resilience_nodes": int(summary.get("high_resilience_nodes", 0)),
+                "low_resilience_nodes": int(summary.get("low_resilience_nodes", 0)),
+                "critical_single_source_nodes": int(summary.get("critical_single_source_nodes", 0)),
+                "impacted_customer_count": int(summary.get("impacted_customer_count", 0)),
+                "estimated_cost": float(summary.get("estimated_cost", 0.0)),
+                "restoration_steps": int(summary.get("restoration_steps", 0)),
+                "final_restored_demand": final_restored_demand,
+            }
+        )
+
+    rows.sort(key=lambda item: (-float(item.get("resilience_score", 0.0)), str(item.get("scenario_name", ""))))
+    score_values = [float(row["resilience_score"]) for row in rows]
+    return {
+        "summary": {
+            "scenario_count": len(rows),
+            "best_scenario": str(rows[0]["scenario_name"]),
+            "worst_scenario": str(rows[-1]["scenario_name"]),
+            "mean_resilience_score": float(statistics.fmean(score_values)),
+        },
+        "scenarios": rows,
+    }
+
+
+def export_resilience_portfolio_report(
+    report: dict[str, Any],
+    output_path: str | Path,
+    format: str | None = None,
+) -> str:
+    path = Path(output_path)
+    resolved_format = (format or path.suffix.lstrip(".")).lower()
+    if resolved_format == "md":
+        resolved_format = "markdown"
+    if resolved_format not in {"json", "csv", "markdown", "html"}:
+        raise ValueError("format must be one of: json, csv, markdown, html")
+
+    summary = dict(report.get("summary", {}))
+    rows = [dict(row) for row in report.get("scenarios", [])]
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if resolved_format == "json":
+        path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        return str(path)
+
+    if resolved_format == "csv":
+        fieldnames = sorted({key for row in rows for key in row.keys()}) if rows else ["scenario_name", "resilience_score"]
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return str(path)
+
+    if resolved_format == "markdown":
+        lines = [
+            "# Resilience Portfolio Report",
+            "",
+            f"- Scenario count: {int(summary.get('scenario_count', 0))}",
+            f"- Best scenario: {summary.get('best_scenario', '')}",
+            f"- Worst scenario: {summary.get('worst_scenario', '')}",
+            f"- Mean resilience score: {float(summary.get('mean_resilience_score', 0.0)):.2f}",
+            "",
+            "| Scenario | Score | Severity | High Nodes | Low Nodes | Impacted Customers | Cost |",
+            "| --- | --- | --- | --- | --- | --- | --- |",
+        ]
+        lines.extend(
+            f"| {row.get('scenario_name', '')} | {float(row.get('resilience_score', 0.0)):.2f} | {row.get('severity_tier', '')} | {int(row.get('high_resilience_nodes', 0))} | {int(row.get('low_resilience_nodes', 0))} | {int(row.get('impacted_customer_count', 0))} | {float(row.get('estimated_cost', 0.0)):.2f} |"
+            for row in rows
+        )
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return str(path)
+
+    svg = _resilience_portfolio_svg(rows)
+    table_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(row.get('scenario_name', '')))}</td>"
+        f"<td>{float(row.get('resilience_score', 0.0)):.2f}</td>"
+        f"<td>{escape(str(row.get('severity_tier', '')))}</td>"
+        f"<td>{int(row.get('high_resilience_nodes', 0))}</td>"
+        f"<td>{int(row.get('low_resilience_nodes', 0))}</td>"
+        f"<td>{int(row.get('impacted_customer_count', 0))}</td>"
+        f"<td>{float(row.get('estimated_cost', 0.0)):.2f}</td>"
+        "</tr>"
+        for row in rows
+    )
+    html = f"""<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <title>Resilience Portfolio Report</title>
+  <style>
+    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
+    th, td {{ border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }}
+    th {{ background: #f3f4f6; }}
+    .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
+  </style>
+</head>
+<body>
+  <h1>Resilience Portfolio Report</h1>
+  <p><span class=\"pill\">scenario count: {int(summary.get('scenario_count', 0))}</span>
+  <span class=\"pill\">best: {escape(str(summary.get('best_scenario', '')))}</span>
+  <span class=\"pill\">mean score: {float(summary.get('mean_resilience_score', 0.0)):.2f}</span></p>
+  <h2>Scenario Ranking</h2>
+  {svg}
+  <table>
+    <thead><tr><th>Scenario</th><th>Score</th><th>Severity</th><th>High Nodes</th><th>Low Nodes</th><th>Impacted Customers</th><th>Cost</th></tr></thead>
+    <tbody>{table_rows}</tbody>
+  </table>
+</body>
+</html>
+"""
+    path.write_text(html, encoding="utf-8")
+    return str(path)
+
+
 def vectorized_decay(
     distance_values: Sequence[float],
     method: str = "power",
@@ -1220,12 +1578,15 @@ __all__ = [
     "batch_accessibility_scores",
     "benchmark_function",
     "bootstrap_confidence_interval",
+    "build_resilience_portfolio_report",
     "build_scenario_report",
     "calibrate_decay_parameters",
     "compare_scenarios",
     "export_multi_scenario_report",
+    "export_resilience_portfolio_report",
+    "export_resilience_summary_report",
     "export_scenario_report",
-        "multi_scenario_report_table",
+    "multi_scenario_report_table",
     "gravity_interaction_table",
     "monte_carlo_interval",
     "normalize_units",

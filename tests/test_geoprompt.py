@@ -125,6 +125,55 @@ def test_line_centroid_uses_segment_length_weighting() -> None:
     assert centroid == (1.5, 0.0)
 
 
+def test_geometry_validity_reports_issues_and_suggestions() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {
+                "site_id": "bad-line",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [(0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
+                },
+            },
+            {
+                "site_id": "bad-poly",
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [(0.0, 0.0), (1.0, 1.0), (1.0, 0.0), (0.0, 1.0), (0.0, 0.0)],
+                },
+            },
+        ]
+    )
+
+    report = frame.geometry_validity(id_column="site_id").sort_values("site_id")
+    poly_row = next(row for row in report if row["site_id"] == "bad-poly")
+    line_row = next(row for row in report if row["site_id"] == "bad-line")
+
+    assert poly_row["is_valid"] is False
+    assert "self_intersection" in poly_row["issues"]
+    assert "repair" in poly_row["suggested_fix"]
+    assert line_row["issue_count"] >= 1
+    assert "duplicate_vertices" in line_row["issues"]
+
+
+def test_fix_geometries_removes_duplicate_vertices() -> None:
+    frame = GeoPromptFrame.from_records(
+        [
+            {
+                "site_id": "bad-line",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [(0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
+                },
+            }
+        ]
+    )
+
+    fixed = frame.fix_geometries()
+
+    assert fixed[0]["geometry"]["coordinates"] == ((0.0, 0.0), (1.0, 0.0))
+
+
 def test_geojson_round_trip_and_nearest_neighbors(tmp_path: Path) -> None:
     frame = read_features(PROJECT_ROOT / "data" / "sample_features.json", crs="EPSG:4326")
     geojson_path = write_geojson(tmp_path / "sample_features.geojson", frame)
@@ -1377,3 +1426,132 @@ def test_assign_with_callable() -> None:
     assert records[0]["demand_doubled"] == 4.0
     assert records[1]["demand_doubled"] == 8.0
     assert all(row["label"] == "fixed" for row in records)
+
+
+# ─── Phase 8: Frame markdown and summary ─────────────────────────────────────
+
+
+class TestFrameMarkdownAndSummary:
+    def test_to_markdown_basic(self) -> None:
+        frame = GeoPromptFrame.from_records(
+            [
+                {"site_id": "a", "demand": 10.0, "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+                {"site_id": "b", "demand": 20.0, "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}},
+            ]
+        )
+        md = frame.to_markdown()
+        assert "| site_id |" in md
+        assert "| a |" in md or "a" in md
+        assert "Point" in md  # geometry should show type
+
+    def test_to_markdown_max_rows(self) -> None:
+        records = [
+            {"site_id": f"s{i}", "geometry": {"type": "Point", "coordinates": [float(i), 0.0]}}
+            for i in range(30)
+        ]
+        frame = GeoPromptFrame.from_records(records)
+        md = frame.to_markdown(max_rows=5)
+        assert "more rows" in md
+
+    def test_to_markdown_empty_frame(self) -> None:
+        frame = GeoPromptFrame.from_records([])
+        md = frame.to_markdown()
+        assert "---" in md
+
+    def test_summary_basic(self) -> None:
+        frame = GeoPromptFrame.from_records(
+            [
+                {"site_id": "a", "demand": 10.0, "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}},
+                {"site_id": "b", "demand": 20.0, "geometry": {"type": "Point", "coordinates": [1.0, 1.0]}},
+            ],
+            crs="EPSG:4326",
+        )
+        s = frame.summary()
+        assert s["row_count"] == 2
+        assert s["crs"] == "EPSG:4326"
+        assert "Point" in s["geometry_types"]
+        assert s["bounds"] is not None
+        stats = {item["column"]: item for item in s["column_stats"]}
+        assert "demand" in stats
+        assert stats["demand"]["min"] == 10.0
+        assert stats["demand"]["max"] == 20.0
+
+
+# ─── Phase 10: Explode ───────────────────────────────────────────────────────
+
+
+class TestExplode:
+    def test_explode_multipoint(self) -> None:
+        frame = GeoPromptFrame.from_records([
+            {"site_id": "m", "geometry": {"type": "MultiPoint", "coordinates": [[0, 0], [1, 1], [2, 2]]}},
+        ])
+        exploded = frame.explode()
+        assert len(exploded) == 3
+        for row in exploded.to_records():
+            assert row["geometry"]["type"] == "Point"
+            assert row["site_id"] == "m"
+
+    def test_explode_single_geom_passthrough(self) -> None:
+        frame = GeoPromptFrame.from_records([
+            {"site_id": "p", "geometry": {"type": "Point", "coordinates": [5, 5]}},
+        ])
+        exploded = frame.explode()
+        assert len(exploded) == 1
+        assert exploded.to_records()[0]["geometry"]["type"] == "Point"
+
+    def test_explode_multipolygon(self) -> None:
+        frame = GeoPromptFrame.from_records([
+            {
+                "site_id": "mp",
+                "geometry": {
+                    "type": "MultiPolygon",
+                    "coordinates": [
+                        [[[0, 0], [1, 0], [1, 1], [0, 1]]],
+                        [[[2, 2], [3, 2], [3, 3], [2, 3]]],
+                    ],
+                },
+            },
+        ])
+        exploded = frame.explode()
+        assert len(exploded) == 2
+        for row in exploded.to_records():
+            assert row["geometry"]["type"] == "Polygon"
+
+
+# ─── Phase 9: Larger stress corpus generators ────────────────────────────────
+
+
+def test_large_stress_corpus_generators() -> None:
+    from geoprompt.compare import _large_stress_feature_records, _large_stress_region_records
+
+    features = _large_stress_feature_records()
+    regions = _large_stress_region_records()
+    assert len(features) > 93  # must be larger than the base corpus
+    assert len(regions) > 16
+    geom_types = {r["geometry"]["type"] for r in features}
+    assert "Point" in geom_types
+    assert "LineString" in geom_types
+    assert "Polygon" in geom_types
+    assert "MultiPoint" in geom_types
+
+
+# ─── Phase 6: Layer discovery ────────────────────────────────────────────────
+
+
+def test_discover_layers_geojson(tmp_path) -> None:
+    from geoprompt.io import discover_layers
+
+    geojson = {
+        "type": "FeatureCollection",
+        "features": [
+            {"type": "Feature", "properties": {"name": "A"}, "geometry": {"type": "Point", "coordinates": [0, 0]}},
+            {"type": "Feature", "properties": {"name": "B"}, "geometry": {"type": "Point", "coordinates": [1, 1]}},
+        ],
+    }
+    path = tmp_path / "test.geojson"
+    path.write_text(json.dumps(geojson), encoding="utf-8")
+    layers = discover_layers(path)
+    assert len(layers) == 1
+    assert layers[0]["feature_count"] == 2
+    assert layers[0]["geometry_type"] == "Point"
+    assert "name" in layers[0]["columns"]

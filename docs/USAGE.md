@@ -144,6 +144,33 @@ path = router.shortest_path("A", "C")
 matrix = router.od_cost_matrix(["A"], ["C"])
 ```
 
+### Geometry trust and repair
+
+```python
+from geoprompt import GeoPromptFrame
+
+frame = GeoPromptFrame.from_records([
+    {
+        "site_id": "bad-line",
+        "geometry": {"type": "LineString", "coordinates": [(0, 0), (0, 0), (1, 0)]},
+    }
+])
+
+report = frame.geometry_validity(id_column="site_id")
+fixed = frame.fix_geometries()
+```
+
+### Benchmark proof bundle
+
+```python
+from pathlib import Path
+from geoprompt import build_comparison_report, benchmark_summary_table, export_comparison_bundle
+
+report = build_comparison_report(output_dir=Path("outputs"))
+summary = benchmark_summary_table(report)
+written = export_comparison_bundle(report, Path("outputs"))
+```
+
 ### Chunked Ingestion (`iter_data`)
 
 Use chunked reads for large tabular/geo files.

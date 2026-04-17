@@ -6,6 +6,7 @@ import json
 import pytest
 
 from geoprompt import GeoPromptFrame
+from geoprompt.compare import benchmark_summary_table, export_comparison_bundle
 from geoprompt.table import PromptTable
 from geoprompt.equations import prompt_decay
 from geoprompt.interop import geopandas_available
@@ -21,6 +22,10 @@ from geoprompt.tools import (
     multi_scenario_report_table,
     optimize_decay_parameters,
     rank_scenarios,
+    build_resilience_summary_report,
+    build_resilience_portfolio_report,
+    export_resilience_portfolio_report,
+    export_resilience_summary_report,
     scenario_report_table,
     service_probability_table,
     validate_numeric_series,
@@ -276,6 +281,190 @@ def test_prompt_table_summarize_groups_rows() -> None:
     summary = table.summarize("row_id", {"accessibility_score": "mean"}).sort_values("row_id")
     assert summary.head(1)[0]["row_id"] == "north"
     assert summary.head(1)[0]["row_count"] == 2
+
+
+def test_prompt_table_groupby_agg_supports_multiple_metrics() -> None:
+    table = PromptTable.from_records(
+        [
+            {"region": "north", "score": 10.0, "cost": 2.0},
+            {"region": "north", "score": 20.0, "cost": 4.0},
+            {"region": "south", "score": 15.0, "cost": 3.0},
+        ]
+    )
+
+    grouped = table.groupby("region").agg({"score": ["mean", "max"], "cost": "sum"}).sort_values("region")
+
+    assert grouped.head(1)[0]["region"] == "north"
+    assert grouped.head(1)[0]["score_mean"] == pytest.approx(15.0)
+    assert grouped.head(1)[0]["score_max"] == pytest.approx(20.0)
+    assert grouped.head(1)[0]["cost_sum"] == pytest.approx(6.0)
+
+
+def test_prompt_table_value_counts_and_describe() -> None:
+    table = PromptTable.from_records(
+        [
+            {"region": "north", "score": 10.0},
+            {"region": "north", "score": 20.0},
+            {"region": "south", "score": None},
+        ]
+    )
+
+    counts = table.value_counts("region").sort_values("region")
+    stats = table.describe(["score"])
+
+    assert counts.head(1)[0]["region"] == "north"
+    assert counts.head(1)[0]["count"] == 2
+    assert counts.head(1)[0]["share"] == pytest.approx(2 / 3)
+    assert stats.head(1)[0]["column"] == "score"
+    assert stats.head(1)[0]["non_null_count"] == 2
+    assert stats.head(1)[0]["mean"] == pytest.approx(15.0)
+
+
+def test_benchmark_summary_table_and_bundle_export(tmp_path) -> None:
+    report = {
+        "package": "geoprompt",
+        "comparison": {"engines": ["geoprompt", "reference"], "corpus": ["demo"]},
+        "summary": {
+            "all_bounds_match": True,
+            "all_nearest_neighbor_match": True,
+            "all_bounds_query_match": True,
+            "all_geometry_metrics_within_tolerance": True,
+            "all_projected_bounds_match": True,
+            "all_clip_matches": True,
+            "all_dissolve_matches": True,
+            "all_spatial_joins_match": True,
+        },
+        "datasets": [
+            {
+                "dataset": "demo",
+                "feature_count": 3,
+                "correctness": {
+                    "bounds_match": True,
+                    "nearest_neighbor_match": True,
+                    "bounds_query_match": True,
+                    "geometry_metrics_within_tolerance": True,
+                    "projected_bounds_match": True,
+                    "clip": None,
+                    "dissolve": None,
+                    "spatial_join": None,
+                },
+                "benchmarks": [
+                    {"operation": "demo.geoprompt.nearest_neighbors", "median_seconds": 0.01, "min_seconds": 0.009, "max_seconds": 0.02, "repeats": 5},
+                    {"operation": "demo.reference.nearest_neighbors", "median_seconds": 0.025, "min_seconds": 0.02, "max_seconds": 0.03, "repeats": 5},
+                ],
+            }
+        ],
+    }
+
+    summary = benchmark_summary_table(report)
+    row = summary.head(1)[0]
+    written = export_comparison_bundle(report, tmp_path)
+
+    assert row["dataset"] == "demo"
+    assert row["operation"] == "nearest_neighbors"
+    assert row["speedup_ratio"] == pytest.approx(2.5)
+    assert row["winner"] == "geoprompt"
+    assert (tmp_path / "geoprompt_comparison_report.json").exists()
+    assert (tmp_path / "geoprompt_comparison_summary.md").exists()
+    assert (tmp_path / "geoprompt_comparison_summary.html").exists()
+    assert written["json"].endswith("geoprompt_comparison_report.json")
+
+
+def test_build_and_export_resilience_summary_report(tmp_path) -> None:
+    report = build_resilience_summary_report(
+        redundancy_rows=[
+            {"node": "hospital", "single_source_dependency": True, "is_critical": True, "resilience_tier": "low"},
+            {"node": "pump", "single_source_dependency": False, "is_critical": False, "resilience_tier": "high"},
+        ],
+        outage_report={
+            "impacted_node_count": 3,
+            "impacted_customer_count": 120,
+            "estimated_cost": 960.0,
+            "severity_tier": "high",
+        },
+        restoration_report={
+            "total_steps": 2,
+            "stages": [
+                {"step": 1, "repair_edge_id": "e1", "cumulative_restored_demand": 40.0},
+                {"step": 2, "repair_edge_id": "e2", "cumulative_restored_demand": 100.0},
+            ],
+        },
+        metadata={"scenario_id": "storm-demo"},
+    )
+
+    json_path = tmp_path / "resilience.json"
+    md_path = tmp_path / "resilience.md"
+    html_path = tmp_path / "resilience.html"
+
+    export_resilience_summary_report(report, json_path)
+    export_resilience_summary_report(report, md_path)
+    export_resilience_summary_report(report, html_path)
+
+    assert report["summary"]["critical_single_source_nodes"] == 1
+    assert report["summary"]["low_resilience_nodes"] == 1
+    assert report["metadata"]["scenario_id"] == "storm-demo"
+    assert "Resilience Summary Report" in html_path.read_text(encoding="utf-8")
+    assert "<svg" in html_path.read_text(encoding="utf-8")
+    assert "critical_single_source_nodes" in json_path.read_text(encoding="utf-8")
+    assert "Resilience Summary Report" in md_path.read_text(encoding="utf-8")
+
+
+def test_build_and_export_resilience_portfolio_report(tmp_path) -> None:
+    scenario_a = build_resilience_summary_report(
+        redundancy_rows=[
+            {"node": "hospital", "single_source_dependency": True, "is_critical": True, "resilience_tier": "low"},
+            {"node": "pump", "single_source_dependency": False, "is_critical": False, "resilience_tier": "high"},
+        ],
+        outage_report={
+            "impacted_node_count": 4,
+            "impacted_customer_count": 150,
+            "estimated_cost": 1800.0,
+            "severity_tier": "high",
+        },
+        restoration_report={
+            "total_steps": 3,
+            "stages": [{"step": 1, "cumulative_restored_demand": 30.0}, {"step": 3, "cumulative_restored_demand": 110.0}],
+        },
+        metadata={"scenario_id": "storm_a"},
+    )
+    scenario_b = build_resilience_summary_report(
+        redundancy_rows=[
+            {"node": "hospital", "single_source_dependency": False, "is_critical": True, "resilience_tier": "high"},
+            {"node": "pump", "single_source_dependency": False, "is_critical": False, "resilience_tier": "high"},
+        ],
+        outage_report={
+            "impacted_node_count": 2,
+            "impacted_customer_count": 50,
+            "estimated_cost": 600.0,
+            "severity_tier": "medium",
+        },
+        restoration_report={
+            "total_steps": 2,
+            "stages": [{"step": 1, "cumulative_restored_demand": 60.0}, {"step": 2, "cumulative_restored_demand": 120.0}],
+        },
+        metadata={"scenario_id": "storm_b"},
+    )
+
+    report = build_resilience_portfolio_report({"storm_a": scenario_a, "storm_b": scenario_b})
+    assert report["summary"]["scenario_count"] == 2
+    assert report["summary"]["best_scenario"] == "storm_b"
+    assert len(report["scenarios"]) == 2
+    assert report["scenarios"][0]["resilience_score"] >= report["scenarios"][1]["resilience_score"]
+
+    json_path = tmp_path / "portfolio.json"
+    csv_path = tmp_path / "portfolio.csv"
+    md_path = tmp_path / "portfolio.md"
+    html_path = tmp_path / "portfolio.html"
+
+    export_resilience_portfolio_report(report, json_path)
+    export_resilience_portfolio_report(report, csv_path)
+    export_resilience_portfolio_report(report, md_path)
+    export_resilience_portfolio_report(report, html_path)
+
+    assert "best_scenario" in json_path.read_text(encoding="utf-8")
+    assert "scenario_name" in csv_path.read_text(encoding="utf-8")
+    assert "Resilience Portfolio Report" in md_path.read_text(encoding="utf-8")
+    assert "<svg" in html_path.read_text(encoding="utf-8")
 
 
 def test_validate_numeric_series_rejects_nan() -> None:

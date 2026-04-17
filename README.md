@@ -10,6 +10,7 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 
 - Quickstart: [docs/quickstart-cookbook.md](docs/quickstart-cookbook.md)
 - API guidance: [docs/api-stability.md](docs/api-stability.md)
+- Benchmarks and proof: [docs/benchmarks.md](docs/benchmarks.md)
 - Network recipes: [docs/network-scenario-recipes.md](docs/network-scenario-recipes.md)
 - Interop and reporting: [docs/geopandas-interop-and-reporting.md](docs/geopandas-interop-and-reporting.md)
 
@@ -27,7 +28,7 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 - Lane: Spatial package design
 - Domain: Reusable custom spatial analysis
 - Stack: Python, JSON fixtures, lightweight geometry frame, custom equations
-- Includes: GeoPromptFrame object, mixed-geometry helpers with multi-part support, GeoJSON and WKT-friendly I/O, normalized CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, reusable bounds indexing, indexed Euclidean joins (with optional non-indexed baseline mode), radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition, corridor reach, overlay summaries, zone-fit scoring, multi-scale clustering, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, PromptTable outputs for model/report workflows (filter/join/pivot/summarize/JSON/HTML export), single- and multi-scenario report tooling, custom influence equations, benchmark corpus, demo report, tests
+- Includes: GeoPromptFrame object, mixed-geometry helpers with multi-part support, GeoJSON and WKT-friendly I/O, normalized CRS metadata and reprojection, Euclidean and haversine distance tools, bounding-box queries, reusable bounds indexing, indexed Euclidean joins (with optional non-indexed baseline mode), radius queries, within-distance predicates, spatial joins, proximity joins, nearest joins, nearest assignment workflows, assignment summaries, catchment competition, corridor reach, overlay summaries, zone-fit scoring, multi-scale clustering, buffer, buffer joins, coverage summaries, dissolve, clip and overlay intersections, nearest-neighbor analysis, PromptTable outputs for model/report workflows (filter/join/pivot/summarize/JSON/HTML export), geometry validity and repair helpers, single- and multi-scenario report tooling, benchmark proof bundles, network resilience auditing, staged restoration planning, custom influence equations, benchmark corpus, demo report, tests
 
 ## Overview
 
@@ -134,6 +135,55 @@ bottlenecks = utility_bottlenecks_with_preset(
 )
 ```
 
+Resilience and restoration example:
+
+```python
+from geoprompt.network import (
+    multi_source_service_audit,
+    outage_impact_report,
+    restoration_sequence_report,
+    supply_redundancy_audit,
+)
+from geoprompt.tools import (
+    build_resilience_portfolio_report,
+    build_resilience_summary_report,
+    export_resilience_portfolio_report,
+    export_resilience_summary_report,
+)
+
+redundancy = supply_redundancy_audit(
+    graph,
+    source_nodes=["substation-a", "tie-source"],
+    demand_by_node=node_demands,
+    critical_nodes=["hospital-1", "water-plant"],
+)
+service_audit = multi_source_service_audit(
+    graph,
+    source_nodes=["substation-a", "tie-source"],
+    demand_by_node=node_demands,
+    source_capacity_by_node={"substation-a": 80.0, "tie-source": 60.0},
+)
+outage = outage_impact_report(
+    graph,
+    source_nodes=["substation-a"],
+    failed_edges=["sw-12", "sw-18"],
+    demand_by_node=node_demands,
+    customer_count_by_node=customer_counts,
+    critical_nodes=["hospital-1"],
+)
+staging = restoration_sequence_report(
+    graph,
+    source_nodes=["substation-a"],
+    failed_edges=["sw-12", "sw-18"],
+    demand_by_node=node_demands,
+    critical_nodes=["hospital-1"],
+)
+report = build_resilience_summary_report(redundancy, outage_report=outage, restoration_report=staging)
+portfolio = build_resilience_portfolio_report({"baseline": report, "upgrade": report})
+export_resilience_summary_report(report, "outputs/resilience-summary.html")
+export_resilience_portfolio_report(portfolio, "outputs/resilience-portfolio.html")
+```
+
 GeoPandas interop and report export example:
 
 ```python
@@ -171,6 +221,21 @@ joined = frame.proximity_join(frame, max_distance=0.08)
 ranked = frame.sort_values("site_id")
 filtered = frame.where(site_id="a")
 frame.to_json("outputs/frame.json")
+```
+
+Benchmark proof bundle example:
+
+```python
+import geoprompt as gp
+from pathlib import Path
+
+# Requires compare extras: pip install geoprompt[compare]
+report = gp.build_comparison_report(output_dir=Path("outputs"))
+summary = gp.benchmark_summary_table(report)
+written = gp.export_comparison_bundle(report, Path("outputs"))
+
+print(summary.head(5))
+print(written)
 ```
 
 ```python

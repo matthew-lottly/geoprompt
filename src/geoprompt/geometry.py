@@ -439,6 +439,127 @@ def geometry_centroid(geometry: Geometry) -> Coordinate:
     )
 
 
+def _has_consecutive_duplicate_vertices(vertices: tuple[Coordinate, ...]) -> bool:
+    return any(vertices[index] == vertices[index - 1] for index in range(1, len(vertices)))
+
+
+def _dedupe_consecutive_vertices(vertices: tuple[Coordinate, ...]) -> tuple[Coordinate, ...]:
+    deduped: list[Coordinate] = []
+    for vertex in vertices:
+        if not deduped or deduped[-1] != vertex:
+            deduped.append(vertex)
+    return tuple(deduped)
+
+
+def _polygon_has_self_intersection(ring: tuple[Coordinate, ...]) -> bool:
+    segments = _segments(ring)
+    last_index = len(segments) - 1
+    for index, (first_start, first_end) in enumerate(segments):
+        for other_index in range(index + 1, len(segments)):
+            if abs(index - other_index) <= 1 or (index == 0 and other_index == last_index):
+                continue
+            second_start, second_end = segments[other_index]
+            if _segments_intersect(first_start, first_end, second_start, second_end):
+                return True
+    return False
+
+
+def validate_geometry(geometry: Geometry) -> dict[str, object]:
+    normalized = normalize_geometry(geometry)
+    geometry_kind = geometry_type(normalized)
+    issues: list[str] = []
+
+    if geometry_kind == "Point":
+        pass
+    elif geometry_kind == "MultiPoint":
+        vertices = geometry_vertices(normalized)
+        if len(set(vertices)) < len(vertices):
+            issues.append("duplicate_vertices")
+    elif geometry_kind == "LineString":
+        vertices = geometry_vertices(normalized)
+        if _has_consecutive_duplicate_vertices(vertices):
+            issues.append("duplicate_vertices")
+        if len(set(vertices)) < 2:
+            issues.append("insufficient_distinct_vertices")
+        if geometry_length(normalized) == 0.0:
+            issues.append("zero_length")
+    elif geometry_kind == "Polygon":
+        ring = geometry_vertices(normalized)
+        if _has_consecutive_duplicate_vertices(ring):
+            issues.append("duplicate_vertices")
+        if len(set(ring[:-1])) < 3:
+            issues.append("insufficient_distinct_vertices")
+        if geometry_area(normalized) == 0.0:
+            issues.append("zero_area")
+        if len(ring) >= 4 and _polygon_has_self_intersection(ring):
+            issues.append("self_intersection")
+    elif geometry_kind in {"MultiLineString", "MultiPolygon"}:
+        part_reports = [validate_geometry(part) for part in _component_geometries(normalized)]
+        seen: set[str] = set()
+        for report in part_reports:
+            for issue in report["issues"]:  # type: ignore[index]
+                if issue not in seen:
+                    seen.add(issue)
+                    issues.append(issue)
+
+    suggestions: list[str] = []
+    if "duplicate_vertices" in issues:
+        suggestions.append("Use repair to remove repeated vertices.")
+    if "insufficient_distinct_vertices" in issues or "zero_length" in issues or "zero_area" in issues:
+        suggestions.append("Review the source coordinates and repair collapsed geometry parts.")
+    if "self_intersection" in issues:
+        suggestions.append("Use repair or simplify the polygon to remove self intersections.")
+
+    return {
+        "geometry_type": geometry_kind,
+        "is_valid": not issues,
+        "issue_count": len(issues),
+        "issues": issues,
+        "suggested_fix": " ".join(suggestions) if suggestions else "No repair needed.",
+    }
+
+
+def repair_geometry(geometry: Geometry) -> Geometry:
+    normalized = normalize_geometry(geometry)
+    geometry_kind = geometry_type(normalized)
+
+    if geometry_kind == "Point":
+        return normalized
+    if geometry_kind == "MultiPoint":
+        seen: set[Coordinate] = set()
+        coordinates: list[Coordinate] = []
+        for vertex in geometry_vertices(normalized):
+            if vertex in seen:
+                continue
+            seen.add(vertex)
+            coordinates.append(vertex)
+        return {"type": "MultiPoint", "coordinates": tuple(coordinates)}
+    if geometry_kind == "LineString":
+        vertices = _dedupe_consecutive_vertices(geometry_vertices(normalized))
+        return {"type": "LineString", "coordinates": vertices}
+    if geometry_kind == "MultiLineString":
+        repaired_lines = []
+        for part in _component_geometries(normalized):
+            repaired = repair_geometry(part)
+            coordinates = repaired["coordinates"]
+            if len(coordinates) >= 2:  # type: ignore[arg-type]
+                repaired_lines.append(tuple(coordinates))  # type: ignore[arg-type]
+        return {"type": "MultiLineString", "coordinates": tuple(repaired_lines)}
+    if geometry_kind == "Polygon":
+        ring = _dedupe_consecutive_vertices(geometry_vertices(normalized))
+        if ring and ring[0] != ring[-1]:
+            ring = (*ring, ring[0])
+        return {"type": "Polygon", "coordinates": ring}
+    if geometry_kind == "MultiPolygon":
+        repaired_polygons = []
+        for part in _component_geometries(normalized):
+            repaired = repair_geometry(part)
+            repaired_polygons.append(tuple(repaired["coordinates"]))  # type: ignore[arg-type]
+        return {"type": "MultiPolygon", "coordinates": tuple(repaired_polygons)}
+
+    raise TypeError("unsupported geometry type")
+
+
 def geometry_distance(origin: Geometry, destination: Geometry, method: DistanceMethod = "euclidean") -> float:
     return coordinate_distance(geometry_centroid(origin), geometry_centroid(destination), method=method)
 
@@ -459,5 +580,7 @@ __all__ = [
     "geometry_within",
     "geometry_within_bounds",
     "normalize_geometry",
+    "repair_geometry",
     "transform_geometry",
+    "validate_geometry",
 ]

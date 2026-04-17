@@ -987,7 +987,201 @@ def write_data(
     raise ValueError(f"unsupported output format for path: {output_path}")
 
 
+def discover_layers(path: str | Path) -> list[dict[str, Any]]:
+    """List available layers and their schemas in a geospatial file.
+
+    Supports GeoPackage, Shapefile, GDB, and other GDAL-backed formats.
+    Returns a list of dicts with ``layer``, ``feature_count``, ``geometry_type``,
+    ``crs``, and ``columns`` keys.
+    """
+    data_path = Path(path)
+    if not data_path.exists():
+        raise FileNotFoundError(f"input path does not exist: {data_path}")
+
+    suffix = data_path.suffix.lower()
+
+    if suffix in {".json", ".geojson"}:
+        payload = _read_json(data_path)
+        records = _records_from_payload(payload)
+        geom_types: set[str] = set()
+        columns: set[str] = set()
+        for record in records:
+            geom = record.get("geometry")
+            if isinstance(geom, dict):
+                geom_types.add(str(geom.get("type", "Unknown")))
+            columns.update(k for k in record if k != "geometry")
+        return [
+            {
+                "layer": data_path.stem,
+                "feature_count": len(records),
+                "geometry_type": sorted(geom_types)[0] if geom_types else "Unknown",
+                "crs": _extract_crs(payload),
+                "columns": sorted(columns),
+            }
+        ]
+
+    try:
+        import fiona
+    except ImportError:
+        try:
+            import geopandas as gpd
+        except ImportError as exc:
+            raise ImportError(
+                "fiona or geopandas is required for layer discovery. "
+                "Install extras: pip install geoprompt[io,compare]"
+            ) from exc
+
+        if suffix == ".parquet":
+            gdf = gpd.read_parquet(data_path)
+            geom_col = gdf.geometry.name if gdf.geometry is not None else "geometry"
+            gt = str(gdf.geometry.geom_type.iloc[0]) if len(gdf) > 0 else "Unknown"
+            crs_str = str(gdf.crs) if gdf.crs is not None else None
+            cols = [c for c in gdf.columns if c != geom_col]
+            return [
+                {
+                    "layer": data_path.stem,
+                    "feature_count": len(gdf),
+                    "geometry_type": gt,
+                    "crs": crs_str,
+                    "columns": cols,
+                }
+            ]
+
+        layer_names = gpd.list_layers(data_path)["name"].tolist() if hasattr(gpd, "list_layers") else [None]
+        layers: list[dict[str, Any]] = []
+        for layer_name in layer_names:
+            read_kw: dict[str, Any] = {}
+            if layer_name is not None:
+                read_kw["layer"] = layer_name
+            gdf = gpd.read_file(data_path, rows=slice(0, 1), **read_kw)
+            geom_col = gdf.geometry.name if gdf.geometry is not None else "geometry"
+            gt = str(gdf.geometry.geom_type.iloc[0]) if len(gdf) > 0 else "Unknown"
+            crs_str = str(gdf.crs) if gdf.crs is not None else None
+            cols = [c for c in gdf.columns if c != geom_col]
+            count_gdf = gpd.read_file(data_path, **read_kw)
+            layers.append(
+                {
+                    "layer": layer_name or data_path.stem,
+                    "feature_count": len(count_gdf),
+                    "geometry_type": gt,
+                    "crs": crs_str,
+                    "columns": cols,
+                }
+            )
+        return layers
+
+    layer_names = fiona.listlayers(str(data_path))
+    layers = []
+    for layer_name in layer_names:
+        with fiona.open(str(data_path), layer=layer_name) as src:
+            schema = src.schema
+            gt = schema.get("geometry", "Unknown")
+            crs_str = str(src.crs) if src.crs else None
+            cols = list(schema.get("properties", {}).keys())
+            layers.append(
+                {
+                    "layer": layer_name,
+                    "feature_count": len(src),
+                    "geometry_type": gt,
+                    "crs": crs_str,
+                    "columns": cols,
+                }
+            )
+    return layers
+
+
+def write_geoparquet(
+    path: str | Path,
+    frame: GeoPromptFrame,
+    *,
+    geometry: str = "geometry",
+    id_column: str = "site_id",
+    schema_version: str = "1.1.0",
+    primary_column: str | None = None,
+) -> Path:
+    """Write a GeoPromptFrame to GeoParquet with enriched metadata.
+
+    Embeds ``geo`` metadata compliant with the GeoParquet specification,
+    including CRS, geometry types, bounding box, and encoding information.
+    """
+    try:
+        import geopandas as gpd
+    except ImportError as exc:
+        raise ImportError(
+            "geopandas is required to write GeoParquet. Install extras: pip install geoprompt[io,compare]"
+        ) from exc
+
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    collection = frame_to_geojson(frame, geometry=geometry, id_column=id_column)
+    gdf = gpd.GeoDataFrame.from_features(collection["features"], crs=frame.crs)
+
+    geom_col = primary_column or gdf.geometry.name
+    geom_types = sorted({str(g.geom_type) for g in gdf.geometry if g is not None})
+    bbox = list(gdf.total_bounds) if len(gdf) > 0 else None
+    crs_json = gdf.crs.to_json_dict() if gdf.crs is not None else None
+
+    geo_metadata = {
+        "version": schema_version,
+        "primary_column": geom_col,
+        "columns": {
+            geom_col: {
+                "encoding": "WKB",
+                "geometry_types": geom_types,
+                "crs": crs_json,
+                "bbox": bbox,
+            }
+        },
+    }
+
+    try:
+        import pyarrow.parquet as pq
+        import pyarrow as pa
+
+        table = pa.Table.from_pandas(gdf)
+        existing_meta = table.schema.metadata or {}
+        existing_meta[b"geo"] = json.dumps(geo_metadata).encode("utf-8")
+        table = table.replace_schema_metadata(existing_meta)
+        pq.write_table(table, str(output_path))
+    except ImportError:
+        gdf.to_parquet(output_path)
+
+    return output_path
+
+
+def read_geoparquet_metadata(path: str | Path) -> dict[str, Any]:
+    """Read GeoParquet ``geo`` metadata without loading the full dataset."""
+    data_path = Path(path)
+    if not data_path.exists():
+        raise FileNotFoundError(f"input path does not exist: {data_path}")
+
+    try:
+        import pyarrow.parquet as pq
+
+        pf = pq.ParquetFile(str(data_path))
+        schema_meta = pf.schema_arrow.metadata or {}
+        geo_bytes = schema_meta.get(b"geo")
+        if geo_bytes is not None:
+            return json.loads(geo_bytes.decode("utf-8"))
+        return {}
+    except ImportError:
+        try:
+            import geopandas as gpd
+
+            gdf = gpd.read_parquet(data_path)
+            return {
+                "primary_column": gdf.geometry.name,
+                "crs": str(gdf.crs) if gdf.crs is not None else None,
+                "feature_count": len(gdf),
+            }
+        except ImportError as exc:
+            raise ImportError(
+                "pyarrow or geopandas is required to read GeoParquet metadata"
+            ) from exc
+
+
 __all__ = [
+    "discover_layers",
     "frame_to_geojson",
     "get_workload_preset",
     "iter_data",
@@ -998,10 +1192,12 @@ __all__ = [
     "read_data_with_preset",
     "read_features",
     "read_geojson",
+    "read_geoparquet_metadata",
     "read_points",
     "read_table",
     "WORKLOAD_PRESETS",
     "write_data",
     "write_geojson",
+    "write_geoparquet",
     "write_json",
 ]

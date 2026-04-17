@@ -64,33 +64,34 @@ Geoprompt is strongest when a tool does one of these well:
 
 ### 6. Format Expansion
 
-- Add WKT support for MultiLineString and MultiPolygon
-- Add richer GeoParquet metadata round-tripping and export controls
-- Improve layer discovery and schema reporting for geospatial inputs
+- Implemented WKT support for MultiLineString and MultiPolygon
+- Implemented `write_geoparquet(...)` with enriched GeoParquet `geo` metadata
+- Implemented `read_geoparquet_metadata(...)` for metadata-only reads
+- Implemented `discover_layers(...)` for layer and schema discovery
 
 ### 7. Network Depth
 
-- Improve hydraulic and gas heuristics with more attribute-aware calculations
-- Add outage restoration ranking with demand-weighted benefit summaries
-- Add cross-utility dependency scoring and resilience overlays
+- Implemented `attribute_aware_headloss(...)` with per-edge Hazen-Williams
+- Implemented `demand_weighted_restoration_ranking(...)` for demand-weighted benefit ranking
+- Implemented `cross_utility_dependency_score(...)` for cascade exposure scoring
 
 ### 8. Reporting and UX
 
-- Add HTML export helpers for tables
-- Add built-in markdown summaries for frames and scenario outputs
-- Expand cookbook examples around utility decision support
+- Implemented HTML/Markdown/CSV export on `PromptTable`
+- Implemented `GeoPromptFrame.to_markdown(...)` and `GeoPromptFrame.summary()`
+- Expanded cookbook examples around utility decision support
 
 ### 9. Validation and Benchmarking
 
-- Publish reproducible benchmark snapshots for indexed and non-indexed operations
-- Expand parity coverage against Shapely and GeoPandas for more geometry mixes
-- Add larger synthetic stress corpora and benchmark reports to docs
+- Implemented `save_benchmark_snapshot(...)` for reproducible benchmark artifacts
+- Implemented larger stress corpora generators (4x scale)
+- Existing parity coverage against Shapely and GeoPandas
 
 ### 10. Package Maturity
 
-- Clarify stable versus experimental APIs per feature group
-- Expand error messages and troubleshooting guidance
-- Keep narrowing the “everyday workflow” gap with GeoPandas
+- Implemented `api-stability.md` with stable/advanced/network API classification
+- Implemented `GeoPromptFrame.explode()` and `GeoPromptFrame.unary_union()` (GeoPandas parity)
+- Existing: `dissolve(...)` with full aggregation, error validation at boundaries
 
 ## Design Rules For New Tools
 

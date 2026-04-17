@@ -323,6 +323,233 @@ def pump_station_failure_cascade(
     }
 
 
+def multi_source_service_audit(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    demand_by_node: dict[str, float] | None = None,
+    source_capacity_by_node: dict[str, float] | None = None,
+    critical_nodes: list[str] | None = None,
+) -> dict[str, Any]:
+    if not source_nodes:
+        raise ValueError("source_nodes must not be empty")
+
+    demand_by_node = demand_by_node or {}
+    source_capacity_by_node = source_capacity_by_node or {}
+    critical = set(critical_nodes or [])
+    unique_sources = sorted(dict.fromkeys(source_nodes))
+    for source in unique_sources:
+        if source not in graph.adjacency:
+            raise KeyError(source)
+
+    source_state = {
+        source: {
+            "assigned_demand": 0.0,
+            "assigned_nodes": [],
+            "capacity": max(0.0, float(source_capacity_by_node.get(source, math.inf))),
+        }
+        for source in unique_sources
+    }
+
+    assignments: list[dict[str, Any]] = []
+    ordered_nodes = sorted(graph.adjacency.keys(), key=lambda node: (-float(demand_by_node.get(node, 0.0)), str(node)))
+    for node in ordered_nodes:
+        demand = float(demand_by_node.get(node, 0.0))
+        options: list[tuple[bool, float, float, str]] = []
+        cost_lookup: list[tuple[str, float]] = []
+        for source in unique_sources:
+            result = shortest_path(graph, source, node)
+            if not bool(result["reachable"]):
+                continue
+            cost = float(result["total_cost"])
+            cost_lookup.append((source, cost))
+            capacity = source_state[source]["capacity"]
+            projected_load = float(source_state[source]["assigned_demand"]) + demand
+            load_ratio = 0.0 if not math.isfinite(capacity) or capacity == 0.0 else projected_load / capacity
+            would_overload = math.isfinite(capacity) and projected_load > capacity
+            options.append((would_overload, load_ratio, cost, source))
+
+        cost_lookup.sort(key=lambda item: (item[1], item[0]))
+        assigned_source = None
+        assigned_cost = None
+        backup_source = cost_lookup[1][0] if len(cost_lookup) >= 2 else None
+        backup_cost = cost_lookup[1][1] if len(cost_lookup) >= 2 else None
+        if options:
+            options.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+            _, _, assigned_cost, assigned_source = options[0]
+            source_state[assigned_source]["assigned_demand"] = float(source_state[assigned_source]["assigned_demand"]) + demand
+            cast(list[str], source_state[assigned_source]["assigned_nodes"]).append(node)
+
+        assignments.append(
+            {
+                "node": node,
+                "assigned_source": assigned_source,
+                "assigned_cost": assigned_cost,
+                "backup_source": backup_source,
+                "backup_cost": backup_cost,
+                "is_critical": node in critical,
+                "demand": demand,
+                "reachable_source_count": len(cost_lookup),
+            }
+        )
+
+    source_summary: list[dict[str, Any]] = []
+    for source in unique_sources:
+        assigned_demand = float(source_state[source]["assigned_demand"])
+        capacity = float(source_state[source]["capacity"])
+        overloaded = math.isfinite(capacity) and assigned_demand > capacity
+        spare_capacity = None if not math.isfinite(capacity) else capacity - assigned_demand
+        source_summary.append(
+            {
+                "source_node": source,
+                "assigned_node_count": len(cast(list[str], source_state[source]["assigned_nodes"])),
+                "assigned_nodes": sorted(cast(list[str], source_state[source]["assigned_nodes"])),
+                "assigned_demand": assigned_demand,
+                "capacity": None if not math.isfinite(capacity) else capacity,
+                "spare_capacity": spare_capacity,
+                "utilization_ratio": None if not math.isfinite(capacity) or capacity == 0.0 else assigned_demand / capacity,
+                "overloaded": overloaded,
+            }
+        )
+
+    source_summary.sort(key=lambda item: (-float(item["assigned_demand"]), str(item["source_node"])))
+    assignments.sort(key=lambda item: (str(item["node"])))
+    return {
+        "source_count": len(unique_sources),
+        "overloaded_source_count": sum(1 for row in source_summary if bool(row["overloaded"])),
+        "unserved_node_count": sum(1 for row in assignments if row["assigned_source"] is None),
+        "source_summary": source_summary,
+        "node_assignments": assignments,
+    }
+
+
+def supply_redundancy_audit(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    demand_by_node: dict[str, float] | None = None,
+    critical_nodes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    if not source_nodes:
+        raise ValueError("source_nodes must not be empty")
+
+    demand_by_node = demand_by_node or {}
+    critical = set(critical_nodes or [])
+    unique_sources = sorted(dict.fromkeys(source_nodes))
+    for source in unique_sources:
+        if source not in graph.adjacency:
+            raise KeyError(source)
+
+    rows: list[dict[str, Any]] = []
+    for node in sorted(graph.adjacency.keys()):
+        costs: list[tuple[str, float]] = []
+        for source in unique_sources:
+            result = shortest_path(graph, source, node)
+            if bool(result["reachable"]):
+                costs.append((source, float(result["total_cost"])))
+        costs.sort(key=lambda item: (item[1], item[0]))
+
+        path_count = len(costs)
+        best_source = costs[0][0] if costs else None
+        primary_cost = costs[0][1] if costs else math.inf
+        backup_cost = costs[1][1] if path_count >= 2 else None
+        if path_count >= 2:
+            tier = "high" if (backup_cost is not None and (backup_cost - primary_cost) <= 1.0) or path_count >= 3 else "medium"
+        else:
+            tier = "low"
+
+        demand = float(demand_by_node.get(node, 0.0))
+        rows.append(
+            {
+                "node": node,
+                "best_source": best_source,
+                "source_path_count": path_count,
+                "primary_cost": None if primary_cost is math.inf else primary_cost,
+                "backup_cost": backup_cost,
+                "single_source_dependency": path_count <= 1,
+                "is_critical": node in critical,
+                "demand": demand,
+                "resilience_tier": tier,
+                "priority_score": (2.0 if node in critical else 1.0) * (1.0 + demand) / max(path_count, 1),
+            }
+        )
+
+    rows.sort(
+        key=lambda item: (
+            not bool(item["single_source_dependency"]),
+            not bool(item["is_critical"]),
+            -float(item["priority_score"]),
+            str(item["node"]),
+        )
+    )
+    return rows
+
+
+def restoration_sequence_report(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    failed_edges: list[str],
+    repair_time_by_edge: dict[str, float] | None = None,
+    demand_by_node: dict[str, float] | None = None,
+    critical_nodes: list[str] | None = None,
+) -> dict[str, Any]:
+    demand_by_node = demand_by_node or {}
+    critical_nodes = critical_nodes or []
+    baseline_outage = utility_outage_isolation(graph, source_nodes, failed_edges=failed_edges)
+    if not failed_edges:
+        return {
+            "total_steps": 0,
+            "baseline_deenergized_nodes": list(baseline_outage["deenergized_nodes"]),
+            "final_deenergized_nodes": list(baseline_outage["deenergized_nodes"]),
+            "stages": [],
+        }
+
+    optimization = crew_dispatch_optimizer(
+        graph,
+        source_nodes=source_nodes,
+        failed_edges=failed_edges,
+        repair_time_by_edge=repair_time_by_edge,
+        demand_by_node=demand_by_node,
+        critical_nodes=critical_nodes,
+    )
+
+    unresolved = set(failed_edges)
+    previously_served = set(graph.adjacency.keys()) - set(baseline_outage["deenergized_nodes"])
+    stages: list[dict[str, Any]] = []
+    final_deenergized_nodes = list(baseline_outage["deenergized_nodes"])
+    cumulative_restored_demand = 0.0
+
+    for step_index, step in enumerate(optimization["repair_plan"], start=1):
+        edge_id = str(step["repair_edge_id"])
+        unresolved.discard(edge_id)
+        outage = utility_outage_isolation(graph, source_nodes, failed_edges=sorted(unresolved))
+        served_nodes = set(graph.adjacency.keys()) - set(outage["deenergized_nodes"])
+        restored_nodes = sorted(served_nodes - previously_served)
+        previously_served = served_nodes
+        final_deenergized_nodes = list(outage["deenergized_nodes"])
+        restored_demand = sum(float(demand_by_node.get(node, 0.0)) for node in restored_nodes)
+        cumulative_restored_demand += restored_demand
+        stages.append(
+            {
+                "step": step_index,
+                "repair_edge_id": edge_id,
+                "priority_score": float(step["priority_score"]),
+                "restored_node_count": len(restored_nodes),
+                "restored_nodes": restored_nodes,
+                "restored_demand": restored_demand,
+                "cumulative_restored_demand": cumulative_restored_demand,
+                "served_node_count": len(served_nodes),
+                "remaining_outage_count": int(outage["deenergized_count"]),
+                "protected_critical_count": sum(1 for node in critical_nodes if node in served_nodes),
+            }
+        )
+
+    return {
+        "total_steps": len(stages),
+        "baseline_deenergized_nodes": list(baseline_outage["deenergized_nodes"]),
+        "final_deenergized_nodes": final_deenergized_nodes,
+        "stages": stages,
+    }
+
+
 def feeder_reconfiguration_optimizer(
     graph: NetworkGraph,
     source_nodes: list[str],
@@ -504,6 +731,58 @@ def gas_pressure_drop_trace(
         "min_pressure": min_pressure,
         "max_pressure": max((float(item["pressure"]) for item in profile), default=0.0),
         "pressure_profile": profile,
+    }
+
+
+def outage_impact_report(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    failed_edges: list[str],
+    demand_by_node: dict[str, float] | None = None,
+    customer_count_by_node: dict[str, int] | None = None,
+    critical_nodes: list[str] | None = None,
+    outage_hours: float = 1.0,
+    cost_per_customer_hour: float = 8.0,
+    cost_per_demand_unit: float = 3.0,
+) -> dict[str, Any]:
+    if outage_hours < 0:
+        raise ValueError("outage_hours must be zero or greater")
+
+    demand_by_node = demand_by_node or {}
+    customer_count_by_node = customer_count_by_node or {}
+    critical = set(critical_nodes or [])
+
+    outage = utility_outage_isolation(graph, source_nodes, failed_edges=failed_edges)
+    impacted_nodes = list(outage["deenergized_nodes"])
+    impacted_demand = sum(float(demand_by_node.get(node, 0.0)) for node in impacted_nodes)
+    impacted_customer_count = sum(int(customer_count_by_node.get(node, 1)) for node in impacted_nodes)
+    critical_impacted = sorted(node for node in impacted_nodes if node in critical)
+    customer_hours = impacted_customer_count * float(outage_hours)
+    demand_hours = impacted_demand * float(outage_hours)
+    estimated_cost = customer_hours * float(cost_per_customer_hour) + demand_hours * float(cost_per_demand_unit)
+    severity_score = impacted_demand + (impacted_customer_count / 10.0) + (len(critical_impacted) * 100.0)
+    if len(critical_impacted) >= 2 or severity_score >= 200.0:
+        severity_tier = "extreme"
+    elif len(critical_impacted) >= 1 or severity_score >= 80.0:
+        severity_tier = "high"
+    elif severity_score >= 20.0:
+        severity_tier = "medium"
+    else:
+        severity_tier = "low"
+
+    return {
+        "impacted_node_count": len(impacted_nodes),
+        "impacted_nodes": impacted_nodes,
+        "impacted_customer_count": impacted_customer_count,
+        "impacted_demand": impacted_demand,
+        "critical_node_count": len(critical_impacted),
+        "critical_impacted_nodes": critical_impacted,
+        "customer_hours_interrupted": customer_hours,
+        "demand_hours_interrupted": demand_hours,
+        "estimated_cost": estimated_cost,
+        "severity_score": severity_score,
+        "severity_tier": severity_tier,
+        "failed_edge_count": len(failed_edges),
     }
 
 
@@ -788,3 +1067,130 @@ def criticality_ranking_by_node_removal(
 
     rows.sort(key=lambda item: (-float(item["lost_demand"]), str(item["node"])))
     return rows
+
+
+def demand_weighted_restoration_ranking(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    failed_edges: list[str],
+    demand_by_node: dict[str, float] | None = None,
+    customer_count_by_node: dict[str, int] | None = None,
+    critical_nodes: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Rank failed edges by the demand-weighted benefit of repairing each one.
+
+    For each failed edge, computes how many nodes, customers, demand, and
+    critical nodes would be restored if that single edge were repaired first.
+    Returns rows sorted by ``benefit_score`` descending.
+    """
+    if not failed_edges:
+        return []
+    demand_by_node = demand_by_node or {}
+    customer_count_by_node = customer_count_by_node or {}
+    critical = set(critical_nodes or [])
+
+    baseline_reachable = _reachable_nodes(graph, source_nodes, failed_edges=failed_edges)
+
+    rows: list[dict[str, Any]] = []
+    for edge_id in failed_edges:
+        remaining_failed = [e for e in failed_edges if e != edge_id]
+        after_reachable = _reachable_nodes(graph, source_nodes, failed_edges=remaining_failed)
+        restored_nodes = sorted(after_reachable - baseline_reachable)
+        restored_demand = sum(float(demand_by_node.get(n, 0.0)) for n in restored_nodes)
+        restored_customers = sum(int(customer_count_by_node.get(n, 1)) for n in restored_nodes)
+        restored_critical = [n for n in restored_nodes if n in critical]
+        benefit = restored_demand + (restored_customers / 10.0) + (len(restored_critical) * 100.0)
+        rows.append({
+            "edge_id": edge_id,
+            "restored_node_count": len(restored_nodes),
+            "restored_demand": restored_demand,
+            "restored_customer_count": restored_customers,
+            "restored_critical_count": len(restored_critical),
+            "benefit_score": benefit,
+        })
+    rows.sort(key=lambda item: (-float(item["benefit_score"]), str(item["edge_id"])))
+    return rows
+
+
+def cross_utility_dependency_score(
+    primary_graph: NetworkGraph,
+    dependent_graph: NetworkGraph,
+    dependency_map: dict[str, list[str]],
+    demand_by_node: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Score how strongly a dependent network relies on a primary network.
+
+    Uses ``dependency_map`` (primary-node → list of dependent-nodes) to quantify
+    cascade exposure.  Returns per-primary-node scores and an overall dependency
+    index (0–1 scale).
+    """
+    demand_by_node = demand_by_node or {}
+    total_dependent_demand = sum(float(demand_by_node.get(n, 1.0)) for n in dependent_graph.adjacency)
+    if total_dependent_demand == 0:
+        total_dependent_demand = max(len(dependent_graph.adjacency), 1)
+
+    node_scores: list[dict[str, Any]] = []
+    cascade_demand = 0.0
+    for primary_node, dep_nodes in dependency_map.items():
+        valid_deps = [n for n in dep_nodes if n in dependent_graph.adjacency]
+        node_demand = sum(float(demand_by_node.get(n, 1.0)) for n in valid_deps)
+        cascade_demand += node_demand
+        node_scores.append({
+            "primary_node": primary_node,
+            "dependent_node_count": len(valid_deps),
+            "dependent_demand": node_demand,
+        })
+    node_scores.sort(key=lambda item: (-float(item["dependent_demand"]), str(item["primary_node"])))
+    dependency_index = min(1.0, cascade_demand / total_dependent_demand) if total_dependent_demand else 0.0
+    return {
+        "dependency_index": round(dependency_index, 4),
+        "total_cascade_demand": cascade_demand,
+        "total_dependent_demand": total_dependent_demand,
+        "node_scores": node_scores,
+    }
+
+
+def attribute_aware_headloss(
+    graph: NetworkGraph,
+    source_node: str,
+    inlet_pressure: float,
+    roughness_column: str = "roughness_coefficient",
+    diameter_column: str = "diameter",
+    flow_column: str = "flow",
+    length_column: str = "length",
+) -> dict[str, Any]:
+    """Trace pressure through a water network using per-edge Hazen-Williams attributes.
+
+    Unlike the simpler ``trace_water_pressure_zones`` which uses a flat cost
+    proxy, this function reads per-edge ``roughness``, ``diameter``, ``flow``,
+    and ``length`` attributes to compute Hazen-Williams headloss on each edge.
+    """
+    visited: dict[str, float] = {source_node: float(inlet_pressure)}
+    queue = deque([source_node])
+    while queue:
+        current = queue.popleft()
+        pressure = visited[current]
+        for step in graph.adjacency.get(current, []):
+            if step.to_node in visited:
+                continue
+            edge = graph.edge_attributes.get(step.edge_id, {})
+            length = max(0.0, float(edge.get(length_column, edge.get("cost", 0.0))))
+            flow = max(0.0, float(edge.get(flow_column, 0.0)))
+            diameter = max(1e-9, float(edge.get(diameter_column, 1.0)))
+            roughness = max(1e-9, float(edge.get(roughness_column, edge.get("roughness", 130.0))))
+            loss = utility_headloss_hazen_williams(length, flow, diameter, roughness)
+            downstream = max(0.0, pressure - loss)
+            visited[step.to_node] = downstream
+            queue.append(step.to_node)
+
+    profile = [{"node": n, "pressure": p} for n, p in sorted(visited.items())]
+    pressures = [p for p in visited.values()]
+    return {
+        "source_node": source_node,
+        "inlet_pressure": inlet_pressure,
+        "zone_node_count": len(visited),
+        "min_pressure": min(pressures) if pressures else 0.0,
+        "max_pressure": max(pressures) if pressures else 0.0,
+        "mean_pressure": sum(pressures) / len(pressures) if pressures else 0.0,
+        "pressure_profile": profile,
+    }

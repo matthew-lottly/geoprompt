@@ -2,11 +2,59 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
+from numbers import Real
 from pathlib import Path
+from statistics import median
 from typing import Any, Iterable, Sequence
 
 
 Record = dict[str, Any]
+
+
+def _is_numeric_value(value: Any) -> bool:
+    return isinstance(value, Real) and not isinstance(value, bool)
+
+
+def _infer_column_dtype(values: Sequence[Any]) -> str:
+    non_null = [value for value in values if value is not None]
+    if not non_null:
+        return "empty"
+    if all(_is_numeric_value(value) for value in non_null):
+        return "numeric"
+    if all(isinstance(value, str) for value in non_null):
+        return "string"
+    return "mixed"
+
+
+def _apply_aggregation(values: Sequence[Any], operation: str) -> Any:
+    cleaned = [value for value in values if value is not None]
+    if not cleaned:
+        return None
+
+    if operation == "count":
+        return len(cleaned)
+    if operation == "first":
+        return cleaned[0]
+    if operation == "unique_count":
+        return len({json.dumps(value, sort_keys=True, default=str) for value in cleaned})
+
+    if operation in {"sum", "mean", "median"}:
+        numeric = [float(value) for value in cleaned if _is_numeric_value(value)]
+        if len(numeric) != len(cleaned):
+            raise ValueError(f"aggregation '{operation}' requires numeric values")
+        if operation == "sum":
+            return sum(numeric)
+        if operation == "mean":
+            return sum(numeric) / len(numeric)
+        return median(numeric)
+
+    if operation == "min":
+        return min(cleaned)
+    if operation == "max":
+        return max(cleaned)
+
+    raise ValueError(f"unsupported aggregation: {operation}")
 
 
 class PromptTable:
@@ -155,36 +203,70 @@ class PromptTable:
     def summarize(self, by: str, aggregations: dict[str, str] | None = None) -> "PromptTable":
         if by not in self.columns:
             raise KeyError(f"column '{by}' is not present")
+        return self.groupby(by).agg(aggregations or {})
 
-        grouped_rows: dict[Any, list[Record]] = {}
-        for row in self._rows:
-            grouped_rows.setdefault(row[by], []).append(row)
+    def groupby(self, by: str | Sequence[str]) -> "GroupedPromptTable":
+        group_columns = [by] if isinstance(by, str) else list(by)
+        if not group_columns:
+            raise ValueError("groupby requires at least one column")
+        for column in group_columns:
+            if column not in self.columns:
+                raise KeyError(f"column '{column}' is not present")
+        return GroupedPromptTable(self._rows, group_columns)
 
-        summary_rows: list[Record] = []
-        for group_value, rows in grouped_rows.items():
-            summary_row: Record = {by: group_value, "row_count": len(rows)}
-            for column, operation in (aggregations or {}).items():
-                values = [row[column] for row in rows if column in row and row[column] is not None]
-                if not values:
-                    summary_row[f"{column}_{operation}"] = None
-                    continue
-                if operation == "sum":
-                    summary_row[f"{column}_{operation}"] = sum(float(value) for value in values)
-                elif operation == "mean":
-                    summary_row[f"{column}_{operation}"] = sum(float(value) for value in values) / len(values)
-                elif operation == "min":
-                    summary_row[f"{column}_{operation}"] = min(values)
-                elif operation == "max":
-                    summary_row[f"{column}_{operation}"] = max(values)
-                elif operation == "first":
-                    summary_row[f"{column}_{operation}"] = values[0]
-                elif operation == "count":
-                    summary_row[f"{column}_{operation}"] = len(values)
-                else:
-                    raise ValueError(f"unsupported aggregation: {operation}")
-            summary_rows.append(summary_row)
+    def value_counts(self, column: str, normalize: bool = False, dropna: bool = True) -> "PromptTable":
+        if column not in self.columns:
+            raise KeyError(f"column '{column}' is not present")
 
-        return PromptTable(summary_rows)
+        values = [row.get(column) for row in self._rows]
+        if dropna:
+            values = [value for value in values if value is not None]
+
+        counts = Counter(values)
+        total = sum(counts.values())
+        rows = [
+            {
+                column: value,
+                "count": count,
+                "share": (count / total) if total else 0.0,
+            }
+            for value, count in sorted(counts.items(), key=lambda item: (-item[1], str(item[0])))
+        ]
+        if normalize:
+            return PromptTable([{column: row[column], "share": row["share"]} for row in rows])
+        return PromptTable(rows)
+
+    def describe(self, columns: Sequence[str] | None = None) -> "PromptTable":
+        selected = list(columns) if columns is not None else self.columns
+        for column in selected:
+            if column not in self.columns:
+                raise KeyError(f"column '{column}' is not present")
+
+        rows: list[Record] = []
+        for column in selected:
+            values = [row.get(column) for row in self._rows]
+            non_null = [value for value in values if value is not None]
+            dtype = _infer_column_dtype(values)
+            numeric = [float(value) for value in non_null if _is_numeric_value(value)]
+            top_value = Counter(non_null).most_common(1)[0][0] if non_null else None
+            rows.append(
+                {
+                    "column": column,
+                    "dtype": dtype,
+                    "row_count": len(values),
+                    "non_null_count": len(non_null),
+                    "null_count": len(values) - len(non_null),
+                    "unique_count": len({json.dumps(value, sort_keys=True, default=str) for value in non_null}),
+                    "top": top_value,
+                    "sum": sum(numeric) if dtype == "numeric" else None,
+                    "mean": (sum(numeric) / len(numeric)) if dtype == "numeric" and numeric else None,
+                    "median": median(numeric) if dtype == "numeric" and numeric else None,
+                    "min": min(non_null) if non_null else None,
+                    "max": max(non_null) if non_null else None,
+                }
+            )
+
+        return PromptTable(rows)
 
     def to_markdown(self) -> str:
         if not self._rows:
@@ -226,4 +308,33 @@ class PromptTable:
         return str(path)
 
 
-__all__ = ["PromptTable"]
+class GroupedPromptTable:
+    """Grouped PromptTable rows with lightweight aggregation support."""
+
+    def __init__(self, rows: Sequence[Record], group_columns: Sequence[str]) -> None:
+        self._rows = [dict(row) for row in rows]
+        self._group_columns = list(group_columns)
+
+    def agg(self, aggregations: dict[str, str | Sequence[str]]) -> PromptTable:
+        grouped_rows: dict[tuple[Any, ...], list[Record]] = {}
+        for row in self._rows:
+            key = tuple(row.get(column) for column in self._group_columns)
+            grouped_rows.setdefault(key, []).append(row)
+
+        summary_rows: list[Record] = []
+        for key, rows in grouped_rows.items():
+            summary_row: Record = {
+                column: value for column, value in zip(self._group_columns, key)
+            }
+            summary_row["row_count"] = len(rows)
+            for column, operations in aggregations.items():
+                ops = [operations] if isinstance(operations, str) else list(operations)
+                values = [row.get(column) for row in rows if column in row]
+                for operation in ops:
+                    summary_row[f"{column}_{operation}"] = _apply_aggregation(values, operation)
+            summary_rows.append(summary_row)
+
+        return PromptTable(summary_rows)
+
+
+__all__ = ["PromptTable", "GroupedPromptTable"]

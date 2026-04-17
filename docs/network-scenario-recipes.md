@@ -52,6 +52,22 @@ What it shows:
 - Ring node redundancy checks
 - Circuit impact by candidate fiber cut edge
 
+## Resilience Prioritization and Restoration Staging
+
+Run:
+
+```bash
+python examples/network/resilience_restoration_screen.py
+```
+
+What it shows:
+- Node-by-node supply redundancy tiers
+- Multi-source service balancing and overload visibility
+- Outage customer and demand impact scoring
+- Stepwise repair staging with cumulative restored demand
+- Stakeholder-ready HTML resilience summary output
+- Portfolio ranking across baseline versus upgrade scenarios
+
 ## Notes
 
 - These recipes are intentionally small and deterministic.

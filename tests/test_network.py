@@ -45,6 +45,13 @@ from geoprompt.network import (
     resilience_capex_prioritization,
     ring_redundancy_check,
     run_utility_scenarios,
+    restoration_sequence_report,
+    supply_redundancy_audit,
+    multi_source_service_audit,
+    outage_impact_report,
+    demand_weighted_restoration_ranking,
+    cross_utility_dependency_score,
+    attribute_aware_headloss,
     service_area,
     shortest_path,
     stormwater_flow_accumulation,
@@ -691,6 +698,102 @@ class TestResilienceCapexPrioritization:
         assert rows[0]["project_id"] == "add-tie"
 
 
+class TestSupplyRedundancyAudit:
+    def test_flags_single_source_dependency_and_backup_cost(self):
+        g = _ring_graph()
+        rows = supply_redundancy_audit(
+            g,
+            source_nodes=["A", "C"],
+            demand_by_node={"B": 20.0, "D": 5.0},
+            critical_nodes=["B"],
+        )
+        by_node = {row["node"]: row for row in rows}
+
+        assert by_node["B"]["source_path_count"] >= 2
+        assert by_node["B"]["is_critical"] is True
+        assert by_node["B"]["backup_cost"] is not None
+        assert by_node["B"]["resilience_tier"] in {"medium", "high"}
+
+    def test_single_source_graph_reports_low_resilience(self):
+        g = _linear_graph()
+        rows = supply_redundancy_audit(g, source_nodes=["A"])
+        by_node = {row["node"]: row for row in rows}
+
+        assert by_node["E"]["source_path_count"] == 1
+        assert by_node["E"]["single_source_dependency"] is True
+        assert by_node["E"]["resilience_tier"] == "low"
+
+
+class TestRestorationSequenceReport:
+    def test_returns_ranked_stepwise_restoration_gains(self):
+        g = _linear_graph()
+        result = restoration_sequence_report(
+            g,
+            source_nodes=["A"],
+            failed_edges=["e0", "e1"],
+            demand_by_node={"B": 10.0, "C": 40.0, "D": 20.0, "E": 5.0},
+            critical_nodes=["C"],
+        )
+
+        assert result["total_steps"] == 2
+        assert result["stages"][0]["repair_edge_id"] == "e0"
+        assert result["stages"][0]["restored_node_count"] >= 1
+        assert result["stages"][-1]["cumulative_restored_demand"] >= 75.0
+        assert result["stages"][-1]["protected_critical_count"] >= 1
+
+
+class TestMultiSourceServiceAudit:
+    def test_assigns_primary_backup_and_source_balance(self):
+        g = build_network_graph(
+            [
+                {"edge_id": "s1a", "from_node": "S1", "to_node": "A", "cost": 1.0},
+                {"edge_id": "ab", "from_node": "A", "to_node": "B", "cost": 1.0},
+                {"edge_id": "s2c", "from_node": "S2", "to_node": "C", "cost": 1.0},
+                {"edge_id": "cb", "from_node": "C", "to_node": "B", "cost": 1.0},
+            ],
+            directed=False,
+        )
+
+        result = multi_source_service_audit(
+            g,
+            source_nodes=["S1", "S2"],
+            demand_by_node={"B": 50.0, "A": 10.0, "C": 5.0},
+            source_capacity_by_node={"S1": 40.0, "S2": 40.0},
+            critical_nodes=["B"],
+        )
+
+        by_node = {row["node"]: row for row in result["node_assignments"]}
+        by_source = {row["source_node"]: row for row in result["source_summary"]}
+
+        assert by_node["B"]["backup_source"] is not None
+        assert by_node["B"]["is_critical"] is True
+        assert by_source["S1"]["assigned_demand"] >= 0.0
+        assert by_source["S2"]["assigned_demand"] >= 0.0
+        assert result["overloaded_source_count"] >= 1
+
+
+class TestOutageImpactReport:
+    def test_scores_customer_and_demand_impact(self):
+        g = _linear_graph()
+        result = outage_impact_report(
+            g,
+            source_nodes=["A"],
+            failed_edges=["e0"],
+            demand_by_node={"B": 10.0, "C": 20.0, "D": 5.0, "E": 1.0},
+            customer_count_by_node={"B": 100, "C": 50, "D": 20, "E": 5},
+            critical_nodes=["C"],
+            outage_hours=2.0,
+            cost_per_customer_hour=8.0,
+            cost_per_demand_unit=3.0,
+        )
+
+        assert result["impacted_node_count"] >= 1
+        assert result["impacted_customer_count"] >= 100
+        assert result["critical_node_count"] == 1
+        assert result["estimated_cost"] > 0.0
+        assert result["severity_tier"] in {"medium", "high", "extreme"}
+
+
 # ─── Water Domain ────────────────────────────────────────────────────────────
 
 
@@ -1071,3 +1174,85 @@ class TestEdgeCases:
         g = _linear_graph()
         rows = od_cost_matrix(g, origins=[], destinations=["A"])
         assert len(rows) == 0
+
+
+# ─── Phase 7: Demand-Weighted Restoration Ranking ──────────────────────────
+
+
+class TestDemandWeightedRestorationRanking:
+    def test_ranks_by_demand_benefit(self):
+        g = build_network_graph(
+            [
+                {"edge_id": "e1", "from_node": "S", "to_node": "A", "cost": 1.0},
+                {"edge_id": "e2", "from_node": "A", "to_node": "B", "cost": 1.0},
+                {"edge_id": "e3", "from_node": "A", "to_node": "C", "cost": 1.0},
+                {"edge_id": "e4", "from_node": "C", "to_node": "D", "cost": 1.0},
+            ],
+            directed=False,
+        )
+        rows = demand_weighted_restoration_ranking(
+            g,
+            source_nodes=["S"],
+            failed_edges=["e2", "e3"],
+            demand_by_node={"A": 5.0, "B": 10.0, "C": 20.0, "D": 15.0},
+        )
+        assert len(rows) == 2
+        # e3 should rank higher: restoring it recovers C+D (35 demand) vs e2 recovers B (10)
+        assert rows[0]["edge_id"] == "e3"
+        assert rows[0]["restored_demand"] >= 20.0
+
+    def test_empty_failed_edges(self):
+        g = _linear_graph()
+        rows = demand_weighted_restoration_ranking(g, source_nodes=["A"], failed_edges=[])
+        assert rows == []
+
+
+# ─── Phase 7: Cross-Utility Dependency Score ─────────────────────────────────
+
+
+class TestCrossUtilityDependencyScore:
+    def test_basic_dependency_scoring(self):
+        primary = build_network_graph(
+            [{"edge_id": "pe1", "from_node": "P1", "to_node": "P2", "cost": 1.0}],
+            directed=False,
+        )
+        dependent = build_network_graph(
+            [
+                {"edge_id": "de1", "from_node": "D1", "to_node": "D2", "cost": 1.0},
+                {"edge_id": "de2", "from_node": "D2", "to_node": "D3", "cost": 1.0},
+            ],
+            directed=False,
+        )
+        dep_map = {"P1": ["D1", "D2"], "P2": ["D3"]}
+        result = cross_utility_dependency_score(
+            primary, dependent, dep_map,
+            demand_by_node={"D1": 10.0, "D2": 20.0, "D3": 30.0},
+        )
+        assert 0.0 <= result["dependency_index"] <= 1.0
+        assert result["total_cascade_demand"] == 60.0
+        assert len(result["node_scores"]) == 2
+
+
+# ─── Phase 7: Attribute-Aware Headloss ───────────────────────────────────────
+
+
+class TestAttributeAwareHeadloss:
+    def test_pressure_trace(self):
+        g = build_network_graph(
+            [
+                {"edge_id": "e1", "from_node": "S", "to_node": "A", "cost": 1.0,
+                 "length": 100.0, "flow": 5.0, "diameter": 8.0, "roughness_coefficient": 130.0},
+                {"edge_id": "e2", "from_node": "A", "to_node": "B", "cost": 1.0,
+                 "length": 200.0, "flow": 3.0, "diameter": 6.0, "roughness_coefficient": 120.0},
+            ],
+            directed=False,
+        )
+        result = attribute_aware_headloss(g, source_node="S", inlet_pressure=50.0)
+        assert result["zone_node_count"] == 3
+        assert result["max_pressure"] == 50.0
+        assert result["min_pressure"] < 50.0
+        assert result["mean_pressure"] > 0.0
+        profile = {item["node"]: item["pressure"] for item in result["pressure_profile"]}
+        assert profile["S"] == 50.0
+        assert profile["A"] < 50.0
+        assert profile["B"] < profile["A"]

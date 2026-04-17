@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
 from .equations import DistanceMethod, area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
-from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, transform_geometry
+from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, repair_geometry, transform_geometry, validate_geometry
 from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
 from .table import PromptTable
 from .tools import batch_accessibility_scores, vectorized_gravity_interaction, vectorized_service_probability
@@ -304,6 +304,84 @@ class GeoPromptFrame:
         """Return all rows as a list of shallow-copied dicts."""
         return [dict(row) for row in self._rows]
 
+    def to_markdown(self, max_rows: int | None = 20) -> str:
+        """Render the frame as a Markdown table.
+
+        Geometry values are replaced with their type name to keep output
+        compact.  Use ``max_rows`` to cap the number of body rows
+        (``None`` means unlimited).
+        """
+        if not self._rows:
+            return "| |\n| --- |\n"
+        cols = self.columns
+        header = "| " + " | ".join(cols) + " |"
+        separator = "| " + " | ".join("---" for _ in cols) + " |"
+        display_rows = self._rows if max_rows is None else self._rows[:max_rows]
+        lines = [header, separator]
+        for row in display_rows:
+            cells: list[str] = []
+            for col in cols:
+                val = row.get(col)
+                if col == self.geometry_column and isinstance(val, dict):
+                    cells.append(str(val.get("type", "")))
+                else:
+                    cells.append(str(val) if val is not None else "")
+            lines.append("| " + " | ".join(cells) + " |")
+        if max_rows is not None and len(self._rows) > max_rows:
+            lines.append(f"| ... ({len(self._rows) - max_rows} more rows) |")
+        return "\n".join(lines) + "\n"
+
+    def summary(self) -> Record:
+        """Return a dict summarising the frame contents.
+
+        Keys include ``row_count``, ``column_count``, ``columns``, ``crs``,
+        ``geometry_types``, ``bounds``, and per-column ``column_stats`` with
+        dtype/null_count/unique_count and numeric min/max/mean when applicable.
+        """
+        from collections import Counter as _Counter
+        geom_types: set[str] = set()
+        col_values: dict[str, list[Any]] = {col: [] for col in self.columns}
+        for row in self._rows:
+            geom = row.get(self.geometry_column)
+            if isinstance(geom, dict):
+                geom_types.add(str(geom.get("type", "Unknown")))
+            for col in self.columns:
+                col_values[col].append(row.get(col))
+        bounds = None
+        if self._rows:
+            try:
+                b = self.bounds()
+                bounds = {"min_x": b.min_x, "min_y": b.min_y, "max_x": b.max_x, "max_y": b.max_y}
+            except Exception:
+                pass
+        col_stats: list[Record] = []
+        for col in self.columns:
+            if col == self.geometry_column:
+                continue
+            vals = col_values[col]
+            non_null = [v for v in vals if v is not None]
+            numerics = [float(v) for v in non_null if isinstance(v, (int, float)) and not isinstance(v, bool)]
+            stat: Record = {
+                "column": col,
+                "dtype": "numeric" if numerics and len(numerics) == len(non_null) else ("string" if non_null and all(isinstance(v, str) for v in non_null) else "mixed"),
+                "null_count": len(vals) - len(non_null),
+                "unique_count": len(set(str(v) for v in non_null)),
+            }
+            if numerics:
+                stat["min"] = min(numerics)
+                stat["max"] = max(numerics)
+                stat["mean"] = sum(numerics) / len(numerics)
+            col_stats.append(stat)
+        return {
+            "row_count": len(self._rows),
+            "column_count": len(self.columns),
+            "columns": self.columns,
+            "crs": self.crs,
+            "geometry_types": sorted(geom_types),
+            "bounds": bounds,
+            "column_stats": col_stats,
+        }
+
     def to_json(self, output_path: str | Path, indent: int = 2) -> str:
         """Write the frame rows to JSON and return the output path."""
         path = Path(output_path)
@@ -452,6 +530,39 @@ class GeoPromptFrame:
         absolute planar area in coordinate-unit\u00b2.
         """
         return [geometry_area(row[self.geometry_column]) for row in self._rows]
+
+    def geometry_validity(self, id_column: str | None = None) -> PromptTable:
+        """Return a per-row report describing geometry validity and repair guidance."""
+        if id_column is not None:
+            self._require_column(id_column)
+
+        report_rows: list[Record] = []
+        for index, row in enumerate(self._rows):
+            validity = validate_geometry(row[self.geometry_column])
+            report: Record = {
+                "row_index": index,
+                "geometry_type": validity["geometry_type"],
+                "is_valid": validity["is_valid"],
+                "issue_count": validity["issue_count"],
+                "issues": validity["issues"],
+                "suggested_fix": validity["suggested_fix"],
+            }
+            if id_column is not None:
+                report[id_column] = row[id_column]
+            report_rows.append(report)
+        return PromptTable(report_rows)
+
+    def fix_geometries(self, drop_invalid: bool = False) -> "GeoPromptFrame":
+        """Apply lightweight repairs and optionally drop rows that remain invalid."""
+        repaired_rows: list[Record] = []
+        for row in self._rows:
+            updated = dict(row)
+            updated[self.geometry_column] = repair_geometry(row[self.geometry_column])
+            validity = validate_geometry(updated[self.geometry_column])
+            if drop_invalid and not bool(validity["is_valid"]):
+                continue
+            repaired_rows.append(updated)
+        return GeoPromptFrame(rows=repaired_rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def nearest_neighbors(
         self,
@@ -1457,6 +1568,54 @@ class GeoPromptFrame:
                 rows.append({**aggregate_values, self.geometry_column: geometry})
 
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def explode(self) -> "GeoPromptFrame":
+        """Split multi-part geometries into individual single-part rows.
+
+        Each part inherits the attributes of the original row.  Single-part
+        geometries pass through unchanged.
+
+        Returns:
+            New :class:`GeoPromptFrame` with one row per geometry part.
+        """
+        _MULTI_MAP = {
+            "MultiPoint": ("Point", True),
+            "MultiLineString": ("LineString", False),
+            "MultiPolygon": ("Polygon", False),
+        }
+        rows: list[Record] = []
+        for row in self._rows:
+            geom = row[self.geometry_column]
+            if not isinstance(geom, dict):
+                rows.append(dict(row))
+                continue
+            gtype = geom.get("type", "")
+            if gtype not in _MULTI_MAP:
+                rows.append(dict(row))
+                continue
+            single_type, flat_coords = _MULTI_MAP[gtype]
+            coords = geom.get("coordinates", [])
+            for part in coords:
+                child: Record = {k: v for k, v in row.items() if k != self.geometry_column}
+                if flat_coords:
+                    child[self.geometry_column] = {"type": single_type, "coordinates": part}
+                else:
+                    child[self.geometry_column] = {"type": single_type, "coordinates": part}
+                rows.append(child)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def unary_union(self) -> dict[str, Any]:
+        """Return the union of all geometries as a single GeoJSON geometry dict.
+
+        Requires Shapely (``pip install shapely``).
+        """
+        shapely_ops = importlib.import_module("shapely.ops")
+        shapely_geometry = importlib.import_module("shapely.geometry")
+        shapes = [shapely_geometry.shape(row[self.geometry_column]) for row in self._rows if isinstance(row.get(self.geometry_column), dict)]
+        if not shapes:
+            raise ValueError("frame has no geometries to union")
+        merged = shapely_ops.unary_union(shapes)
+        return dict(merged.__geo_interface__)
 
     def with_column(self, name: str, values: Sequence[Any]) -> "GeoPromptFrame":
         """Return a new frame with ``name`` added (or replaced) from ``values``.
