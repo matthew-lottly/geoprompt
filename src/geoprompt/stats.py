@@ -352,6 +352,72 @@ def idw_interpolation(
     return results
 
 
+def spatial_weights_matrix(
+    centroids: Sequence[tuple[float, float]],
+    *,
+    bandwidth: float | None = None,
+    k: int | None = None,
+    row_standardize: bool = False,
+) -> list[list[float]]:
+    """Build and optionally row-standardize a spatial weights matrix."""
+    weights = _build_distance_weights(centroids, bandwidth=bandwidth, k=k)
+    return _row_standardize(weights) if row_standardize else weights
+
+
+def spatial_lag(
+    values: Sequence[float],
+    centroids: Sequence[tuple[float, float]],
+    *,
+    bandwidth: float | None = None,
+    k: int | None = None,
+) -> list[float]:
+    """Compute the row-standardized spatial lag for each observation."""
+    if len(values) != len(centroids):
+        raise ValueError("values and centroids must have equal length")
+    weights = spatial_weights_matrix(centroids, bandwidth=bandwidth, k=k, row_standardize=True)
+    return [sum(weights[i][j] * values[j] for j in range(len(values))) for i in range(len(values))]
+
+
+def semivariogram(
+    centroids: Sequence[tuple[float, float]],
+    values: Sequence[float],
+    *,
+    bins: int = 10,
+) -> list[dict[str, float]]:
+    """Compute an empirical semivariogram from point values."""
+    if len(values) != len(centroids):
+        raise ValueError("values and centroids must have equal length")
+    if len(values) < 2:
+        return []
+
+    pairs: list[tuple[float, float]] = []
+    for i in range(len(values)):
+        for j in range(i + 1, len(values)):
+            dist = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+            gamma = 0.5 * ((values[i] - values[j]) ** 2)
+            pairs.append((dist, gamma))
+
+    max_dist = max(dist for dist, _ in pairs)
+    if max_dist == 0:
+        return [{"bin": 1.0, "pair_count": float(len(pairs)), "mean_distance": 0.0, "semivariance": 0.0}]
+    step = max_dist / max(bins, 1)
+
+    results: list[dict[str, float]] = []
+    for idx in range(max(bins, 1)):
+        lower = idx * step
+        upper = (idx + 1) * step if idx < bins - 1 else max_dist + 1e-12
+        bucket = [(dist, gamma) for dist, gamma in pairs if lower <= dist < upper]
+        if not bucket:
+            continue
+        results.append({
+            "bin": float(idx + 1),
+            "pair_count": float(len(bucket)),
+            "mean_distance": sum(dist for dist, _ in bucket) / len(bucket),
+            "semivariance": sum(gamma for _, gamma in bucket) / len(bucket),
+        })
+    return results
+
+
 def spatial_outliers(
     values: Sequence[float],
     centroids: Sequence[tuple[float, float]],
@@ -406,5 +472,8 @@ __all__ = [
     "kernel_density",
     "local_morans_i",
     "morans_i",
+    "semivariogram",
+    "spatial_lag",
     "spatial_outliers",
+    "spatial_weights_matrix",
 ]

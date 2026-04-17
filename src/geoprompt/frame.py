@@ -2498,6 +2498,40 @@ class GeoPromptFrame:
                 row[column] = mapping[val]
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
+    def map_column(self, column: str, func: Any, *, new_column: str | None = None) -> "GeoPromptFrame":
+        """Map a callable across a single column.
+
+        Args:
+            column: Source column to transform.
+            func: Callable taking the current value and returning a new value.
+            new_column: Optional target column name. Defaults to overwriting
+                ``column``.
+
+        Returns:
+            New :class:`GeoPromptFrame`.
+        """
+        self._require_column(column)
+        if not callable(func):
+            raise TypeError("func must be callable")
+        target = new_column or column
+        rows = self.to_records()
+        for row in rows:
+            row[target] = func(row.get(column))
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def apply_rows(self, func: Any) -> "GeoPromptFrame":
+        """Apply a row-wise transformation callable to each record."""
+        if not callable(func):
+            raise TypeError("func must be callable")
+        rows = [dict(func(dict(row))) for row in self._rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+    def pipe(self, func: Any, *args: Any, **kwargs: Any) -> Any:
+        """Pipe the frame through a callable for chainable workflows."""
+        if not callable(func):
+            raise TypeError("func must be callable")
+        return func(self, *args, **kwargs)
+
     def set_index(self, column: str) -> "GeoPromptFrame":
         """Set a column as an index-like identifier, stored in ``_index_column``.
 
@@ -2608,6 +2642,9 @@ class GeoPromptFrame:
         on: str,
         how: str = "inner",
         rsuffix: str = "right",
+        *,
+        indicator: bool = False,
+        validate: str | None = None,
     ) -> "GeoPromptFrame":
         """Merge with another frame on a shared key column.
 
@@ -2616,6 +2653,10 @@ class GeoPromptFrame:
             on: Column name to join on.
             how: ``"inner"`` or ``"left"``.
             rsuffix: Suffix for colliding right column names.
+            indicator: If ``True``, add a ``_merge`` column showing whether
+                each row came from ``"both"`` or ``"left_only"``.
+            validate: Optional join-cardinality check: ``"one_to_one"``,
+                ``"one_to_many"``, or ``"many_to_one"``.
 
         Returns:
             New :class:`GeoPromptFrame`.
@@ -2624,6 +2665,25 @@ class GeoPromptFrame:
         other._require_column(on)
         if how not in {"inner", "left"}:
             raise ValueError("how must be 'inner' or 'left'")
+        if validate not in {None, "one_to_one", "one_to_many", "many_to_one"}:
+            raise ValueError("validate must be one of: None, 'one_to_one', 'one_to_many', 'many_to_one'")
+
+        left_counts: dict[Any, int] = {}
+        for row in self._rows:
+            left_counts[row.get(on)] = left_counts.get(row.get(on), 0) + 1
+        right_counts: dict[Any, int] = {}
+        for row in other._rows:
+            right_counts[row.get(on)] = right_counts.get(row.get(on), 0) + 1
+
+        if validate == "one_to_one":
+            if any(count > 1 for count in left_counts.values()) or any(count > 1 for count in right_counts.values()):
+                raise ValueError("merge validation failed: expected one-to-one keys")
+        elif validate == "one_to_many":
+            if any(count > 1 for count in left_counts.values()):
+                raise ValueError("merge validation failed: expected one-to-many keys with unique left keys")
+        elif validate == "many_to_one":
+            if any(count > 1 for count in right_counts.values()):
+                raise ValueError("merge validation failed: expected many-to-one keys with unique right keys")
 
         right_index: dict[Any, list[Record]] = {}
         for row in other._rows:
@@ -2639,12 +2699,16 @@ class GeoPromptFrame:
                 for col in right_columns:
                     target = col if col not in merged else f"{col}_{rsuffix}"
                     merged[target] = None
+                if indicator:
+                    merged["_merge"] = "left_only"
                 rows.append(merged)
             for right_row in right_rows:
                 merged = dict(left_row)
                 for col in right_columns:
                     target = col if col not in merged else f"{col}_{rsuffix}"
                     merged[target] = right_row[col]
+                if indicator:
+                    merged["_merge"] = "both"
                 rows.append(merged)
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 

@@ -1,0 +1,40 @@
+name: Release Benchmark Proof
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  benchmark-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with compare extras
+        run: |
+          python -m pip install --upgrade pip build
+          python -m pip install -e ".[dev,compare,overlay,projection,viz]"
+
+      - name: Generate comparison bundle and history page
+        run: |
+          python -m geoprompt.compare --export-history --output-dir outputs/release-proof
+
+      - name: Build distribution artifacts
+        run: python -m build
+
+      - name: Upload release proof bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: geoprompt-release-proof
+          path: |
+            outputs/release-proof/**
+            dist/**
+          if-no-files-found: error

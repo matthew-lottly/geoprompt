@@ -59,8 +59,21 @@ jobs:
       - name: Check distribution metadata
         run: python -m twine check dist/*
 
+      - name: Upload benchmark and demo artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: geoprompt-artifacts-py${{ matrix.python-version }}
+          path: |
+            outputs/**
+            dist/**
+          if-no-files-found: ignore
+
   optional-gated:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extra-profile: ["io", "viz", "service"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -73,15 +86,25 @@ jobs:
       - name: Upgrade packaging tools
         run: python -m pip install --upgrade pip
 
-      - name: Install Geoprompt with optional IO extras
-        run: python -m pip install -e ".[dev,io]"
+      - name: Install Geoprompt with selected extras
+        run: python -m pip install -e ".[dev,${{ matrix.extra-profile }}]"
 
       - name: Run optional geospatial integration test gate
+        if: matrix.extra-profile == 'io'
         env:
           GEOPROMPT_RUN_GEO_IO: "1"
         run: python -m pytest tests/test_geoprompt.py::test_geospatial_integration_parquet_round_trip
 
+      - name: Run visualization and platform tests
+        if: matrix.extra-profile == 'viz'
+        run: python -m pytest tests/test_platform_remaining_push.py
+
+      - name: Run service smoke test
+        if: matrix.extra-profile == 'service'
+        run: python -c "import geoprompt.service; print('service ok')"
+
       - name: Run benchmark regression gate
+        if: matrix.extra-profile == 'io'
         env:
           GEOPROMPT_RUN_BENCHMARKS: "1"
         run: python -m pytest tests/test_benchmark_regression.py

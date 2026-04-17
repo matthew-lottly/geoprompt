@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import html
 import importlib
+import json
 import statistics
 import time
 from dataclasses import dataclass
@@ -915,6 +916,71 @@ def build_comparison_report(
     }
 
 
+def _load_benchmark_history_reports(history_dir: Path) -> list[dict[str, Any]]:
+    reports: list[dict[str, Any]] = []
+    if not history_dir.exists():
+        return reports
+    for path in sorted(history_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if isinstance(payload, dict) and "datasets" in payload:
+            payload.setdefault("_source_path", str(path))
+            reports.append(payload)
+    return reports
+
+
+def benchmark_history_table(history_dir: str | Path) -> PromptTable:
+    """Build a per-release benchmark history summary table."""
+    history_path = Path(history_dir)
+    rows: list[dict[str, Any]] = []
+    for report in _load_benchmark_history_reports(history_path):
+        summary_table = benchmark_summary_table(report)
+        summary_rows = summary_table.to_records()
+        speedups = [float(r["speedup_ratio"]) for r in summary_rows if isinstance(r.get("speedup_ratio"), float)]
+        wins = sum(1 for r in summary_rows if r.get("winner") == "geoprompt")
+        losses = sum(1 for r in summary_rows if r.get("winner") == "reference")
+        version = str(report.get("version") or Path(str(report.get("_source_path", "unknown"))).stem)
+        rows.append({
+            "version": version,
+            "dataset_count": len(report.get("datasets", [])),
+            "all_checks_passed": all(bool(v) for v in report.get("summary", {}).values()) if report.get("summary") else None,
+            "benchmark_rows": len(summary_rows),
+            "geoprompt_wins": wins,
+            "reference_wins": losses,
+            "mean_speedup_ratio": (sum(speedups) / len(speedups)) if speedups else None,
+            "source": str(report.get("_source_path", "")),
+        })
+    return PromptTable(rows)
+
+
+def render_benchmark_history_html(history_dir: str | Path) -> str:
+    """Render an HTML summary of benchmark history snapshots."""
+    table = benchmark_history_table(history_dir)
+    return (
+        "<html><head><meta charset='utf-8'><title>GeoPrompt Benchmark History</title>"
+        "<style>body{font-family:Arial,sans-serif;margin:24px;}table{border-collapse:collapse;width:100%;margin:16px 0;}"
+        "th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}th{background:#f6f8fa;}</style>"
+        "</head><body>"
+        "<h1>GeoPrompt Benchmark History</h1>"
+        f"{_html_table(table)}"
+        "</body></html>"
+    )
+
+
+def export_benchmark_history(history_dir: str | Path) -> dict[str, str]:
+    """Export benchmark history summary artifacts to the given directory."""
+    history_path = Path(history_dir)
+    history_path.mkdir(parents=True, exist_ok=True)
+    table = benchmark_history_table(history_path)
+    html_path = history_path / "benchmark_history.html"
+    json_path = history_path / "benchmark_history.json"
+    html_path.write_text(render_benchmark_history_html(history_path), encoding="utf-8")
+    json_path.write_text(json.dumps(table.to_records(), indent=2), encoding="utf-8")
+    return {"html": str(html_path), "json": str(json_path)}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Compare Geoprompt results and runtime against Shapely and GeoPandas.")
     parser.add_argument("--input-path", type=Path, default=None, help="Optional single input fixture to compare. If omitted, the built-in corpus is used.")
@@ -922,6 +988,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tolerance", type=float, default=1e-7, help="Absolute tolerance for correctness checks.")
     parser.add_argument("--crs", type=str, default="EPSG:4326", help="Source CRS for a custom single input fixture.")
     parser.add_argument("--join-path", type=Path, default=None, help="Optional polygon region fixture for a custom single input comparison.")
+    parser.add_argument("--export-history", action="store_true", help="Also export a benchmark history page from JSON reports in the output directory.")
     return parser.parse_args()
 
 
@@ -939,14 +1006,21 @@ def main() -> None:
     print(f"- JSON: {written['json']}")
     print(f"- Markdown: {written['markdown']}")
     print(f"- HTML: {written['html']}")
+    if args.export_history:
+        history = export_benchmark_history(args.output_dir)
+        print(f"- Benchmark history HTML: {history['html']}")
+        print(f"- Benchmark history JSON: {history['json']}")
 
 
 __all__ = [
+    "benchmark_history_table",
     "benchmark_summary_table",
     "build_comparison_report",
     "correctness_summary_table",
+    "export_benchmark_history",
     "export_comparison_bundle",
     "main",
+    "render_benchmark_history_html",
     "render_comparison_html",
     "render_comparison_markdown",
     "save_benchmark_snapshot",

@@ -27,6 +27,15 @@ def _load_folium() -> Any:
         ) from exc
 
 
+def _load_plotly() -> Any:
+    try:
+        return importlib.import_module("plotly.graph_objects")
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install visualization support with 'pip install geoprompt[viz]' to use Plotly dashboards."
+        ) from exc
+
+
 def _geojson_coords(geometry: Geometry) -> Any:
     """Convert internal geometry dict to GeoJSON-compatible structure."""
     gtype = str(geometry.get("type", ""))
@@ -324,6 +333,59 @@ def plot_scenario_dashboard(
     return fig
 
 
+def plotly_scenario_dashboard(
+    baseline_metrics: dict[str, float],
+    candidate_metrics: dict[str, float],
+    *,
+    higher_is_better: Sequence[str] | None = None,
+    title: str | None = None,
+) -> Any:
+    """Create an interactive Plotly scenario dashboard."""
+    go = _load_plotly()
+    comparison = compare_scenarios(
+        baseline_metrics,
+        candidate_metrics,
+        higher_is_better=higher_is_better,
+    )
+    metrics = list(comparison.keys())
+    baseline = [float(comparison[m]["baseline"]) for m in metrics]
+    candidate = [float(comparison[m]["candidate"]) for m in metrics]
+    deltas = [float(comparison[m]["delta_percent"]) for m in metrics]
+    colors = ["#2b8a3e" if comparison[m]["direction"] == "improved" else "#c92a2a" for m in metrics]
+
+    fig = go.Figure()
+    fig.add_bar(name="baseline", y=metrics, x=baseline, orientation="h", marker_color="#94a3b8")
+    fig.add_bar(name="candidate", y=metrics, x=candidate, orientation="h", marker_color="#2563eb")
+    fig.add_scatter(
+        name="delta %",
+        y=metrics,
+        x=deltas,
+        mode="markers+text",
+        marker=dict(color=colors, size=11),
+        text=[f"{d:.1f}%" for d in deltas],
+        textposition="middle right",
+        xaxis="x2",
+    )
+    fig.update_layout(
+        title=title or "Scenario Dashboard",
+        barmode="group",
+        template="plotly_white",
+        xaxis=dict(title="metric value"),
+        xaxis2=dict(title="percent change", overlaying="x", side="top", showgrid=False, zeroline=True),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        margin=dict(l=80, r=40, t=80, b=40),
+    )
+    return fig
+
+
+def save_plotly_html(figure: Any, output_path: str | Path) -> str:
+    """Save a Plotly figure to an HTML file."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    figure.write_html(str(path), include_plotlyjs="cdn")
+    return str(path)
+
+
 # --- Resilience styling presets ---
 
 RESILIENCE_STYLE_PRESETS: dict[str, dict[str, Any]] = {
@@ -568,9 +630,11 @@ __all__ = [
     "RESILIENCE_STYLE_PRESETS",
     "plot_restoration_timeline",
     "plot_scenario_dashboard",
+    "plotly_scenario_dashboard",
     "quickplot",
     "resilience_style_map",
     "save_map",
+    "save_plotly_html",
     "to_choropleth",
     "to_folium_map",
     "to_outage_overlay_map",

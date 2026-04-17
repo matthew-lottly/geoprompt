@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import csv
 import json
+import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_type
@@ -37,27 +38,78 @@ def _is_url_source(path: str | Path) -> bool:
     return parsed.scheme in {"http", "https", "file"}
 
 
-def _resolve_service_url(url: str) -> str:
+def _resolve_service_url(url: str, *, query_params: dict[str, Any] | None = None) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         return url
-    if not any(token in parsed.path for token in ("FeatureServer", "MapServer")):
-        return url
+
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    if "f" not in query:
+    if any(token in parsed.path for token in ("FeatureServer", "MapServer")):
         query.setdefault("where", "1=1")
         query.setdefault("outFields", "*")
-        query["f"] = "json"
-        return urlunparse(parsed._replace(query=urlencode(query)))
-    return url
+        query.setdefault("f", "json")
+
+    if query_params:
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            query[key] = str(value)
+
+    return urlunparse(parsed._replace(query=urlencode(query, safe=",")))
 
 
-def _read_json_source(path: str | Path, *, timeout: float = 30.0) -> Any:
+def _read_json_source(
+    path: str | Path,
+    *,
+    timeout: float = 30.0,
+    headers: dict[str, str] | None = None,
+    max_retries: int = 0,
+    retry_delay: float = 0.5,
+) -> Any:
     if _is_url_source(path):
         resolved = _resolve_service_url(str(path))
-        with urlopen(resolved, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+        request = Request(resolved, headers=headers or {})
+        last_error: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                with urlopen(request, timeout=timeout) as response:  # noqa: S310
+                    return json.loads(response.read().decode("utf-8"))
+            except Exception as exc:  # pragma: no cover - network failures are environment-specific
+                last_error = exc
+                if attempt >= max_retries:
+                    raise
+                time.sleep(retry_delay)
+        if last_error is not None:
+            raise last_error
     return _read_json(path)
+
+
+def _service_query_params(
+    *,
+    where: str | None = None,
+    out_fields: Sequence[str] | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    result_offset: int | None = None,
+    page_size: int | None = None,
+    out_sr: str | int | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if where is not None:
+        params["where"] = where
+    if out_fields is not None:
+        params["outFields"] = ",".join(str(field) for field in out_fields)
+    if bbox is not None:
+        xmin, ymin, xmax, ymax = bbox
+        params["geometry"] = f"{xmin},{ymin},{xmax},{ymax}"
+        params["geometryType"] = "esriGeometryEnvelope"
+        params["spatialRel"] = "esriSpatialRelIntersects"
+    if result_offset is not None:
+        params["resultOffset"] = result_offset
+    if page_size is not None:
+        params["resultRecordCount"] = page_size
+    if out_sr is not None:
+        params["outSR"] = out_sr
+    return params
 
 
 def _validate_read_options(
@@ -1017,20 +1069,73 @@ def read_service_url(
     limit_rows: int | None = None,
     sample_step: int = 1,
     timeout: float = 30.0,
+    where: str | None = None,
+    out_fields: Sequence[str] | None = None,
+    bbox: tuple[float, float, float, float] | None = None,
+    page_size: int | None = None,
+    headers: dict[str, str] | None = None,
+    paginate: bool = True,
+    out_sr: str | int | None = None,
+    max_retries: int = 0,
+    retry_delay: float = 0.5,
 ) -> GeoPromptFrame:
-    """Read GeoJSON or ArcGIS-style feature JSON directly from a URL or URI."""
+    """Read GeoJSON or ArcGIS-style feature JSON directly from a URL or URI.
+
+    Supports ArcGIS Feature Service query parameters like ``where``,
+    ``out_fields``, bounding-box filters, custom headers, and automatic
+    pagination when a service reports ``exceededTransferLimit``.
+    """
     if sample_step <= 0:
         raise ValueError("sample_step must be >= 1")
     if limit_rows is not None and limit_rows <= 0:
         raise ValueError("limit_rows must be >= 1 when provided")
+    if page_size is not None and page_size <= 0:
+        raise ValueError("page_size must be >= 1 when provided")
 
-    payload = _read_json_source(url, timeout=timeout)
-    rows = _records_from_service_payload(payload, geometry=geometry)
-    rows = _apply_row_limits(rows, limit_rows=limit_rows, sample_step=sample_step)
-    if use_columns:
-        keep = set(use_columns)
-        rows = [{**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]} for row in rows]
-    return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs or _extract_service_crs(payload))
+    all_rows: list[dict[str, Any]] = []
+    last_payload: Any = None
+    next_offset = 0
+
+    while True:
+        request_url = _resolve_service_url(
+            url,
+            query_params=_service_query_params(
+                where=where,
+                out_fields=out_fields,
+                bbox=bbox,
+                result_offset=next_offset if next_offset else None,
+                page_size=page_size,
+                out_sr=out_sr,
+            ),
+        )
+        extra_read_kwargs: dict[str, Any] = {}
+        if max_retries:
+            extra_read_kwargs["max_retries"] = max_retries
+        if retry_delay != 0.5:
+            extra_read_kwargs["retry_delay"] = retry_delay
+        payload = _read_json_source(
+            request_url,
+            timeout=timeout,
+            headers=headers,
+            **extra_read_kwargs,
+        )
+        last_payload = payload
+        rows = _records_from_service_payload(payload, geometry=geometry)
+        if use_columns:
+            keep = set(use_columns)
+            rows = [{**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]} for row in rows]
+        all_rows.extend(rows)
+
+        if limit_rows is not None and len(all_rows) >= limit_rows:
+            break
+
+        more_rows = bool(payload.get("exceededTransferLimit")) if isinstance(payload, dict) else False
+        if not paginate or not more_rows or not rows:
+            break
+        next_offset += len(rows)
+
+    all_rows = _apply_row_limits(all_rows, limit_rows=limit_rows, sample_step=sample_step)
+    return GeoPromptFrame.from_records(all_rows, geometry=geometry, crs=crs or _extract_service_crs(last_payload or {}))
 
 
 def _as_geojson_geometry(geometry: dict[str, Any]) -> dict[str, Any]:

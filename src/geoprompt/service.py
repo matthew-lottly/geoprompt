@@ -13,6 +13,8 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import os
+import time
 from typing import Any
 
 logger = logging.getLogger("geoprompt.service")
@@ -40,6 +42,21 @@ def build_app() -> Any:
         version="0.1.0",
         description="Lightweight API for GeoPrompt spatial analysis workflows.",
     )
+    expected_api_key = os.getenv("GEOPROMPT_API_KEY")
+
+    @app.middleware("http")
+    async def audit_requests(request, call_next):
+        start = time.perf_counter()
+        if expected_api_key and request.url.path != "/health":
+            provided = request.headers.get("x-api-key")
+            if provided != expected_api_key:
+                response = fastapi.responses.JSONResponse({"detail": "unauthorized"}, status_code=401)
+                logger.warning("unauthorized request path=%s", request.url.path)
+                return response
+        response = await call_next(request)
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        logger.info("request method=%s path=%s status=%s duration_ms=%.2f", request.method, request.url.path, response.status_code, duration_ms)
+        return response
 
     # --- Request / Response models ---
 

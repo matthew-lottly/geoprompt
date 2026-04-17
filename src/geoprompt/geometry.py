@@ -451,6 +451,18 @@ def _dedupe_consecutive_vertices(vertices: tuple[Coordinate, ...]) -> tuple[Coor
     return tuple(deduped)
 
 
+def _line_has_self_intersection(vertices: tuple[Coordinate, ...]) -> bool:
+    segments = _segments(vertices)
+    for index, (first_start, first_end) in enumerate(segments):
+        for other_index in range(index + 1, len(segments)):
+            if abs(index - other_index) <= 1:
+                continue
+            second_start, second_end = segments[other_index]
+            if _segments_intersect(first_start, first_end, second_start, second_end):
+                return True
+    return False
+
+
 def _polygon_has_self_intersection(ring: tuple[Coordinate, ...]) -> bool:
     segments = _segments(ring)
     last_index = len(segments) - 1
@@ -483,6 +495,8 @@ def validate_geometry(geometry: Geometry) -> dict[str, object]:
             issues.append("insufficient_distinct_vertices")
         if geometry_length(normalized) == 0.0:
             issues.append("zero_length")
+        if len(vertices) >= 4 and _line_has_self_intersection(vertices):
+            issues.append("self_intersection")
     elif geometry_kind == "Polygon":
         ring = geometry_vertices(normalized)
         if _has_consecutive_duplicate_vertices(ring):
