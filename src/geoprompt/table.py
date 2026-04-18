@@ -473,4 +473,8 @@ class GroupedPromptTable:
         return PromptTable(summary_rows)
 
 
-__all__ = ["PromptTable", "GroupedPromptTable"]
+prompttable = PromptTable
+groupedprompttable = GroupedPromptTable
+
+
+__all__ = ["PromptTable", "GroupedPromptTable", "prompttable", "groupedprompttable"]

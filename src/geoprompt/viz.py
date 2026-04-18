@@ -626,12 +626,192 @@ def quickplot(
     return fig
 
 
+# ---------------------------------------------------------------------------
+#  Basemap and symbol preset families
+# ---------------------------------------------------------------------------
+
+BASEMAP_PRESETS: dict[str, str] = {
+    "light": "CartoDB positron",
+    "dark": "CartoDB dark_matter",
+    "satellite": "Esri.WorldImagery",
+    "terrain": "Stamen Terrain",
+    "street": "OpenStreetMap",
+    "report": "CartoDB positron",
+}
+
+SYMBOL_PRESETS: dict[str, dict[str, str]] = {
+    "risk": {
+        "high": "#d7191c",
+        "medium": "#fdae61",
+        "low": "#1a9641",
+        "unknown": "#999999",
+    },
+    "outage": {
+        "active": "#e31a1c",
+        "restored": "#33a02c",
+        "planned": "#ff7f00",
+        "unknown": "#999999",
+    },
+    "severity": {
+        "critical": "#d7191c",
+        "major": "#fdae61",
+        "minor": "#ffffbf",
+        "none": "#1a9641",
+    },
+    "asset_class": {
+        "electric": "#e41a1c",
+        "water": "#377eb8",
+        "gas": "#ff7f00",
+        "telecom": "#984ea3",
+        "stormwater": "#4daf4a",
+    },
+    "recommendation": {
+        "do_now": "#d7191c",
+        "plan_next": "#fdae61",
+        "monitor": "#1a9641",
+        "defer": "#999999",
+    },
+}
+
+
+def portfolio_scorecard(
+    records: Sequence[Record],
+    *,
+    title: str = "Portfolio Scorecard",
+    metrics: Sequence[str] | None = None,
+) -> str:
+    """Render a simple HTML portfolio scorecard from a set of records.
+
+    Each record should have a ``"name"`` key and one or more numeric metric
+    columns.
+
+    Args:
+        records: Sequence of dicts representing scored items.
+        title: Scorecard title.
+        metrics: Metric columns to display (default: all numeric columns).
+
+    Returns:
+        An HTML string suitable for embedding or saving.
+    """
+    if not records:
+        return f"<h2>{title}</h2><p>No data.</p>"
+
+    if metrics is None:
+        metrics = [k for k, v in records[0].items() if isinstance(v, (int, float)) and k != "name"]
+
+    header = "".join(f"<th>{m}</th>" for m in metrics)
+    rows_html: list[str] = []
+    for rec in records:
+        cells = "".join(f"<td>{rec.get(m, '')}</td>" for m in metrics)
+        rows_html.append(f"<tr><td><strong>{rec.get('name', '')}</strong></td>{cells}</tr>")
+
+    return (
+        f"<h2>{title}</h2>"
+        f"<table border='1' cellpadding='4' cellspacing='0'>"
+        f"<tr><th>Item</th>{header}</tr>"
+        + "".join(rows_html)
+        + "</table>"
+    )
+
+
+def recommendation_card(
+    item_name: str,
+    recommendation: str,
+    *,
+    explanation: str = "",
+    score: float | None = None,
+    color: str | None = None,
+) -> str:
+    """Render an HTML recommendation card for a single item.
+
+    Args:
+        item_name: Name of the asset or project.
+        recommendation: Short recommendation label (e.g. ``"Do Now"``).
+        explanation: Longer explanation text.
+        score: Optional numeric score to display.
+        color: Optional background color for the recommendation badge.
+
+    Returns:
+        An HTML string.
+    """
+    badge_color = color or SYMBOL_PRESETS["recommendation"].get(
+        recommendation.lower().replace(" ", "_"), "#999999"
+    )
+    score_html = f"<p>Score: <strong>{score:.2f}</strong></p>" if score is not None else ""
+    return (
+        f"<div style='border:1px solid #ccc; padding:12px; margin:8px; border-radius:6px;'>"
+        f"<h3>{item_name}</h3>"
+        f"<span style='background:{badge_color}; color:white; padding:4px 10px; border-radius:4px;'>"
+        f"{recommendation}</span>"
+        f"{score_html}"
+        f"<p>{explanation}</p>"
+        f"</div>"
+    )
+
+
+def before_after_comparison(
+    before_records: Sequence[Record],
+    after_records: Sequence[Record],
+    *,
+    title: str = "Before / After Comparison",
+    key_column: str = "name",
+    metric_columns: Sequence[str] | None = None,
+) -> str:
+    """Render an HTML before/after comparison table.
+
+    Args:
+        before_records: Records representing the baseline scenario.
+        after_records: Records representing the proposed scenario.
+        title: Table title.
+        key_column: Column used to match rows across scenarios.
+        metric_columns: Numeric columns to compare (auto-detected if omitted).
+
+    Returns:
+        An HTML string.
+    """
+    if not before_records:
+        return f"<h2>{title}</h2><p>No baseline data.</p>"
+
+    if metric_columns is None:
+        metric_columns = [k for k, v in before_records[0].items() if isinstance(v, (int, float)) and k != key_column]
+
+    after_map = {r.get(key_column): r for r in after_records}
+
+    header = "".join(f"<th>{m} (before)</th><th>{m} (after)</th><th>Δ</th>" for m in metric_columns)
+    rows_html: list[str] = []
+    for rec in before_records:
+        name = rec.get(key_column, "")
+        after_rec = after_map.get(name, {})
+        cells = ""
+        for m in metric_columns:
+            bv = rec.get(m)
+            av = after_rec.get(m)
+            delta = ""
+            if isinstance(bv, (int, float)) and isinstance(av, (int, float)):
+                delta = f"{av - bv:+.2f}"
+            cells += f"<td>{bv}</td><td>{av if av is not None else ''}</td><td>{delta}</td>"
+        rows_html.append(f"<tr><td><strong>{name}</strong></td>{cells}</tr>")
+
+    return (
+        f"<h2>{title}</h2>"
+        f"<table border='1' cellpadding='4' cellspacing='0'>"
+        f"<tr><th>Item</th>{header}</tr>"
+        + "".join(rows_html)
+        + "</table>"
+    )
+
+
 __all__ = [
+    "BASEMAP_PRESETS",
     "RESILIENCE_STYLE_PRESETS",
+    "SYMBOL_PRESETS",
+    "before_after_comparison",
     "plot_restoration_timeline",
     "plot_scenario_dashboard",
     "plotly_scenario_dashboard",
+    "portfolio_scorecard",
     "quickplot",
+    "recommendation_card",
     "resilience_style_map",
     "save_map",
     "save_plotly_html",

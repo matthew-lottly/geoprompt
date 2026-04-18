@@ -306,3 +306,214 @@ def test_temporal_resample_and_rolling_stats():
     rolling = rolling_window_stats(ordered, value_column="value", window=2)
     assert rolling[1]["rolling_mean"] == 15
     assert rolling[2]["rolling_mean"] == 25
+
+
+def test_geometry_predicates_and_affine_helpers():
+    from geoprompt.geometry import (
+        geometry_boundary,
+        geometry_covered_by,
+        geometry_covers,
+        geometry_disjoint,
+        geometry_equals,
+        representative_point,
+        rotate_geometry,
+        scale_geometry,
+        skew_geometry,
+        translate_geometry,
+    )
+
+    poly = {"type": "Polygon", "coordinates": [(0, 0), (2, 0), (2, 2), (0, 2)]}
+    inner = {"type": "Polygon", "coordinates": [(0.5, 0.5), (1.5, 0.5), (1.5, 1.5), (0.5, 1.5)]}
+    other = {"type": "Polygon", "coordinates": [(5, 5), (6, 5), (6, 6), (5, 6)]}
+
+    assert geometry_covers(poly, inner) is True
+    assert geometry_covered_by(inner, poly) is True
+    assert geometry_disjoint(poly, other) is True
+    assert geometry_equals(poly, dict(poly)) is True
+
+    rp = representative_point(poly)
+    assert rp["type"] == "Point"
+
+    boundary = geometry_boundary(poly)
+    assert boundary["type"] == "LineString"
+
+    moved = translate_geometry(poly, dx=10, dy=0)
+    assert moved["coordinates"][0][0] == 10.0
+
+    scaled = scale_geometry(poly, xfact=2, yfact=2)
+    assert scaled["coordinates"][1][0] == 4.0
+
+    rotated = rotate_geometry({"type": "Point", "coordinates": (1, 0)}, angle_degrees=90)
+    assert round(rotated["coordinates"][0], 6) == 0.0
+
+    skewed = skew_geometry({"type": "Point", "coordinates": (1, 1)}, x_angle_degrees=45)
+    assert round(skewed["coordinates"][0], 6) == 2.0
+
+
+def test_frame_loc_iloc_and_drop_duplicates():
+    frame = GeoPromptFrame(
+        [
+            {"id": "a", "value": 1, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+            {"id": "a", "value": 1, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+            {"id": "b", "value": 2, "geometry": {"type": "Point", "coordinates": (1, 1)}},
+        ],
+        geometry_column="geometry",
+    ).set_index("id")
+
+    assert frame.iloc(0)["id"] == "a"
+    assert frame.loc("b")["value"] == 2
+
+    deduped = frame.drop_duplicates(subset=["id", "value"])
+    assert len(deduped) == 2
+
+
+def test_schema_migration_and_landcover_summary():
+    from geoprompt.io import apply_schema_mapping, generate_schema_migration_plan
+    from geoprompt.raster import land_cover_summary
+
+    records = [{"site": "A", "score_text": "10", "flag": "yes"}]
+    plan = generate_schema_migration_plan(records, {"site": "str", "score_text": "int", "flag": "bool"})
+    assert plan["change_count"] == 2
+
+    migrated = apply_schema_mapping(records, rename={"site": "site_id"}, casts={"score_text": "int", "flag": "bool"})
+    assert migrated[0]["site_id"] == "A"
+    assert migrated[0]["score_text"] == 10
+    assert migrated[0]["flag"] is True
+
+    raster = {
+        "data": [
+            [1, 1, 2],
+            [2, 3, 3],
+            [1, 2, 3],
+        ],
+        "transform": (0.0, 3.0, 1.0, 1.0),
+        "nodata": None,
+    }
+    zones = GeoPromptFrame(
+        [
+            {"zone": "all", "geometry": {"type": "Polygon", "coordinates": [(0, 0), (3, 0), (3, 3), (0, 3)]}},
+        ],
+        geometry_column="geometry",
+    )
+    summary = land_cover_summary(raster, zones, zone_id_column="zone")
+    rows = summary.to_records()
+    assert rows[0]["1"] == 3
+    assert rows[0]["2"] == 3
+    assert rows[0]["3"] == 3
+
+
+def test_workspace_registry_class(tmp_path: Path):
+    from geoprompt.workspace import GeoPromptWorkspace
+
+    ws = GeoPromptWorkspace(tmp_path / "demo-workspace")
+    ws.register_layer("sites", path="data/sites.geojson", crs="EPSG:4326")
+    ws.register_layer("regions", path="data/regions.geojson", crs="EPSG:4326")
+    manifest = ws.build_manifest(steps=["load", "join"], outputs=["outputs/map.html"])
+    assert manifest["dataset_count"] == 2
+    saved = ws.save_manifest(manifest)
+    assert Path(saved["json"]).exists()
+
+
+def test_lowercase_public_api_aliases_and_frame_ergonomics(tmp_path: Path):
+    import geoprompt as gp
+
+    frame = gp.geopromptframe(
+        [
+            {"id": "a", "flag": "yes", "when": "2026-01-02", "metric_a": 10, "metric_b": 20, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+            {"id": "b", "flag": "no", "when": "2026-01-03", "metric_a": 30, "metric_b": 40, "geometry": {"type": "Point", "coordinates": (1, 1)}},
+        ],
+        geometry_column="geometry",
+    )
+    assert gp.geopromptframe is gp.GeoPromptFrame
+    assert gp.prompttable is gp.PromptTable
+    assert gp.geopromptworkspace is gp.GeoPromptWorkspace
+
+    masked = frame.where([True, False])
+    assert len(masked) == 1
+    assert masked.iloc(0)["id"] == "a"
+
+    typed = frame.astype("flag", "bool").astype("when", "date")
+    typed_rows = typed.to_records()
+    assert typed_rows[0]["flag"] is True
+    assert typed_rows[1]["flag"] is False
+    assert typed_rows[0]["when"].isoformat() == "2026-01-02"
+
+    melted = frame.melt(id_vars=["id"], value_vars=["metric_a", "metric_b"], var_name="metric", value_name="score")
+    melted_rows = melted.to_records()
+    assert len(melted_rows) == 4
+    assert {row["metric"] for row in melted_rows} == {"metric_a", "metric_b"}
+
+    ws = gp.geopromptworkspace(tmp_path / "alias-workspace")
+    ws.register_layer("sites", path="data/sites.geojson", crs="EPSG:4326")
+    saved = ws.save_manifest()
+    assert Path(saved["markdown"]).exists()
+
+
+def test_geometry_collection_operations_and_reshape_helpers():
+    pytest.importorskip("shapely")
+    from geoprompt.geometry import geometry_linemerge, geometry_offset_curve, geometry_polygonize, geometry_union_all
+
+    line_a = {"type": "LineString", "coordinates": [(0, 0), (1, 0)]}
+    line_b = {"type": "LineString", "coordinates": [(1, 0), (1, 1)]}
+    line_c = {"type": "LineString", "coordinates": [(1, 1), (0, 1)]}
+    line_d = {"type": "LineString", "coordinates": [(0, 1), (0, 0)]}
+
+    merged = geometry_linemerge([line_a, line_b])
+    assert merged["type"] in {"LineString", "MultiLineString"}
+
+    polys = geometry_polygonize([line_a, line_b, line_c, line_d])
+    assert len(polys) == 1
+    assert polys[0]["type"] == "Polygon"
+
+    unioned = geometry_union_all([
+        {"type": "Polygon", "coordinates": [(0, 0), (1, 0), (1, 1), (0, 1)]},
+        {"type": "Polygon", "coordinates": [(1, 0), (2, 0), (2, 1), (1, 1)]},
+    ])
+    assert unioned["type"] in {"Polygon", "MultiPolygon"}
+
+    offset = geometry_offset_curve(line_a, 0.25)
+    assert offset["type"] in {"LineString", "MultiLineString"}
+
+    frame = GeoPromptFrame(
+        [
+            {"id": "s1", "year": 2025, "sales": 10, "cost": 6, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+            {"id": "s2", "year": 2025, "sales": 20, "cost": 11, "geometry": {"type": "Point", "coordinates": (1, 1)}},
+        ],
+        geometry_column="geometry",
+    )
+
+    stacked = frame.stack(["sales", "cost"], var_name="metric", value_name="amount")
+    assert len(stacked) == 4
+
+    unstacked = stacked.unstack(index="id", columns="metric", values="amount")
+    unstacked_rows = unstacked.to_records()
+    assert len(unstacked_rows) == 2
+
+    wide = GeoPromptFrame(
+        [
+            {"site": "a", "temp_2024": 10, "temp_2025": 12, "rain_2024": 5, "rain_2025": 6, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+        ],
+        geometry_column="geometry",
+    )
+    long = wide.wide_to_long(stubnames=["temp", "rain"], i="site", j="year")
+    long_rows = long.to_records()
+    assert len(long_rows) == 2
+    assert {row["year"] for row in long_rows} == {"2024", "2025"}
+    assert {key for key in long_rows[0].keys()} >= {"site", "year", "temp", "rain"}
+
+
+def test_sorting_nulls_and_friendly_missing_column_errors():
+    frame = GeoPromptFrame(
+        [
+            {"id": "a", "score": 2, "geometry": {"type": "Point", "coordinates": (0, 0)}},
+            {"id": "b", "score": None, "geometry": {"type": "Point", "coordinates": (1, 1)}},
+            {"id": "c", "score": 5, "geometry": {"type": "Point", "coordinates": (2, 2)}},
+        ],
+        geometry_column="geometry",
+    )
+
+    sorted_rows = frame.sort_values("score", descending=True).to_records()
+    assert [row["id"] for row in sorted_rows] == ["c", "a", "b"]
+
+    with pytest.raises(KeyError, match="available columns"):
+        frame.select_columns(["missing"])

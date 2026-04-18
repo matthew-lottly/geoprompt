@@ -1757,6 +1757,84 @@ def validate_schema(
     return {"valid": len(violations) == 0, "violations": violations}
 
 
+def _cast_schema_value(value: Any, dtype: str) -> Any:
+    """Cast a value to a target schema dtype."""
+    if value is None:
+        return None
+
+    normalized = dtype.lower()
+    if normalized == "str":
+        return str(value)
+    if normalized == "int":
+        return int(value)
+    if normalized == "float":
+        return float(value)
+    if normalized == "bool":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"true", "t", "yes", "y", "1", "on"}:
+            return True
+        if text in {"false", "f", "no", "n", "0", "off", ""}:
+            return False
+        raise ValueError(f"cannot cast value {value!r} to bool")
+    return value
+
+
+def generate_schema_migration_plan(
+    records: list[dict[str, object]] | Any,
+    target_schema: dict[str, str],
+) -> dict[str, Any]:
+    """Describe the type changes needed to align records to a target schema."""
+    report = schema_report(records)
+    lookup: dict[str, dict[str, Any]] = {col["name"]: col for col in report["columns"]}
+    changes: list[dict[str, Any]] = []
+
+    for column, target_type in target_schema.items():
+        if column not in lookup:
+            changes.append({"column": column, "action": "add", "target_type": target_type})
+            continue
+        actual_types = [t for t in lookup[column].get("types", []) if t != "NoneType"]
+        if actual_types != [target_type]:
+            changes.append({
+                "column": column,
+                "action": "cast",
+                "from_types": actual_types,
+                "target_type": target_type,
+            })
+
+    return {
+        "row_count": report["row_count"],
+        "target_schema": dict(target_schema),
+        "changes": changes,
+        "change_count": len(changes),
+    }
+
+
+def apply_schema_mapping(
+    records: list[dict[str, object]] | Any,
+    *,
+    rename: dict[str, str] | None = None,
+    casts: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    """Rename and cast columns across a record collection."""
+    rows = records.to_records() if hasattr(records, "to_records") else [dict(row) for row in records]
+    rename_map = dict(rename or {})
+    cast_map = dict(casts or {})
+
+    output: list[dict[str, Any]] = []
+    for row in rows:
+        new_row = {rename_map.get(key, key): value for key, value in row.items()}
+        for column, dtype in cast_map.items():
+            target_column = rename_map.get(column, column)
+            if target_column in new_row:
+                new_row[target_column] = _cast_schema_value(new_row[target_column], dtype)
+        output.append(new_row)
+    return output
+
+
 def read_cloud_json(
     url: str,
     *,
@@ -1805,9 +1883,86 @@ def read_cloud_json(
     return [payload]
 
 
+def read_zipped_shapefile(
+    path: str | Path,
+    *,
+    geometry: str = "geometry",
+    crs: str | None = None,
+    layer: str | None = None,
+) -> Any:
+    """Read a zipped shapefile (.zip containing .shp and sidecar files).
+
+    Uses fiona or the built-in ``read_shapefile`` after extracting to a
+    temporary directory.
+
+    Args:
+        path: Local path or URL to a .zip archive.
+        geometry: Geometry column name.
+        crs: Override CRS.
+        layer: Layer name if the archive contains multiple layers.
+
+    Returns:
+        A :class:`~geoprompt.frame.GeoPromptFrame`.
+    """
+    import tempfile
+    import zipfile
+    from pathlib import Path as _P
+    import urllib.request
+
+    p = str(path)
+    if p.startswith("http://") or p.startswith("https://"):
+        tmp_zip = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        urllib.request.urlretrieve(p, tmp_zip.name)  # noqa: S310
+        p = tmp_zip.name
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with zipfile.ZipFile(p) as zf:
+            zf.extractall(tmpdir)
+
+        shp_files = list(_P(tmpdir).rglob("*.shp"))
+        if not shp_files:
+            raise FileNotFoundError("no .shp file found in the archive")
+
+        target = shp_files[0]
+        if layer:
+            for sf in shp_files:
+                if layer.lower() in sf.stem.lower():
+                    target = sf
+                    break
+
+        return read_shapefile(str(target), geometry=geometry, crs=crs)
+
+
+def apply_field_aliases(
+    records: list[dict],
+    alias_map: dict[str, str],
+) -> list[dict]:
+    """Rename fields in a list of records according to an alias map.
+
+    Args:
+        records: Raw record dicts.
+        alias_map: Mapping from original field names to desired aliases.
+
+    Returns:
+        New list of records with renamed fields.
+    """
+    if not alias_map:
+        return records
+    result: list[dict] = []
+    for row in records:
+        new_row = {}
+        for k, v in row.items():
+            new_row[alias_map.get(k, k)] = v
+        result.append(new_row)
+    return result
+
+
 __all__ = [
+    "apply_field_aliases",
+    "apply_schema_mapping",
     "discover_layers",
     "frame_to_geojson",
+    "generate_schema_migration_plan",
     "get_workload_preset",
     "iter_data",
     "iter_data_with_preset",
@@ -1825,6 +1980,7 @@ __all__ = [
     "read_service_url",
     "read_shapefile",
     "read_table",
+    "read_zipped_shapefile",
     "schema_report",
     "validate_schema",
     "WORKLOAD_PRESETS",

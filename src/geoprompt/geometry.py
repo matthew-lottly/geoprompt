@@ -6,7 +6,9 @@ implement standard computational geometry patterns.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+import importlib
+import math
+from typing import Any, Callable, Sequence
 
 from .equations import DistanceMethod, coordinate_distance
 
@@ -578,6 +580,201 @@ def geometry_distance(origin: Geometry, destination: Geometry, method: DistanceM
     return coordinate_distance(geometry_centroid(origin), geometry_centroid(destination), method=method)
 
 
+def geometry_equals(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when two geometries are structurally identical."""
+    return normalize_geometry(origin) == normalize_geometry(destination)
+
+
+def geometry_disjoint(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when two geometries do not intersect."""
+    return not geometry_intersects(origin, destination)
+
+
+def geometry_covers(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when *origin* spatially covers *destination*."""
+    return geometry_contains(origin, destination) or geometry_equals(origin, destination)
+
+
+def geometry_covered_by(origin: Geometry, destination: Geometry) -> bool:
+    """Return ``True`` when *origin* is covered by *destination*."""
+    return geometry_covers(destination, origin)
+
+
+def representative_point(geometry: Geometry) -> Geometry:
+    """Return a point suitable for labeling or representative display."""
+    centroid = geometry_centroid(geometry)
+    point = {"type": "Point", "coordinates": centroid}
+    if geometry_type(geometry) == "Polygon" and not geometry_within(point, geometry):
+        first = geometry_vertices(geometry)[0]
+        return {"type": "Point", "coordinates": first}
+    return point
+
+
+def _collapse_geometry_parts(parts: list[Geometry]) -> Geometry:
+    if not parts:
+        raise ValueError("geometry operation produced an empty result")
+    if len(parts) == 1:
+        return parts[0]
+    part_types = {part["type"] for part in parts}
+    if part_types == {"Point"}:
+        return {"type": "MultiPoint", "coordinates": tuple(part["coordinates"] for part in parts)}
+    if part_types == {"LineString"}:
+        return {"type": "MultiLineString", "coordinates": tuple(part["coordinates"] for part in parts)}
+    if part_types == {"Polygon"}:
+        return {"type": "MultiPolygon", "coordinates": tuple(part["coordinates"] for part in parts)}
+    return parts[0]
+
+
+def geometry_boundary(geometry: Geometry) -> Geometry:
+    """Return the boundary geometry for a supported input geometry."""
+    normalized = normalize_geometry(geometry)
+    kind = geometry_type(normalized)
+
+    if kind == "Polygon":
+        return {"type": "LineString", "coordinates": geometry_vertices(normalized)}
+    if kind == "MultiPolygon":
+        return {
+            "type": "MultiLineString",
+            "coordinates": tuple(part["coordinates"] for part in _component_geometries(normalized)),
+        }
+    if kind == "LineString":
+        vertices = geometry_vertices(normalized)
+        return {"type": "MultiPoint", "coordinates": (vertices[0], vertices[-1])}
+    if kind == "MultiLineString":
+        endpoints: list[Coordinate] = []
+        for part in _component_geometries(normalized):
+            vertices = geometry_vertices(part)
+            endpoints.extend([vertices[0], vertices[-1]])
+        return {"type": "MultiPoint", "coordinates": tuple(endpoints)}
+    if kind == "Point":
+        return {"type": "MultiPoint", "coordinates": ()}
+    raise TypeError("unsupported geometry type")
+
+
+def translate_geometry(geometry: Geometry, *, dx: float = 0.0, dy: float = 0.0) -> Geometry:
+    """Translate a geometry by the given offset."""
+    return transform_geometry(geometry, lambda coord: (coord[0] + float(dx), coord[1] + float(dy)))
+
+
+def geometry_union_all(geometries: Sequence[Geometry]) -> Geometry:
+    """Union a collection of geometries into a single combined geometry."""
+    if not geometries:
+        raise ValueError("geometries must not be empty")
+    from .overlay import _load_shapely, geometry_from_shapely, geometry_to_shapely
+
+    _, _, unary_union, _ = _load_shapely()
+    merged = unary_union([geometry_to_shapely(normalize_geometry(geometry)) for geometry in geometries])
+    return _collapse_geometry_parts(geometry_from_shapely(merged))
+
+
+def geometry_polygonize(lines: Sequence[Geometry]) -> list[Geometry]:
+    """Polygonize a set of input line geometries using Shapely."""
+    if not lines:
+        return []
+    from .overlay import geometry_from_shapely, geometry_to_shapely
+
+    ops = importlib.import_module("shapely.ops")
+    shapes = [geometry_to_shapely(normalize_geometry(line)) for line in lines]
+    polygons = ops.polygonize(shapes)
+    results: list[Geometry] = []
+    for polygon in polygons:
+        results.extend(geometry_from_shapely(polygon))
+    return results
+
+
+def geometry_linemerge(geometries: Sequence[Geometry]) -> Geometry:
+    """Merge connected line segments into a single line or multi-line."""
+    if not geometries:
+        raise ValueError("geometries must not be empty")
+    from .overlay import geometry_from_shapely, geometry_to_shapely
+
+    ops = importlib.import_module("shapely.ops")
+    shapes = [geometry_to_shapely(normalize_geometry(geometry)) for geometry in geometries]
+    merged = ops.linemerge(shapes)
+    return _collapse_geometry_parts(geometry_from_shapely(merged))
+
+
+def geometry_offset_curve(
+    geometry: Geometry,
+    distance: float,
+    *,
+    join_style: str = "round",
+) -> Geometry:
+    """Build a left/right offset curve from a line geometry."""
+    from .overlay import geometry_from_shapely, geometry_to_shapely
+
+    join_lookup = {"round": 1, "mitre": 2, "bevel": 3, "miter": 2}
+    normalized = normalize_geometry(geometry)
+    if geometry_type(normalized) != "LineString":
+        raise TypeError("geometry_offset_curve requires a LineString geometry")
+    line = geometry_to_shapely(normalized)
+    result = line.offset_curve(distance, join_style=join_lookup.get(join_style.lower(), 1))
+    return _collapse_geometry_parts(geometry_from_shapely(result))
+
+
+def scale_geometry(
+    geometry: Geometry,
+    *,
+    xfact: float = 1.0,
+    yfact: float | None = None,
+    origin: Coordinate = (0.0, 0.0),
+) -> Geometry:
+    """Scale a geometry around an origin."""
+    y_scale = float(xfact if yfact is None else yfact)
+    ox, oy = float(origin[0]), float(origin[1])
+    x_scale = float(xfact)
+    return transform_geometry(
+        geometry,
+        lambda coord: (ox + ((coord[0] - ox) * x_scale), oy + ((coord[1] - oy) * y_scale)),
+    )
+
+
+def rotate_geometry(
+    geometry: Geometry,
+    *,
+    angle_degrees: float,
+    origin: Coordinate = (0.0, 0.0),
+) -> Geometry:
+    """Rotate a geometry counterclockwise around an origin."""
+    ox, oy = float(origin[0]), float(origin[1])
+    angle = math.radians(float(angle_degrees))
+    cos_a = math.cos(angle)
+    sin_a = math.sin(angle)
+
+    def _rotate(coord: Coordinate) -> Coordinate:
+        tx = coord[0] - ox
+        ty = coord[1] - oy
+        return (
+            ox + (tx * cos_a) - (ty * sin_a),
+            oy + (tx * sin_a) + (ty * cos_a),
+        )
+
+    return transform_geometry(geometry, _rotate)
+
+
+def skew_geometry(
+    geometry: Geometry,
+    *,
+    x_angle_degrees: float = 0.0,
+    y_angle_degrees: float = 0.0,
+    origin: Coordinate = (0.0, 0.0),
+) -> Geometry:
+    """Skew a geometry along the x and/or y axis around an origin."""
+    ox, oy = float(origin[0]), float(origin[1])
+    tan_x = math.tan(math.radians(float(x_angle_degrees)))
+    tan_y = math.tan(math.radians(float(y_angle_degrees)))
+
+    def _skew(coord: Coordinate) -> Coordinate:
+        tx = coord[0] - ox
+        ty = coord[1] - oy
+        return (
+            ox + tx + (tan_x * ty),
+            oy + ty + (tan_y * tx),
+        )
+
+    return transform_geometry(geometry, _skew)
+
+
 def geometry_touches(origin: Geometry, destination: Geometry) -> bool:
     """Return ``True`` when *origin* and *destination* share boundary points but their interiors do not intersect.
 
@@ -795,26 +992,270 @@ def _segments_cross_properly(
     )
 
 
+def geometry_convex_hull(geometry: Geometry) -> Geometry:
+    """Return the convex hull of a geometry.
+
+    Uses the Graham scan algorithm for pure-Python computation.
+    """
+    verts = geometry_vertices(geometry)
+    if len(verts) < 3:
+        if len(verts) == 2:
+            return {"type": "LineString", "coordinates": tuple(verts)}
+        if len(verts) == 1:
+            return {"type": "Point", "coordinates": verts[0]}
+        return geometry
+
+    # Graham scan
+    pts = sorted(set(verts))
+    if len(pts) < 3:
+        if len(pts) == 2:
+            return {"type": "LineString", "coordinates": tuple(pts)}
+        return {"type": "Point", "coordinates": pts[0]}
+
+    def _cross(o: Coordinate, a: Coordinate, b: Coordinate) -> float:
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    lower: list[Coordinate] = []
+    for p in pts:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper: list[Coordinate] = []
+    for p in reversed(pts):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    hull.append(hull[0])
+    return {"type": "Polygon", "coordinates": tuple(hull)}
+
+
+def geometry_envelope(geometry: Geometry) -> Geometry:
+    """Return the bounding rectangle (envelope) of a geometry."""
+    min_x, min_y, max_x, max_y = geometry_bounds(geometry)
+    coords = (
+        (min_x, min_y),
+        (max_x, min_y),
+        (max_x, max_y),
+        (min_x, max_y),
+        (min_x, min_y),
+    )
+    return {"type": "Polygon", "coordinates": coords}
+
+
+def geometry_is_empty(geometry: Geometry) -> bool:
+    """Return True if the geometry has no coordinates or is an empty collection."""
+    gtype = geometry_type(geometry)
+    coords = geometry.get("coordinates")
+    if gtype == "GeometryCollection":
+        geoms = geometry.get("geometries", [])
+        return len(geoms) == 0
+    if coords is None:
+        return True
+    if isinstance(coords, (list, tuple)) and len(coords) == 0:
+        return True
+    return False
+
+
+def geometry_validity_reason(geometry: Geometry) -> str:
+    """Return a human-readable reason if the geometry is invalid, or 'Valid' if OK."""
+    report = validate_geometry(geometry)
+    if report.get("is_valid"):
+        return "Valid"
+    issues = report.get("issues", [])
+    if issues:
+        return "; ".join(str(i) for i in issues)
+    return "Invalid (unknown reason)"
+
+
+def geometry_snap(geometry: Geometry, reference: Geometry, tolerance: float) -> Geometry:
+    """Snap vertices of *geometry* to nearby vertices of *reference* within *tolerance*.
+
+    Returns a new geometry with snapped coordinates.
+    """
+    ref_verts = geometry_vertices(reference)
+    gtype = geometry_type(geometry)
+    coords = geometry.get("coordinates")
+
+    def _snap_coord(c: Coordinate) -> Coordinate:
+        best = c
+        best_d = tolerance
+        for rv in ref_verts:
+            d = math.hypot(c[0] - rv[0], c[1] - rv[1])
+            if d < best_d:
+                best = rv
+                best_d = d
+        return best
+
+    if gtype == "Point":
+        return {"type": "Point", "coordinates": _snap_coord(tuple(coords))}  # type: ignore[arg-type]
+    if gtype == "LineString":
+        new_coords = tuple(_snap_coord(tuple(c)) for c in coords)  # type: ignore[union-attr]
+        return {"type": "LineString", "coordinates": new_coords}
+    if gtype == "Polygon":
+        ring = _normalize_polygon(coords)
+        new_ring = tuple(_snap_coord(c) for c in ring)
+        return {"type": "Polygon", "coordinates": new_ring}
+    return geometry
+
+
+def geometry_split(geometry: Geometry, splitter: Geometry) -> list[Geometry]:
+    """Split a geometry by a splitting geometry.
+
+    Delegates to Shapely's ``split`` when available.  Returns a list of
+    result geometries (may be a single-element list if no split occurred).
+    """
+    try:
+        overlay = importlib.import_module("shapely.ops")
+        shp_geom = importlib.import_module("shapely.geometry")
+    except ImportError:
+        return [geometry]
+
+    def _to_shapely(g: Geometry) -> Any:
+        gt = geometry_type(g)
+        c = g["coordinates"]
+        if gt == "Point":
+            return shp_geom.Point(c)
+        if gt == "LineString":
+            return shp_geom.LineString(c)
+        if gt == "Polygon":
+            return shp_geom.Polygon(c)
+        raise TypeError(f"unsupported type for split: {gt}")
+
+    def _from_shapely(s: Any) -> list[Geometry]:
+        if s.is_empty:
+            return []
+        gt = s.geom_type
+        if gt == "Point":
+            return [{"type": "Point", "coordinates": (float(s.x), float(s.y))}]
+        if gt == "LineString":
+            return [{"type": "LineString", "coordinates": tuple((float(x), float(y)) for x, y in s.coords)}]
+        if gt == "Polygon":
+            return [{"type": "Polygon", "coordinates": tuple((float(x), float(y)) for x, y in s.exterior.coords)}]
+        if hasattr(s, "geoms"):
+            result: list[Geometry] = []
+            for child in s.geoms:
+                result.extend(_from_shapely(child))
+            return result
+        return []
+
+    try:
+        parts = overlay.split(_to_shapely(geometry), _to_shapely(splitter))
+        return _from_shapely(parts)
+    except Exception:
+        return [geometry]
+
+
+def geometry_voronoi(points: Sequence[Geometry]) -> list[Geometry]:
+    """Build Voronoi polygons from a set of point geometries.
+
+    Delegates to ``scipy.spatial.Voronoi``.  Returns a list of polygon
+    geometries (one per input point where finite).
+    """
+    if len(points) < 2:
+        return []
+
+    try:
+        spatial = importlib.import_module("scipy.spatial")
+    except ImportError:
+        return []
+
+    coords = []
+    for pt in points:
+        if geometry_type(pt) != "Point":
+            continue
+        c = pt["coordinates"]
+        coords.append([float(c[0]), float(c[1])])
+
+    if len(coords) < 2:
+        return []
+
+    vor = spatial.Voronoi(coords)
+    polygons: list[Geometry] = []
+    for region_idx in vor.point_region:
+        region = vor.regions[region_idx]
+        if not region or -1 in region:
+            continue
+        ring = [tuple(vor.vertices[i]) for i in region]
+        ring.append(ring[0])
+        polygons.append({"type": "Polygon", "coordinates": tuple(ring)})
+    return polygons
+
+
+def geometry_delaunay(points: Sequence[Geometry]) -> list[Geometry]:
+    """Build Delaunay triangles from a set of point geometries.
+
+    Delegates to ``scipy.spatial.Delaunay``.
+    """
+    if len(points) < 3:
+        return []
+
+    try:
+        spatial = importlib.import_module("scipy.spatial")
+    except ImportError:
+        return []
+
+    coords = []
+    for pt in points:
+        if geometry_type(pt) != "Point":
+            continue
+        c = pt["coordinates"]
+        coords.append([float(c[0]), float(c[1])])
+
+    if len(coords) < 3:
+        return []
+
+    tri = spatial.Delaunay(coords)
+    triangles: list[Geometry] = []
+    for simplex in tri.simplices:
+        ring = [tuple(coords[i]) for i in simplex]
+        ring.append(ring[0])
+        triangles.append({"type": "Polygon", "coordinates": tuple(ring)})
+    return triangles
+
+
 __all__ = [
     "Coordinate",
     "Geometry",
     "geometry_area",
     "geometry_bounds",
+    "geometry_boundary",
     "geometry_centroid",
     "geometry_contains",
+    "geometry_convex_hull",
+    "geometry_delaunay",
+    "geometry_envelope",
+    "geometry_is_empty",
+    "geometry_linemerge",
+    "geometry_offset_curve",
+    "geometry_polygonize",
+    "geometry_covered_by",
+    "geometry_covers",
     "geometry_crosses",
+    "geometry_disjoint",
+    "geometry_equals",
     "geometry_intersects_bounds",
     "geometry_intersects",
     "geometry_distance",
     "geometry_length",
     "geometry_overlaps",
+    "geometry_snap",
+    "geometry_split",
     "geometry_touches",
     "geometry_type",
+    "geometry_union_all",
+    "geometry_validity_reason",
     "geometry_vertices",
+    "geometry_voronoi",
     "geometry_within",
     "geometry_within_bounds",
     "normalize_geometry",
     "repair_geometry",
+    "representative_point",
+    "rotate_geometry",
+    "scale_geometry",
+    "skew_geometry",
     "transform_geometry",
+    "translate_geometry",
     "validate_geometry",
 ]

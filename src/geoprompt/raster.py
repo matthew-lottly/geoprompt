@@ -198,10 +198,200 @@ def zonal_summary(
     return PromptTable(results)
 
 
+def land_cover_summary(
+    raster: RasterLike,
+    zones: GeoPromptFrame,
+    *,
+    zone_id_column: str = "zone_id",
+) -> PromptTable:
+    """Count categorical land-cover classes within each polygon zone."""
+    info = _coerce_raster(raster)
+    data = info["data"]
+    min_x, max_y, cell_width, cell_height = info["transform"]
+    nodata = info.get("nodata")
+    results: list[dict[str, Any]] = []
+
+    for row in zones.to_records():
+        geom = row[zones.geometry_column]
+        counts: dict[str, Any] = {zone_id_column: row.get(zone_id_column)}
+        for r_idx, raster_row in enumerate(data):
+            for c_idx, val in enumerate(raster_row):
+                if nodata is not None and val == nodata:
+                    continue
+                center_x = float(min_x) + (c_idx + 0.5) * float(cell_width)
+                center_y = float(max_y) - (r_idx + 0.5) * float(cell_height)
+                pt = {"type": "Point", "coordinates": (center_x, center_y)}
+                if geometry_within(pt, geom):
+                    key = str(val)
+                    counts[key] = int(counts.get(key, 0)) + 1
+        results.append(counts)
+
+    return PromptTable(results)
+
+
+def raster_reproject(
+    raster: RasterLike,
+    target_crs: str,
+) -> dict[str, Any]:
+    """Reproject a raster to a new CRS.
+
+    Requires rasterio.  Returns an in-memory raster dict in the target CRS.
+    """
+    rio = _load_rasterio()
+    from rasterio.warp import calculate_default_transform, reproject as rio_reproject
+    from rasterio.enums import Resampling as RioResampling
+
+    if isinstance(raster, dict):
+        raise TypeError("raster_reproject requires a file path, not an in-memory dict")
+
+    path = Path(raster)
+    with rio.open(path) as src:
+        transform, width, height = calculate_default_transform(
+            src.crs, target_crs, src.width, src.height, *src.bounds
+        )
+        data = src.read(1)
+        import numpy as np
+        dest = np.empty((height, width), dtype=data.dtype)
+        rio_reproject(
+            source=data,
+            destination=dest,
+            src_transform=src.transform,
+            src_crs=src.crs,
+            dst_transform=transform,
+            dst_crs=target_crs,
+            resampling=RioResampling.bilinear,
+        )
+        return {
+            "data": dest.tolist(),
+            "transform": (float(transform.c), float(transform.f), float(transform.a), abs(float(transform.e))),
+            "nodata": src.nodata,
+            "width": width,
+            "height": height,
+            "crs": target_crs,
+        }
+
+
+def raster_algebra(
+    raster_a: RasterLike,
+    raster_b: RasterLike,
+    operation: str = "add",
+) -> dict[str, Any]:
+    """Perform cell-by-cell raster algebra on two identically shaped rasters.
+
+    Args:
+        raster_a: First raster (in-memory dict or file path).
+        raster_b: Second raster (in-memory dict or file path).
+        operation: One of ``"add"``, ``"subtract"``, ``"multiply"``, ``"divide"``,
+            ``"min"``, ``"max"``.
+
+    Returns:
+        In-memory raster dict with the result.
+    """
+    a = _coerce_raster(raster_a)
+    b = _coerce_raster(raster_b)
+    data_a = a["data"]
+    data_b = b["data"]
+
+    if len(data_a) != len(data_b):
+        raise ValueError("rasters must have the same number of rows")
+
+    ops = {
+        "add": lambda x, y: x + y,
+        "subtract": lambda x, y: x - y,
+        "multiply": lambda x, y: x * y,
+        "divide": lambda x, y: x / y if y != 0 else None,
+        "min": lambda x, y: min(x, y),
+        "max": lambda x, y: max(x, y),
+    }
+    if operation not in ops:
+        raise ValueError(f"unsupported operation: {operation}; choose from {list(ops)}")
+    fn = ops[operation]
+
+    result: list[list[Any]] = []
+    for r_idx, (row_a, row_b) in enumerate(zip(data_a, data_b)):
+        if len(row_a) != len(row_b):
+            raise ValueError(f"row {r_idx}: rasters must have the same number of columns")
+        new_row: list[Any] = []
+        for va, vb in zip(row_a, row_b):
+            if va is None or vb is None:
+                new_row.append(None)
+            else:
+                new_row.append(fn(va, vb))
+        result.append(new_row)
+
+    return {
+        "data": result,
+        "transform": a["transform"],
+        "nodata": a.get("nodata"),
+        "width": len(result[0]) if result else 0,
+        "height": len(result),
+    }
+
+
+def write_raster(
+    raster: RasterLike,
+    output_path: str | Path,
+    *,
+    crs: str | None = None,
+    nodata: float | None = None,
+    driver: str = "GTiff",
+) -> str:
+    """Write an in-memory raster dict to a file.
+
+    Requires rasterio.
+
+    Args:
+        raster: In-memory raster dict with ``"data"`` and ``"transform"``.
+        output_path: Destination file path.
+        crs: Optional CRS string.
+        nodata: Optional nodata value.
+        driver: GDAL driver name (default ``"GTiff"``).
+
+    Returns:
+        The written file path as a string.
+    """
+    rio = _load_rasterio()
+    from rasterio.transform import from_bounds as rio_from_bounds
+
+    info = raster if isinstance(raster, dict) else _coerce_raster(raster)
+    data = info["data"]
+    height = len(data)
+    width = len(data[0]) if data else 0
+    t = info["transform"]
+
+    import numpy as np
+    arr = np.array(data, dtype=np.float64)
+
+    transform = rio.transform.Affine(t[2], 0, t[0], 0, -t[3], t[1])
+
+    out = Path(output_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    with rio.open(
+        str(out),
+        "w",
+        driver=driver,
+        height=height,
+        width=width,
+        count=1,
+        dtype=arr.dtype,
+        crs=crs or info.get("crs"),
+        transform=transform,
+        nodata=nodata or info.get("nodata"),
+    ) as dst:
+        dst.write(arr, 1)
+
+    return str(out)
+
+
 __all__ = [
     "inspect_raster",
+    "land_cover_summary",
+    "raster_algebra",
     "raster_hillshade",
+    "raster_reproject",
     "raster_slope_aspect",
     "sample_raster_points",
+    "write_raster",
     "zonal_summary",
 ]

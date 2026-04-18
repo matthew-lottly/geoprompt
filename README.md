@@ -55,7 +55,7 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 ## What It Demonstrates
 
 - A package-first project structure rather than a single lab script
-- A `GeoPromptFrame` object that behaves like a lightweight spatial table wrapper
+- A lower-case `geopromptframe` API that behaves like a lightweight spatial table wrapper
 - GeoJSON FeatureCollection support so callers can use standard spatial data without reshaping it first
 - Custom equations for spatial decay, influence, interaction, corridor strength, and area similarity scoring
 - Basic nearest-neighbor analysis for point, line, and polygon centroids
@@ -205,7 +205,7 @@ GeoPandas interop and report export example:
 ```python
 import geoprompt as gp
 
-frame = gp.GeoPromptFrame.from_records(
+frame = gp.geopromptframe.from_records(
     [{"site_id": "a", "geometry": {"type": "Point", "coordinates": (-111.9, 40.7)}}],
     crs="EPSG:4326",
 )

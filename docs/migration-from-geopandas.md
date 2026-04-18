@@ -10,7 +10,7 @@ GeoPrompt is not trying to replace every part of the GeoPandas ecosystem. It is 
 
 | GeoPandas habit | GeoPrompt equivalent |
 |---|---|
-| `GeoDataFrame(...)` | `GeoPromptFrame(...)` |
+| `GeoDataFrame(...)` | `geopromptframe(...)` |
 | `read_file(...)` | `read_data(...)`, `read_geopackage(...)`, `read_shapefile(...)` |
 | `to_file(...)` | `write_data(...)`, `write_geopackage(...)`, `write_shapefile(...)` |
 | `groupby(...).agg(...)` | `frame.groupby(...).agg(...)` |

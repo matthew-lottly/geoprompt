@@ -104,6 +104,28 @@ def validate_topology_rules(
         for endpoint, count in endpoint_counts.items():
             if count == 1:
                 violations.append({"endpoint": endpoint, "issue": "dangling_endpoint"})
+    elif rule == "must_not_have_gaps":
+        # Check for gaps between polygon features by looking for dangling edges
+        # in the boundary adjacency.  A simplified heuristic: each polygon boundary
+        # edge should be shared with another polygon or lie on the convex hull.
+        for idx, row in enumerate(rows):
+            geom = row[frame.geometry_column]
+            if geometry_type(geom) != "Polygon":
+                continue
+            has_neighbor = False
+            for other_idx, other_row in enumerate(rows):
+                if other_idx == idx:
+                    continue
+                other_geom = other_row[frame.geometry_column]
+                if geometry_touches(geom, other_geom) or geometry_intersects(geom, other_geom):
+                    has_neighbor = True
+                    break
+            if not has_neighbor and len(rows) > 1:
+                violations.append({
+                    "row_index": idx,
+                    "feature_id": row.get("id", row.get("site_id", idx)),
+                    "issue": "potential_gap",
+                })
     elif rule == "must_not_self_intersect":
         for idx, row in enumerate(rows):
             report = validate_geometry(row[frame.geometry_column])
@@ -172,4 +194,89 @@ def topology_diff_report(
     return report
 
 
-__all__ = ["snap_points", "topology_diff_report", "validate_topology_rules"]
+def feature_validation_pipeline(
+    frame: GeoPromptFrame,
+    *,
+    rules: Sequence[str] | None = None,
+    other: GeoPromptFrame | None = None,
+) -> dict[str, Any]:
+    """Run multiple topology rules as a validation pipeline.
+
+    Args:
+        frame: Features to validate.
+        rules: List of rule names (default: ``["must_not_overlap", "must_not_self_intersect"]``).
+        other: Optional reference frame for coverage rules.
+
+    Returns:
+        Dict with ``"valid"``, ``"rule_results"`` (list of per-rule results),
+        and ``"total_violations"``.
+    """
+    if rules is None:
+        rules = ["must_not_overlap", "must_not_self_intersect"]
+
+    results: list[dict[str, Any]] = []
+    total_violations = 0
+    for rule in rules:
+        result = validate_topology_rules(frame, rule=rule, other=other)
+        results.append(result)
+        total_violations += result["violation_count"]
+
+    return {
+        "valid": total_violations == 0,
+        "rule_results": results,
+        "total_violations": total_violations,
+    }
+
+
+def repair_suggestions(
+    frame: GeoPromptFrame,
+    *,
+    rules: Sequence[str] | None = None,
+    other: GeoPromptFrame | None = None,
+) -> list[dict[str, Any]]:
+    """Generate repair suggestions for topology violations.
+
+    Runs a validation pipeline and returns a suggestion per violation
+    describing what action might fix the issue.
+
+    Args:
+        frame: Features to validate.
+        rules: Rule names to check.
+        other: Optional reference frame.
+
+    Returns:
+        List of suggestion dicts with ``"rule"``, ``"feature_id"``, ``"suggestion"``.
+    """
+    pipeline = feature_validation_pipeline(frame, rules=rules, other=other)
+    suggestions: list[dict[str, Any]] = []
+
+    repair_map: dict[str, str] = {
+        "must_not_overlap": "Consider clipping or dissolving overlapping features.",
+        "endpoints_must_connect": "Extend or snap the dangling endpoint to the nearest feature.",
+        "must_not_self_intersect": "Run geometry repair (buffer(0) or repair_geometry) on the feature.",
+        "must_be_covered_by": "Move or extend the feature so it falls within the reference layer.",
+        "must_not_have_gaps": "Add missing features or extend boundaries to close the gap.",
+    }
+
+    for rule_result in pipeline["rule_results"]:
+        rule_name = rule_result["rule"]
+        suggestion_text = repair_map.get(rule_name, "Review the violation manually.")
+        for violation in rule_result["violations"]:
+            fid = violation.get("feature_id", violation.get("left_id", violation.get("endpoint", "unknown")))
+            suggestions.append({
+                "rule": rule_name,
+                "feature_id": fid,
+                "suggestion": suggestion_text,
+                "violation": violation,
+            })
+
+    return suggestions
+
+
+__all__ = [
+    "feature_validation_pipeline",
+    "repair_suggestions",
+    "snap_points",
+    "topology_diff_report",
+    "validate_topology_rules",
+]

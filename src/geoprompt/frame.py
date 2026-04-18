@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib
 import json
 from dataclasses import dataclass
+from datetime import date, datetime
 from heapq import nsmallest
 from itertools import zip_longest
 from pathlib import Path
@@ -56,6 +57,43 @@ def _normalize_crs(crs: object | None) -> str | None:
 
 def _row_sort_key(row: Record) -> str:
     return str(row.get("site_id", row.get("region_id", "")))
+
+
+def _cast_frame_value(value: Any, dtype: str) -> Any:
+    if value is None:
+        return None
+
+    normalized = dtype.lower()
+    if normalized == "int":
+        return int(value)
+    if normalized == "float":
+        return float(value)
+    if normalized == "str":
+        return str(value)
+    if normalized in {"bool", "boolean"}:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value).strip().lower()
+        if text in {"true", "t", "yes", "y", "1", "on"}:
+            return True
+        if text in {"false", "f", "no", "n", "0", "off", ""}:
+            return False
+        raise ValueError(f"cannot cast value {value!r} to bool")
+    if normalized == "date":
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        return datetime.fromisoformat(str(value)).date()
+    if normalized == "datetime":
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, date):
+            return datetime.combine(value, datetime.min.time())
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    raise ValueError(f"unsupported dtype: {dtype}")
 
 
 def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
@@ -234,6 +272,7 @@ class GeoPromptFrame:
         """
         self.geometry_column = geometry_column
         self.crs = _normalize_crs(crs)
+        self._index_column: str | None = None
         self._rows = [dict(row) for row in rows]
         for row in self._rows:
             row[self.geometry_column] = normalize_geometry(row[self.geometry_column])
@@ -265,6 +304,7 @@ class GeoPromptFrame:
         frame = cls.__new__(cls)
         frame.geometry_column = geometry_column
         frame.crs = _normalize_crs(crs)
+        frame._index_column = None
         frame._rows = [dict(row) for row in rows]
         return frame
 
@@ -300,6 +340,51 @@ class GeoPromptFrame:
             List of row dicts, each a shallow copy.
         """
         return [dict(row) for row in self._rows[:count]]
+
+    def iloc(self, index: int) -> Record:
+        """Return one row by zero-based integer position."""
+        return dict(self._rows[index])
+
+    def loc(self, key: Any) -> Record | "GeoPromptFrame":
+        """Return rows matching the current index-like column value."""
+        index_column = getattr(self, "_index_column", None)
+        if not index_column:
+            raise ValueError("no index column set; call set_index() first")
+        matches = [dict(row) for row in self._rows if row.get(index_column) == key]
+        if not matches:
+            raise KeyError(key)
+        if len(matches) == 1:
+            return matches[0]
+        frame = GeoPromptFrame._from_internal_rows(matches, geometry_column=self.geometry_column, crs=self.crs)
+        frame._index_column = index_column  # type: ignore[attr-defined]
+        return frame
+
+    def drop_duplicates(self, subset: Sequence[str] | None = None, keep: str = "first") -> "GeoPromptFrame":
+        """Return a new frame with duplicate rows removed."""
+        if keep not in {"first", "last"}:
+            raise ValueError("keep must be 'first' or 'last'")
+        columns = list(subset) if subset else [c for c in self.columns]
+        seen: dict[tuple[Any, ...], dict[str, Any]] = {}
+        ordered_keys: list[tuple[Any, ...]] = []
+        for row in self._rows:
+            key = tuple(row.get(col) for col in columns)
+            if key not in seen:
+                ordered_keys.append(key)
+            seen[key] = dict(row)
+        if keep == "first":
+            unique_rows: list[Record] = []
+            emitted: set[tuple[Any, ...]] = set()
+            for row in self._rows:
+                key = tuple(row.get(col) for col in columns)
+                if key in emitted:
+                    continue
+                emitted.add(key)
+                unique_rows.append(dict(row))
+        else:
+            unique_rows = [seen[key] for key in ordered_keys]
+        frame = GeoPromptFrame._from_internal_rows(unique_rows, geometry_column=self.geometry_column, crs=self.crs)
+        frame._index_column = getattr(self, "_index_column", None)  # type: ignore[attr-defined]
+        return frame
 
     def to_records(self) -> list[Record]:
         """Return all rows as a list of shallow-copied dicts."""
@@ -401,23 +486,67 @@ class GeoPromptFrame:
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def where(self, predicate: Any | None = None, **equals: Any) -> "GeoPromptFrame":
-        """Filter rows by equality conditions and/or a callable predicate."""
+        """Filter rows by equality conditions, a callable predicate, or a boolean mask list."""
+        mask_values: list[bool] | None = None
         if predicate is not None and not callable(predicate):
-            raise TypeError("predicate must be callable when provided")
+            if not isinstance(predicate, (list, tuple)):
+                raise TypeError("predicate must be a callable or boolean mask sequence")
+            if len(predicate) != len(self._rows):
+                raise ValueError("boolean mask length must match the number of rows")
+            mask_values = [bool(value) for value in predicate]
+
         rows: list[Record] = []
-        for row in self._rows:
+        for index, row in enumerate(self._rows):
             if any(row.get(key) != value for key, value in equals.items()):
                 continue
-            if predicate is not None and not bool(predicate(row)):
+            if mask_values is not None and not mask_values[index]:
+                continue
+            if callable(predicate) and not bool(predicate(row)):
                 continue
             rows.append(dict(row))
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def sort_values(self, by: str, descending: bool = False) -> "GeoPromptFrame":
-        """Return a new frame sorted by a column."""
+        """Return a new frame sorted by a column, with nulls placed last."""
         self._require_column(by)
-        rows = sorted(self._rows, key=lambda row: (row.get(by) is None, row.get(by), _row_sort_key(row)), reverse=descending)
-        return GeoPromptFrame(rows=[dict(row) for row in rows], geometry_column=self.geometry_column, crs=self.crs)
+        non_null_rows = [dict(row) for row in self._rows if row.get(by) is not None]
+        null_rows = [dict(row) for row in self._rows if row.get(by) is None]
+        non_null_sorted = sorted(non_null_rows, key=lambda row: (row.get(by), _row_sort_key(row)), reverse=descending)
+        return GeoPromptFrame(rows=[*non_null_sorted, *null_rows], geometry_column=self.geometry_column, crs=self.crs)
+
+    def melt(
+        self,
+        *,
+        id_vars: Sequence[str] | None = None,
+        value_vars: Sequence[str] | None = None,
+        var_name: str = "variable",
+        value_name: str = "value",
+    ) -> "GeoPromptFrame":
+        """Unpivot wide columns into a longer analyst-friendly layout."""
+        id_columns = list(id_vars or [])
+        for column in id_columns:
+            self._require_column(column)
+
+        if self.geometry_column not in id_columns:
+            id_columns_with_geometry = [*id_columns, self.geometry_column]
+        else:
+            id_columns_with_geometry = id_columns
+
+        selected_values = list(value_vars) if value_vars is not None else [
+            column for column in self.columns if column not in id_columns_with_geometry
+        ]
+        for column in selected_values:
+            self._require_column(column)
+
+        rows: list[Record] = []
+        for row in self._rows:
+            base = {column: row.get(column) for column in id_columns_with_geometry}
+            for column in selected_values:
+                melted = dict(base)
+                melted[var_name] = column
+                melted[value_name] = row.get(column)
+                rows.append(melted)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def bounds(self) -> Bounds:
         """Return the bounding box of all geometries in the frame.
@@ -1827,7 +1956,8 @@ class GeoPromptFrame:
 
     def _require_column(self, name: str) -> None:
         if name not in self.columns:
-            raise KeyError(f"column '{name}' is not present")
+            available = ", ".join(self.columns) if self.columns else "(no columns available)"
+            raise KeyError(f"column '{name}' is not present; available columns: {available}")
 
     def catchment_competition(
         self,
@@ -2278,6 +2408,74 @@ class GeoPromptFrame:
             self._require_column(col)
         return GroupedGeoPromptFrame(self._rows, group_columns, self.geometry_column, self.crs)
 
+    def stack(
+        self,
+        columns: Sequence[str] | None = None,
+        *,
+        var_name: str = "variable",
+        value_name: str = "value",
+    ) -> "GeoPromptFrame":
+        """Stack selected columns into a longer row-wise layout."""
+        value_columns = list(columns) if columns is not None else [c for c in self.columns if c != self.geometry_column]
+        for column in value_columns:
+            self._require_column(column)
+        id_columns = [c for c in self.columns if c not in value_columns and c != self.geometry_column]
+        return self.melt(
+            id_vars=id_columns,
+            value_vars=value_columns,
+            var_name=var_name,
+            value_name=value_name,
+        )
+
+    def unstack(
+        self,
+        *,
+        index: str,
+        columns: str,
+        values: str,
+        agg: str = "first",
+    ) -> PromptTable:
+        """Unstack a long layout back into a table by pivoting it wider."""
+        return self.pivot(index=index, columns=columns, values=values, agg=agg)
+
+    def wide_to_long(
+        self,
+        *,
+        stubnames: Sequence[str],
+        i: str | Sequence[str],
+        j: str,
+        sep: str = "_",
+    ) -> "GeoPromptFrame":
+        """Convert repeated wide stub columns like sales_2024 into a long layout."""
+        id_columns = [i] if isinstance(i, str) else list(i)
+        for column in id_columns:
+            self._require_column(column)
+
+        suffixes: set[str] = set()
+        for column in self.columns:
+            for stub in stubnames:
+                prefix = f"{stub}{sep}"
+                if column.startswith(prefix):
+                    suffixes.add(column[len(prefix):])
+
+        rows: list[Record] = []
+        ordered_suffixes = sorted(suffixes)
+        for row in self._rows:
+            base = {column: row.get(column) for column in id_columns}
+            base[self.geometry_column] = row.get(self.geometry_column)
+            for suffix in ordered_suffixes:
+                long_row = dict(base)
+                long_row[j] = suffix
+                populated = False
+                for stub in stubnames:
+                    key = f"{stub}{sep}{suffix}"
+                    if key in row:
+                        long_row[stub] = row.get(key)
+                        populated = True
+                if populated:
+                    rows.append(long_row)
+        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+
     def pivot(
         self,
         index: str,
@@ -2464,20 +2662,16 @@ class GeoPromptFrame:
 
         Args:
             column: Column to cast.
-            dtype: Target type name — ``"int"``, ``"float"``, ``"str"``, or ``"bool"``.
+            dtype: Target type name — supports ``"int"``, ``"float"``, ``"str"``, ``"bool"``, ``"date"``, and ``"datetime"``.
 
         Returns:
             New :class:`GeoPromptFrame`.
         """
         self._require_column(column)
-        converters = {"int": int, "float": float, "str": str, "bool": bool}
-        if dtype not in converters:
-            raise ValueError(f"unsupported dtype: {dtype}")
-        converter = converters[dtype]
         rows = self.to_records()
         for row in rows:
             if row.get(column) is not None:
-                row[column] = converter(row[column])
+                row[column] = _cast_frame_value(row[column], dtype)
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
     def replace(self, column: str, mapping: dict[Any, Any]) -> "GeoPromptFrame":
@@ -2639,20 +2833,25 @@ class GeoPromptFrame:
     def merge(
         self,
         other: "GeoPromptFrame",
-        on: str,
+        on: str | Sequence[str],
         how: str = "inner",
         rsuffix: str = "right",
         *,
+        lsuffix: str = "left",
+        suffixes: tuple[str, str] | None = None,
         indicator: bool = False,
         validate: str | None = None,
     ) -> "GeoPromptFrame":
-        """Merge with another frame on a shared key column.
+        """Merge with another frame on shared key column(s).
 
         Args:
             other: Right frame.
-            on: Column name to join on.
+            on: Column name or list of column names to join on.
             how: ``"inner"`` or ``"left"``.
-            rsuffix: Suffix for colliding right column names.
+            rsuffix: Suffix for colliding right column names (default).
+            lsuffix: Suffix for colliding left column names.
+            suffixes: Explicit ``(left_suffix, right_suffix)`` tuple.  When
+                provided, overrides *lsuffix* / *rsuffix*.
             indicator: If ``True``, add a ``_merge`` column showing whether
                 each row came from ``"both"`` or ``"left_only"``.
             validate: Optional join-cardinality check: ``"one_to_one"``,
@@ -2661,19 +2860,30 @@ class GeoPromptFrame:
         Returns:
             New :class:`GeoPromptFrame`.
         """
-        self._require_column(on)
-        other._require_column(on)
+        if suffixes is not None:
+            lsuffix, rsuffix = suffixes
+
+        on_cols: list[str] = [on] if isinstance(on, str) else list(on)
+        for col in on_cols:
+            self._require_column(col)
+            other._require_column(col)
+
         if how not in {"inner", "left"}:
             raise ValueError("how must be 'inner' or 'left'")
         if validate not in {None, "one_to_one", "one_to_many", "many_to_one"}:
             raise ValueError("validate must be one of: None, 'one_to_one', 'one_to_many', 'many_to_one'")
 
-        left_counts: dict[Any, int] = {}
+        def _key(row: Record) -> tuple:
+            return tuple(row.get(c) for c in on_cols)
+
+        left_counts: dict[tuple, int] = {}
         for row in self._rows:
-            left_counts[row.get(on)] = left_counts.get(row.get(on), 0) + 1
-        right_counts: dict[Any, int] = {}
+            k = _key(row)
+            left_counts[k] = left_counts.get(k, 0) + 1
+        right_counts: dict[tuple, int] = {}
         for row in other._rows:
-            right_counts[row.get(on)] = right_counts.get(row.get(on), 0) + 1
+            k = _key(row)
+            right_counts[k] = right_counts.get(k, 0) + 1
 
         if validate == "one_to_one":
             if any(count > 1 for count in left_counts.values()) or any(count > 1 for count in right_counts.values()):
@@ -2685,32 +2895,49 @@ class GeoPromptFrame:
             if any(count > 1 for count in right_counts.values()):
                 raise ValueError("merge validation failed: expected many-to-one keys with unique right keys")
 
-        right_index: dict[Any, list[Record]] = {}
+        right_index: dict[tuple, list[Record]] = {}
         for row in other._rows:
-            right_index.setdefault(row[on], []).append(row)
+            right_index.setdefault(_key(row), []).append(row)
 
-        right_columns = [c for c in other.columns if c != on and c != other.geometry_column]
+        on_set = set(on_cols)
+        right_columns = [c for c in other.columns if c not in on_set and c != other.geometry_column]
+        collision_cols = set(self.columns) & set(right_columns)
+
+        def _suffixed(col: str, sfx: str) -> str:
+            sep = "" if sfx.startswith("_") else "_"
+            return f"{col}{sep}{sfx}"
+
         rows: list[Record] = []
         for left_row in self._rows:
-            key = left_row.get(on)
+            key = _key(left_row)
             right_rows = right_index.get(key, [])
             if not right_rows and how == "left":
-                merged = dict(left_row)
+                merged: Record = {}
+                for col, val in left_row.items():
+                    target = _suffixed(col, lsuffix) if col in collision_cols else col
+                    merged[target] = val
                 for col in right_columns:
-                    target = col if col not in merged else f"{col}_{rsuffix}"
+                    target = _suffixed(col, rsuffix) if col in collision_cols else col
                     merged[target] = None
                 if indicator:
                     merged["_merge"] = "left_only"
                 rows.append(merged)
             for right_row in right_rows:
-                merged = dict(left_row)
+                merged = {}
+                for col, val in left_row.items():
+                    target = _suffixed(col, lsuffix) if col in collision_cols else col
+                    merged[target] = val
                 for col in right_columns:
-                    target = col if col not in merged else f"{col}_{rsuffix}"
+                    target = _suffixed(col, rsuffix) if col in collision_cols else col
                     merged[target] = right_row[col]
                 if indicator:
                     merged["_merge"] = "both"
                 rows.append(merged)
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+
+        geom_col = self.geometry_column
+        if geom_col in collision_cols:
+            geom_col = _suffixed(geom_col, lsuffix)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=geom_col, crs=self.crs)
 
     @staticmethod
     def concat(frames: Sequence["GeoPromptFrame"]) -> "GeoPromptFrame":
@@ -3001,4 +3228,17 @@ class GroupedGeoPromptFrame:
         )
 
 
-__all__ = ["Bounds", "GeoPromptFrame", "GeoPromptSpatialIndex", "GroupedGeoPromptFrame"]
+geopromptframe = GeoPromptFrame
+geopromptspatialindex = GeoPromptSpatialIndex
+groupedgeopromptframe = GroupedGeoPromptFrame
+
+
+__all__ = [
+    "Bounds",
+    "GeoPromptFrame",
+    "GeoPromptSpatialIndex",
+    "GroupedGeoPromptFrame",
+    "geopromptframe",
+    "geopromptspatialindex",
+    "groupedgeopromptframe",
+]

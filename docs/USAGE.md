@@ -147,9 +147,9 @@ matrix = router.od_cost_matrix(["A"], ["C"])
 ### Geometry trust and repair
 
 ```python
-from geoprompt import GeoPromptFrame
+from geoprompt import geopromptframe
 
-frame = GeoPromptFrame.from_records([
+frame = geopromptframe.from_records([
     {
         "site_id": "bad-line",
         "geometry": {"type": "LineString", "coordinates": [(0, 0), (0, 0), (1, 0)]},
