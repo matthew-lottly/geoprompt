@@ -12,14 +12,14 @@ from __future__ import annotations
 import importlib
 import math as _math
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, Union
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_type, geometry_within
 from .table import PromptTable
 
 
-RasterLike = dict[str, Any] | str | Path
+RasterLike = Union[dict, str, Path]
 
 
 def _load_rasterio() -> Any:

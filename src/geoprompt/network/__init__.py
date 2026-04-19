@@ -86,6 +86,22 @@ from .utility import (
     trace_water_pressure_zones,
     utility_outage_isolation,
 )
+from .graph_algorithms import (
+    astar_shortest_path,
+    bellman_ford_shortest_path,
+    create_network_dataset,
+    find_articulation_points,
+    find_bridges,
+    find_cycles,
+    floyd_warshall,
+    k_shortest_paths,
+    max_flow_min_cut,
+    minimum_spanning_tree,
+    partition_network,
+    strongly_connected_components,
+    trace_connected,
+    weakly_connected_components,
+)
 
 __all__ = [
     # Core types and utilities
@@ -160,4 +176,19 @@ __all__ = [
     "trace_electric_feeder",
     "trace_water_pressure_zones",
     "utility_outage_isolation",
+    # Graph algorithms
+    "astar_shortest_path",
+    "bellman_ford_shortest_path",
+    "create_network_dataset",
+    "find_articulation_points",
+    "find_bridges",
+    "find_cycles",
+    "floyd_warshall",
+    "k_shortest_paths",
+    "max_flow_min_cut",
+    "minimum_spanning_tree",
+    "partition_network",
+    "strongly_connected_components",
+    "trace_connected",
+    "weakly_connected_components",
 ]
