@@ -53,6 +53,13 @@ jobs:
       - name: Run comparison corpus
         run: python -m geoprompt.compare
 
+      - name: Run flagship persona examples
+        run: |
+          python examples/personas/analyst_resilience_screen.py
+          python examples/personas/executive_briefing_pack.py
+          python examples/personas/operations_dispatch.py
+          python examples/personas/database_roundtrip_demo.py
+
       - name: Build distribution artifacts
         run: python -m build
 

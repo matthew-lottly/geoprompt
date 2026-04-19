@@ -7,11 +7,10 @@ matplotlib) are optional and lazily imported.
 from __future__ import annotations
 
 import importlib
-import json
 from pathlib import Path
 from typing import Any, Sequence
 
-from .geometry import Geometry, geometry_bounds, geometry_centroid, geometry_type
+from .geometry import Geometry, geometry_bounds, geometry_type
 from .tools import compare_scenarios
 
 

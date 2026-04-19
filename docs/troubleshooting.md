@@ -75,7 +75,26 @@ save_map(m, "outputs/map.html")
 - install DuckDB separately if needed
 - make sure the spatial extension is available in the runtime environment
 
-## 6. Tests or examples behave differently across environments
+## 6. Notebooks keep connecting or appear to hang on Windows
+
+### Symptoms
+- the kernel looks like it is connecting forever
+- even a tiny cell seems stuck
+- the same code works fine from the terminal or test suite
+
+### Fix
+1. use the project virtual environment
+2. install the notebook profile or dev profile
+3. run the timed notebook executor to surface real errors quickly
+
+```bash
+pip install -e .[notebook]
+python examples/notebooks/execute_notebooks_with_timeout.py --timeout 20
+```
+
+GeoPrompt now includes a small Windows startup hook that switches the event loop policy used by notebook kernels to the selector-based path, which avoids common pyzmq notebook hangs.
+
+## 7. Tests or examples behave differently across environments
 
 ### Recommended workflow
 1. create a fresh virtual environment
@@ -88,7 +107,7 @@ pip install -e .[dev]
 pytest
 ```
 
-## 7. Slow performance on large workloads
+## 8. Slow performance on large workloads
 
 ### Tips
 - use workload presets where available
@@ -96,7 +115,7 @@ pytest
 - limit columns during ingest when possible
 - benchmark with the included corpus before scaling to production data
 
-## 8. Still stuck?
+## 9. Still stuck?
 
 When reporting an issue, include:
 - Python version

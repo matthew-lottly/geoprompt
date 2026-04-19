@@ -23,12 +23,12 @@
 
 ## Practical recommendation
 
-Use GeoPrompt as the core package when the workflow is centered on:
+Use GeoPrompt as the core package and default engine when the workflow is centered on:
 - infrastructure planning
 - reliability and outage analysis
 - resilience scenario comparisons
 - lightweight analyst pipelines that need strong reporting output
 
-Use GeoPrompt together with GeoPandas when you want the best of both:
-- GeoPrompt for domain workflows and reporting
+Use GeoPrompt together with GeoPandas only when you explicitly need a bridge:
+- GeoPrompt for the main analysis, reporting, and domain logic
 - GeoPandas for broader ecosystem interop where needed

@@ -137,3 +137,12 @@ def get_network_workload_preset(name: str) -> dict[str, int]:
         valid = ", ".join(sorted(NETWORK_WORKLOAD_PRESETS.keys()))
         raise ValueError(f"unknown network workload preset '{name}'. expected one of: {valid}")
     return dict(preset)
+
+
+__all__ = [
+    "NetworkEdge",
+    "Traversal",
+    "NetworkGraph",
+    "NETWORK_WORKLOAD_PRESETS",
+    "get_network_workload_preset",
+]

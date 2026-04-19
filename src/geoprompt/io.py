@@ -792,6 +792,25 @@ def iter_data(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterable[GeoPromptFrame]:
     """Yield data as chunked ``GeoPromptFrame`` batches for large datasets."""
+
+    emitted_chunks = 0
+    emitted_rows = 0
+
+    def _notify(chunk: GeoPromptFrame, source: str = "") -> None:
+        nonlocal emitted_chunks, emitted_rows
+        emitted_chunks += 1
+        emitted_rows += len(chunk)
+        if progress_callback is not None:
+            progress_callback(
+                {
+                    "event": "chunk",
+                    "path": source,
+                    "chunk_index": emitted_chunks,
+                    "chunk_rows": len(chunk),
+                    "rows_emitted": emitted_rows,
+                }
+            )
+
     if _is_url_source(path):
         frame = read_service_url(
             str(path),
@@ -808,7 +827,7 @@ def iter_data(
             chunk_size=chunk_size,
             limit_rows=limit_rows,
         ):
-            _notify(chunk)
+            _notify(chunk, source=str(path))
             yield chunk
         return
 
@@ -820,24 +839,6 @@ def iter_data(
         chunk_size=chunk_size,
     )
     suffix = data_path.suffix.lower()
-
-    emitted_chunks = 0
-    emitted_rows = 0
-
-    def _notify(chunk: GeoPromptFrame) -> None:
-        nonlocal emitted_chunks, emitted_rows
-        emitted_chunks += 1
-        emitted_rows += len(chunk)
-        if progress_callback is not None:
-            progress_callback(
-                {
-                    "event": "chunk",
-                    "path": str(data_path),
-                    "chunk_index": emitted_chunks,
-                    "chunk_rows": len(chunk),
-                    "rows_emitted": emitted_rows,
-                }
-            )
 
     if suffix in {".json", ".geojson"}:
         payload = _read_json(data_path)
@@ -1670,7 +1671,7 @@ def _geometry_to_wkt(geom: dict) -> str:
                 pts = ", ".join(f"{c[0]} {c[1]}" for c in poly)
                 polys.append(f"(({pts}))")
         return f"MULTIPOLYGON ({', '.join(polys)})"
-    return f"GEOMETRYCOLLECTION EMPTY"
+    return "GEOMETRYCOLLECTION EMPTY"
 
 
 def schema_report(records: list[dict[str, object]] | Any) -> dict[str, Any]:
@@ -1836,51 +1837,65 @@ def apply_schema_mapping(
 
 
 def read_cloud_json(
-    url: str,
+    url: str | Path,
     *,
     geometry_column: str = "geometry",
     headers: dict[str, str] | None = None,
-) -> list[dict[str, Any]]:
-    """Read a JSON or GeoJSON file from a cloud object URL.
+) -> Any:
+    """Read a JSON or GeoJSON file from a cloud object URL or local path.
 
     Supports S3 pre-signed URLs, Azure Blob SAS URLs, GCS public URLs,
-    or any HTTPS endpoint returning JSON.  This is a convenience wrapper
-    around URL fetching with optional headers.
-
-    Args:
-        url: Full URL to the JSON/GeoJSON resource.
-        geometry_column: Name for the geometry column.
-        headers: Optional HTTP headers (e.g. for auth tokens).
-
-    Returns:
-        List of record dicts.
+    local files, or any HTTPS endpoint returning JSON.
     """
+    import json as _json
     from urllib.request import Request, urlopen
 
-    req = Request(url)
-    if headers:
-        for key, val in headers.items():
-            req.add_header(key, val)
+    target = str(url)
+    parsed = urlparse(target)
+    is_local_path = parsed.scheme in {"", "file"} or (len(parsed.scheme) == 1 and parsed.scheme.isalpha())
+    if is_local_path:
+        path = Path(parsed.path if parsed.scheme == "file" else target)
+        payload = _json.loads(path.read_text(encoding="utf-8"))
+    else:
+        req = Request(target)
+        if headers:
+            for key, val in headers.items():
+                req.add_header(key, val)
+        with urlopen(req, timeout=60) as resp:  # noqa: S310
+            raw = resp.read()
+        payload = _json.loads(raw)
 
-    with urlopen(req, timeout=60) as resp:  # noqa: S310
-        raw = resp.read()
-
-    import json as _json
-    payload = _json.loads(raw)
-
-    # GeoJSON FeatureCollection
     if isinstance(payload, dict) and payload.get("type") == "FeatureCollection":
         return _records_from_payload(payload, geometry_column)
-
-    # Plain list of records
     if isinstance(payload, list):
         return list(payload)
-
-    # ArcGIS-style features
     if isinstance(payload, dict) and "features" in payload:
         return _records_from_service_payload(payload, geometry_column)
+    return payload
 
-    return [payload]
+
+def write_cloud_json(
+    path: str | Path,
+    payload: Any,
+    *,
+    indent: int = 2,
+) -> str:
+    """Write JSON to a local path or fsspec-supported object-store path."""
+    target = str(path)
+    parsed = urlparse(target)
+    if parsed.scheme in {"s3", "gs", "az", "abfs"}:
+        try:
+            import fsspec  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover - optional dependency path
+            raise RuntimeError("Install fsspec plus the relevant cloud backend to write remote object-store paths") from exc
+        with fsspec.open(target, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=indent)
+        return target
+
+    local_path = Path(parsed.path if parsed.scheme == "file" else target)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_text(json.dumps(payload, indent=indent), encoding="utf-8")
+    return str(local_path)
 
 
 def read_zipped_shapefile(
@@ -1984,6 +1999,7 @@ __all__ = [
     "schema_report",
     "validate_schema",
     "WORKLOAD_PRESETS",
+    "write_cloud_json",
     "write_data",
     "write_excel",
     "write_geojson",

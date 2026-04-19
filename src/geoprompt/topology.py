@@ -5,7 +5,7 @@ need more structure than basic geometry validation alone.
 """
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from .frame import GeoPromptFrame
 from .geometry import (

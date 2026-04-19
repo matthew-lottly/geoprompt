@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.8
+
+- Replaced placeholder gallery figures with data-driven output renders generated from checked-in sample features and scenario metrics.
+- Hardened example scripts so they create their own output directory and resolve repository-relative paths reliably.
+- Expanded notebook and docs quality work to support a full audit pass across examples, markdown guides, and publishable proof artifacts.
+- Added a timed notebook execution helper and a Windows event-loop startup fix to avoid notebook kernels hanging indefinitely in the project venv.
+
 ## 0.1.7
 
 - Added workload preset APIs for IO and network batch workflows, including `read_data_with_preset(...)`, `iter_data_with_preset(...)`, `od_cost_matrix_with_preset(...)`, and `utility_bottlenecks_with_preset(...)`.

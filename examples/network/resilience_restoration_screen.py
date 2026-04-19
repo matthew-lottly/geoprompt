@@ -23,8 +23,12 @@ Shows how to rank single-source dependency risk, quantify outage impact,
 and stage restoration repairs with a stakeholder-ready HTML summary.
 """
 
+ROOT = Path(__file__).resolve().parents[2]
+OUTPUT_DIR = ROOT / "outputs"
+
 
 def main() -> None:
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     graph = build_network_graph(
         [
             {"edge_id": "e1", "from_node": "SRC", "to_node": "A", "cost": 1.0},
@@ -90,8 +94,8 @@ def main() -> None:
             ),
         }
     )
-    output_path = export_resilience_summary_report(report, Path("outputs") / "resilience-summary.html")
-    portfolio_path = export_resilience_portfolio_report(portfolio, Path("outputs") / "resilience-portfolio.html")
+    output_path = export_resilience_summary_report(report, OUTPUT_DIR / "resilience-summary.html")
+    portfolio_path = export_resilience_portfolio_report(portfolio, OUTPUT_DIR / "resilience-portfolio.html")
 
     print("Top redundancy rows:")
     for row in redundancy[:3]:

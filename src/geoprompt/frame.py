@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
 
 from .equations import DistanceMethod, area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
-from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, repair_geometry, transform_geometry, validate_geometry
+from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, repair_geometry, validate_geometry
 from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
 from .table import PromptTable
 from .tools import batch_accessibility_scores, vectorized_gravity_interaction, vectorized_service_probability
@@ -130,6 +130,31 @@ class Bounds:
     min_y: float
     max_x: float
     max_y: float
+
+
+class GeoPromptGeometryAccessor:
+    """Pandas-like geometry accessor for row-wise geometry metrics."""
+
+    def __init__(self, frame: "GeoPromptFrame") -> None:
+        self._frame = frame
+
+    def area(self) -> list[float]:
+        return [geometry_area(row[self._frame.geometry_column]) for row in self._frame]
+
+    def length(self) -> list[float]:
+        return [geometry_length(row[self._frame.geometry_column]) for row in self._frame]
+
+    def centroid(self) -> list[Coordinate]:
+        return [geometry_centroid(row[self._frame.geometry_column]) for row in self._frame]
+
+    def bounds(self) -> list[tuple[float, float, float, float]]:
+        return [geometry_bounds(row[self._frame.geometry_column]) for row in self._frame]
+
+    def validity(self) -> list[dict[str, object]]:
+        return [validate_geometry(row[self._frame.geometry_column]) for row in self._frame]
+
+    def types(self) -> list[str]:
+        return [geometry_type(row[self._frame.geometry_column]) for row in self._frame]
 
 
 @dataclass(frozen=True)
@@ -330,6 +355,11 @@ class GeoPromptFrame:
         """Return the column names of the first row, or an empty list if the frame is empty."""
         return list(self._rows[0].keys()) if self._rows else []
 
+    @property
+    def geom(self) -> GeoPromptGeometryAccessor:
+        """Return a geometry accessor for row-wise geometry metrics and validation."""
+        return GeoPromptGeometryAccessor(self)
+
     def head(self, count: int = 5) -> list[Record]:
         """Return the first ``count`` rows as a list of dicts.
 
@@ -424,7 +454,6 @@ class GeoPromptFrame:
         ``geometry_types``, ``bounds``, and per-column ``column_stats`` with
         dtype/null_count/unique_count and numeric min/max/mean when applicable.
         """
-        from collections import Counter as _Counter
         geom_types: set[str] = set()
         col_values: dict[str, list[Any]] = {col: [] for col in self.columns}
         for row in self._rows:
@@ -1465,20 +1494,11 @@ class GeoPromptFrame:
         if self.crs == normalized_target_crs:
             return GeoPromptFrame(rows=self.to_records(), geometry_column=self.geometry_column, crs=self.crs)
 
-        try:
-            pyproj = importlib.import_module("pyproj")
-        except ImportError as exc:
-            raise RuntimeError("Install projection support with 'pip install -e .[projection]' before calling to_crs.") from exc
-
-        transformer = pyproj.Transformer.from_crs(self.crs, normalized_target_crs, always_xy=True)
-
-        def reproject_coordinate(coordinate: Coordinate) -> Coordinate:
-            x_value, y_value = transformer.transform(coordinate[0], coordinate[1])
-            return (float(x_value), float(y_value))
+        from .crs import reproject_geometry
 
         rows = self.to_records()
         for row in rows:
-            row[self.geometry_column] = transform_geometry(row[self.geometry_column], reproject_coordinate)
+            row[self.geometry_column] = reproject_geometry(row[self.geometry_column], self.crs, normalized_target_crs)
         return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=normalized_target_crs)
 
     def spatial_join(
@@ -3236,6 +3256,7 @@ groupedgeopromptframe = GroupedGeoPromptFrame
 __all__ = [
     "Bounds",
     "GeoPromptFrame",
+    "GeoPromptGeometryAccessor",
     "GeoPromptSpatialIndex",
     "GroupedGeoPromptFrame",
     "geopromptframe",

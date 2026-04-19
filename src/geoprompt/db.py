@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import importlib
 import json
-from pathlib import Path
 from typing import Any, Sequence
 
 from .geometry import Geometry, normalize_geometry
@@ -197,6 +196,75 @@ def write_duckdb(
 
 
 # ---------------------------------------------------------------------------
+# SpatiaLite / SQLite helpers
+# ---------------------------------------------------------------------------
+
+
+def read_spatialite(
+    query: str,
+    database: str,
+    geometry_column: str = "geometry",
+) -> list[Record]:
+    """Read rows from a SQLite or SpatiaLite-style database.
+
+    The geometry column may contain WKT or GeoJSON text.
+    """
+    import sqlite3
+
+    conn = sqlite3.connect(database)
+    try:
+        cursor = conn.execute(query)
+        columns = [desc[0] for desc in cursor.description]
+        rows: list[Record] = []
+        for db_row in cursor.fetchall():
+            item: Record = {}
+            for col, val in zip(columns, db_row):
+                if col == geometry_column:
+                    item["geometry"] = _parse_wkt_or_geojson(val)
+                else:
+                    item[col] = val
+            rows.append(item)
+        return rows
+    finally:
+        conn.close()
+
+
+def write_spatialite(
+    records: Sequence[Record],
+    table_name: str,
+    database: str,
+    geometry_column: str = "geometry",
+    if_exists: str = "replace",
+) -> int:
+    """Write rows to a SQLite or SpatiaLite-style database using WKT text."""
+    if not records:
+        return 0
+
+    import sqlite3
+
+    conn = sqlite3.connect(database)
+    try:
+        non_geom_cols = [k for k in records[0] if k != geometry_column]
+        with conn:
+            if if_exists == "replace":
+                conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+                col_defs = ", ".join(f'"{col}" TEXT' for col in non_geom_cols)
+                conn.execute(f"CREATE TABLE {table_name} ({col_defs}, " + geometry_column + " TEXT)")
+
+            for record in records:
+                values = [str(record.get(col, "")) for col in non_geom_cols]
+                wkt = _geometry_to_wkt(record[geometry_column])
+                placeholders = ", ".join(["?"] * (len(non_geom_cols) + 1))
+                conn.execute(
+                    f"INSERT INTO {table_name} VALUES ({placeholders})",
+                    values + [wkt],
+                )
+        return len(records)
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
@@ -271,9 +339,27 @@ def _geometry_to_geojson(geometry: Geometry) -> dict[str, Any]:
     return geometry_to_geojson(geometry)
 
 
+def _geometry_to_wkt(geometry: Geometry) -> str:
+    """Convert internal geometry to a minimal WKT representation."""
+    geom = normalize_geometry(geometry)
+    gtype = geom["type"]
+    coords = geom["coordinates"]
+    if gtype == "Point":
+        return f"POINT ({coords[0]} {coords[1]})"
+    if gtype == "LineString":
+        body = ", ".join(f"{x} {y}" for x, y in coords)
+        return f"LINESTRING ({body})"
+    if gtype == "Polygon":
+        body = ", ".join(f"{x} {y}" for x, y in coords)
+        return f"POLYGON (({body}))"
+    return json.dumps(_geometry_to_geojson(geom))
+
+
 __all__ = [
     "read_duckdb",
     "read_postgis",
+    "read_spatialite",
     "write_duckdb",
     "write_postgis",
+    "write_spatialite",
 ]

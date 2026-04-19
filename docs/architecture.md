@@ -12,7 +12,7 @@ This project models Geoprompt as a reusable package rather than a single spatial
 4. Frame methods expose reusable spatial analysis primitives such as nearest neighbors, nearest joins, nearest assignment workflows, assignment summaries, map-window queries, radius queries, within-distance predicates, reprojection, spatial joins, proximity joins, buffer generation, buffer joins, coverage summaries, dissolve, clip operations, overlay intersections, interaction tables, area similarity tables, and corridor accessibility.
 5. Custom GeoPrompt equations score decay, influence, corridor strength, area similarity, and pairwise interaction.
 6. The demo CLI exports a JSON report, GeoJSON feature export, and a real review plot from the same package code.
-7. The comparison CLI checks core Geoprompt outputs against Shapely and GeoPandas across a built-in corpus and records timing snapshots.
+7. The comparison CLI optionally checks core Geoprompt outputs against Shapely and GeoPandas across a built-in corpus and records timing snapshots.
 
 ## Package Shape
 
@@ -30,6 +30,6 @@ This project models Geoprompt as a reusable package rather than a single spatial
 - CRS strings are supported, but full CRS objects and metadata models are not
 - No pandas dependency yet
 - Overlay support currently depends on Shapely and covers dissolve, clip, and pairwise intersections first
-- GeoPandas and Shapely remain the reference engines for validation until Geoprompt covers more spatial operations
+- External libraries are used only as optional validation and bridge layers while Geoprompt continues expanding its own native surface
 
 Those constraints are intentional. They keep the package easy to reason about while leaving room for later expansion into richer geometry and table behavior.

@@ -42,7 +42,8 @@ def main() -> None:
         metadata={"scenario_id": "network-reinforcement-demo"},
     )
 
-    output_dir = Path("outputs")
+    output_dir = Path(__file__).resolve().parents[1] / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
     for filename in ["scenario-report.json", "scenario-report.csv", "scenario-report.md", "scenario-report.html"]:
         destination = output_dir / filename
         gp.export_scenario_report(report, destination)

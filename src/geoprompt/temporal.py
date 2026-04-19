@@ -1,8 +1,10 @@
 """Lightweight temporal analysis helpers for GeoPrompt workflows."""
 from __future__ import annotations
 
+import math
+import random
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Sequence
 
 
@@ -83,4 +85,491 @@ def rolling_window_stats(
     return results
 
 
-__all__ = ["resample_time_series", "rolling_window_stats", "sort_by_time"]
+# ---------------------------------------------------------------------------
+# Section I: 3D, Temporal, and Utility-Network Expansion
+# ---------------------------------------------------------------------------
+
+
+# --- 3D Geometry Support ---
+
+
+def geometry_3d(
+    coordinates: Sequence[Sequence[float]],
+    geometry_type: str = "Point",
+) -> dict[str, Any]:
+    """Create a Z-aware GeoJSON-like geometry.
+
+    Coordinates should include Z values: ``[(x, y, z), ...]``.
+    """
+    if geometry_type == "Point":
+        return {"type": "Point", "coordinates": list(coordinates[0]) if coordinates else [0, 0, 0]}
+    if geometry_type == "LineString":
+        return {"type": "LineString", "coordinates": [list(c) for c in coordinates]}
+    if geometry_type == "Polygon":
+        return {"type": "Polygon", "coordinates": [[list(c) for c in coordinates]]}
+    raise ValueError(f"unsupported geometry type: {geometry_type}")
+
+
+def extract_z_values(geometry: dict[str, Any]) -> list[float]:
+    """Extract Z values from a Z-aware geometry."""
+    coords = geometry.get("coordinates", [])
+    zs: list[float] = []
+    _collect_z(coords, zs)
+    return zs
+
+
+def _collect_z(coords: Any, zs: list[float]) -> None:
+    if isinstance(coords, (list, tuple)) and coords and isinstance(coords[0], (int, float)):
+        if len(coords) >= 3:
+            zs.append(float(coords[2]))
+    elif isinstance(coords, (list, tuple)):
+        for c in coords:
+            _collect_z(c, zs)
+
+
+def geometry_3d_bounds(geometry: dict[str, Any]) -> dict[str, float]:
+    """Return 3D bounding box of a Z-aware geometry."""
+    xs: list[float] = []
+    ys: list[float] = []
+    zs: list[float] = []
+    _collect_xyz(geometry.get("coordinates", []), xs, ys, zs)
+    return {
+        "min_x": min(xs) if xs else 0.0,
+        "min_y": min(ys) if ys else 0.0,
+        "min_z": min(zs) if zs else 0.0,
+        "max_x": max(xs) if xs else 0.0,
+        "max_y": max(ys) if ys else 0.0,
+        "max_z": max(zs) if zs else 0.0,
+    }
+
+
+def _collect_xyz(coords: Any, xs: list, ys: list, zs: list) -> None:
+    if isinstance(coords, (list, tuple)) and coords and isinstance(coords[0], (int, float)):
+        xs.append(float(coords[0]))
+        ys.append(float(coords[1]))
+        if len(coords) >= 3:
+            zs.append(float(coords[2]))
+    elif isinstance(coords, (list, tuple)):
+        for c in coords:
+            _collect_xyz(c, xs, ys, zs)
+
+
+# --- Surface Sampling & Profile ---
+
+
+def surface_profile(
+    route_points: Sequence[tuple[float, float]],
+    elevation_func: Any,
+) -> list[dict[str, float]]:
+    """Extract an elevation profile along a route.
+
+    *elevation_func* takes (x, y) and returns a z value.
+
+    Returns list of dicts with ``"distance"``, ``"x"``, ``"y"``, ``"z"``.
+    """
+    profile: list[dict[str, float]] = []
+    cum_dist = 0.0
+    for i, (x, y) in enumerate(route_points):
+        if i > 0:
+            cum_dist += math.hypot(x - route_points[i - 1][0], y - route_points[i - 1][1])
+        z = elevation_func(x, y)
+        profile.append({"distance": cum_dist, "x": x, "y": y, "z": float(z)})
+    return profile
+
+
+def surface_sample_grid(
+    bounds: tuple[float, float, float, float],
+    elevation_func: Any,
+    *,
+    cell_size: float = 1.0,
+) -> dict[str, Any]:
+    """Sample elevation over a grid, returning a raster-like dict."""
+    min_x, min_y, max_x, max_y = bounds
+    cols = max(1, int((max_x - min_x) / cell_size))
+    rows = max(1, int((max_y - min_y) / cell_size))
+    grid: list[list[float]] = []
+    for r in range(rows):
+        row_vals: list[float] = []
+        y = max_y - (r + 0.5) * cell_size
+        for c in range(cols):
+            x = min_x + (c + 0.5) * cell_size
+            row_vals.append(float(elevation_func(x, y)))
+        grid.append(row_vals)
+    return {"data": grid, "transform": (min_x, max_y, cell_size, cell_size), "rows": rows, "cols": cols}
+
+
+# --- Voxel / Volumetric ---
+
+
+def voxel_grid(
+    points_3d: Sequence[tuple[float, float, float]],
+    values: Sequence[float],
+    *,
+    cell_size: float = 1.0,
+) -> dict[str, Any]:
+    """Create a simple voxel grid from 3D point data.
+
+    Returns dict with ``"voxels"`` (list of (ix, iy, iz, value) tuples)
+    and grid metadata.
+    """
+    if not points_3d:
+        return {"voxels": [], "cell_size": cell_size}
+
+    xs = [p[0] for p in points_3d]
+    ys = [p[1] for p in points_3d]
+    zs = [p[2] for p in points_3d]
+    origin = (min(xs), min(ys), min(zs))
+
+    buckets: dict[tuple[int, int, int], list[float]] = {}
+    for (x, y, z), v in zip(points_3d, values):
+        ix = int((x - origin[0]) / cell_size)
+        iy = int((y - origin[1]) / cell_size)
+        iz = int((z - origin[2]) / cell_size)
+        buckets.setdefault((ix, iy, iz), []).append(v)
+
+    voxels = [(ix, iy, iz, sum(vs) / len(vs)) for (ix, iy, iz), vs in sorted(buckets.items())]
+    return {"voxels": voxels, "origin": origin, "cell_size": cell_size, "voxel_count": len(voxels)}
+
+
+# --- Temporal Joins & Windowing ---
+
+
+def temporal_join(
+    left: Sequence[Record],
+    right: Sequence[Record],
+    *,
+    left_time: str,
+    right_time: str,
+    tolerance: str = "1h",
+    join_type: str = "nearest",
+) -> list[Record]:
+    """Join two record sets by temporal proximity.
+
+    *tolerance* is a string like ``"30m"``, ``"1h"``, ``"1d"``.
+    *join_type*: ``"nearest"`` matches closest in time; ``"window"`` keeps
+    all within tolerance.
+    """
+    tol_seconds = _parse_duration(tolerance)
+    results: list[Record] = []
+
+    for lrec in left:
+        lt = _parse_timestamp(lrec.get(left_time))
+        best_rec: Record | None = None
+        best_diff = float("inf")
+
+        matches: list[Record] = []
+        for rrec in right:
+            rt = _parse_timestamp(rrec.get(right_time))
+            diff = abs((lt - rt).total_seconds())
+            if diff <= tol_seconds:
+                matches.append(rrec)
+                if diff < best_diff:
+                    best_diff = diff
+                    best_rec = rrec
+
+        if join_type == "nearest" and best_rec:
+            merged = {**lrec, **{f"right_{k}": v for k, v in best_rec.items()}}
+            merged["_time_diff_seconds"] = best_diff
+            results.append(merged)
+        elif join_type == "window":
+            for m in matches:
+                merged = {**lrec, **{f"right_{k}": v for k, v in m.items()}}
+                results.append(merged)
+
+    return results
+
+
+def temporal_window(
+    records: Sequence[Record],
+    *,
+    time_column: str,
+    window_size: str = "1h",
+    step: str | None = None,
+) -> list[list[Record]]:
+    """Sliding temporal window over records.
+
+    Returns list of windows (each a list of records).
+    """
+    win_sec = _parse_duration(window_size)
+    step_sec = _parse_duration(step) if step else win_sec
+    sorted_recs = sorted(records, key=lambda r: _parse_timestamp(r.get(time_column)))
+    if not sorted_recs:
+        return []
+
+    start = _parse_timestamp(sorted_recs[0].get(time_column))
+    end = _parse_timestamp(sorted_recs[-1].get(time_column))
+
+    windows: list[list[Record]] = []
+    current = start
+    while current <= end:
+        win_end = current + timedelta(seconds=win_sec)
+        window = [
+            r for r in sorted_recs
+            if current <= _parse_timestamp(r.get(time_column)) < win_end
+        ]
+        windows.append(window)
+        current += timedelta(seconds=step_sec)
+
+    return windows
+
+
+def _parse_duration(s: str) -> float:
+    """Parse a duration string like '30m', '1h', '2d' to seconds."""
+    s = s.strip()
+    units = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    if s[-1] in units:
+        return float(s[:-1]) * units[s[-1]]
+    return float(s)
+
+
+def animation_frames(
+    records: Sequence[Record],
+    *,
+    time_column: str,
+    frame_duration: str = "1h",
+) -> list[dict[str, Any]]:
+    """Prepare animation-ready frames from temporal data.
+
+    Returns a list of frame dicts with ``"start"``, ``"end"``, ``"records"``.
+    """
+    windows = temporal_window(records, time_column=time_column, window_size=frame_duration)
+    sorted_recs = sorted(records, key=lambda r: _parse_timestamp(r.get(time_column)))
+    if not sorted_recs:
+        return []
+
+    start = _parse_timestamp(sorted_recs[0].get(time_column))
+    dur = _parse_duration(frame_duration)
+    frames: list[dict[str, Any]] = []
+    for i, window in enumerate(windows):
+        frame_start = start + timedelta(seconds=i * dur)
+        frames.append({
+            "frame": i,
+            "start": frame_start.isoformat(),
+            "end": (frame_start + timedelta(seconds=dur)).isoformat(),
+            "record_count": len(window),
+            "records": window,
+        })
+    return frames
+
+
+# --- Event Tracking ---
+
+
+class EventTracker:
+    """Track outages, incidents, and restoration events over time."""
+
+    def __init__(self) -> None:
+        self._events: list[dict[str, Any]] = []
+
+    def add_event(
+        self,
+        event_type: str,
+        *,
+        start_time: str,
+        end_time: str | None = None,
+        asset_id: str | None = None,
+        severity: str = "medium",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        self._events.append({
+            "event_type": event_type,
+            "start_time": start_time,
+            "end_time": end_time,
+            "asset_id": asset_id,
+            "severity": severity,
+            "duration_hours": self._duration_hours(start_time, end_time),
+            "metadata": metadata or {},
+        })
+
+    def _duration_hours(self, start: str, end: str | None) -> float | None:
+        if not end:
+            return None
+        try:
+            s = _parse_timestamp(start)
+            e = _parse_timestamp(end)
+            return (e - s).total_seconds() / 3600
+        except Exception:
+            return None
+
+    def get_events(
+        self,
+        *,
+        event_type: str | None = None,
+        asset_id: str | None = None,
+        severity: str | None = None,
+    ) -> list[dict[str, Any]]:
+        results = self._events
+        if event_type:
+            results = [e for e in results if e["event_type"] == event_type]
+        if asset_id:
+            results = [e for e in results if e["asset_id"] == asset_id]
+        if severity:
+            results = [e for e in results if e["severity"] == severity]
+        return results
+
+    def summary(self) -> dict[str, Any]:
+        by_type: dict[str, int] = {}
+        by_severity: dict[str, int] = {}
+        durations: list[float] = []
+        for e in self._events:
+            by_type[e["event_type"]] = by_type.get(e["event_type"], 0) + 1
+            by_severity[e["severity"]] = by_severity.get(e["severity"], 0) + 1
+            if e["duration_hours"] is not None:
+                durations.append(e["duration_hours"])
+        return {
+            "total_events": len(self._events),
+            "by_type": by_type,
+            "by_severity": by_severity,
+            "mean_duration_hours": sum(durations) / len(durations) if durations else None,
+            "total_downtime_hours": sum(durations),
+        }
+
+
+# --- Asset Criticality Ranking ---
+
+
+def asset_criticality_ranking(
+    assets: Sequence[Record],
+    *,
+    consequence_field: str = "consequence",
+    likelihood_field: str = "likelihood",
+    weight_consequence: float = 0.6,
+    weight_likelihood: float = 0.4,
+) -> list[dict[str, Any]]:
+    """Rank assets by criticality score (consequence × likelihood).
+
+    Returns ranked list with ``"asset"``, ``"criticality_score"``, ``"rank"``.
+    """
+    scored: list[dict[str, Any]] = []
+    for a in assets:
+        c = float(a.get(consequence_field, 0))
+        l_val = float(a.get(likelihood_field, 0))
+        score = weight_consequence * c + weight_likelihood * l_val
+        scored.append({**a, "criticality_score": score})
+
+    scored.sort(key=lambda x: x["criticality_score"], reverse=True)
+    for rank, item in enumerate(scored, 1):
+        item["rank"] = rank
+    return scored
+
+
+# --- Failure Simulation (Monte Carlo) ---
+
+
+def failure_simulation_monte_carlo(
+    assets: Sequence[Record],
+    *,
+    failure_rate_field: str = "failure_rate",
+    consequence_field: str = "consequence",
+    simulations: int = 1000,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Monte Carlo failure simulation for asset portfolios.
+
+    Each simulation randomly fails assets based on their failure rate and
+    sums consequences.
+
+    Returns dict with ``"mean_loss"``, ``"std_loss"``, ``"percentiles"``,
+    ``"asset_failure_counts"``.
+    """
+    if seed is not None:
+        random.seed(seed)
+
+    n = len(assets)
+    rates = [float(a.get(failure_rate_field, 0)) for a in assets]
+    consequences = [float(a.get(consequence_field, 0)) for a in assets]
+    failure_counts = [0] * n
+
+    losses: list[float] = []
+    for _ in range(simulations):
+        total_loss = 0.0
+        for i in range(n):
+            if random.random() < rates[i]:
+                total_loss += consequences[i]
+                failure_counts[i] += 1
+        losses.append(total_loss)
+
+    losses.sort()
+    mean_loss = sum(losses) / len(losses)
+    var = sum((loss - mean_loss) ** 2 for loss in losses) / len(losses)
+
+    percentiles = {}
+    for p in (5, 25, 50, 75, 95):
+        idx = int(len(losses) * p / 100)
+        percentiles[f"p{p}"] = losses[min(idx, len(losses) - 1)]
+
+    return {
+        "mean_loss": mean_loss,
+        "std_loss": math.sqrt(var),
+        "min_loss": losses[0],
+        "max_loss": losses[-1],
+        "percentiles": percentiles,
+        "simulations": simulations,
+        "asset_failure_counts": {
+            str(assets[i].get("id", i)): failure_counts[i]
+            for i in range(n)
+        },
+    }
+
+
+# --- Capital Planning Optimization ---
+
+
+def capital_planning_prioritize(
+    projects: Sequence[Record],
+    *,
+    benefit_field: str = "benefit",
+    cost_field: str = "cost",
+    budget: float,
+) -> dict[str, Any]:
+    """Budget-constrained capital planning prioritization (knapsack-style).
+
+    Uses a greedy benefit/cost ratio approach.
+
+    Returns dict with ``"selected_projects"``, ``"total_benefit"``,
+    ``"total_cost"``, ``"budget_remaining"``.
+    """
+    items = [
+        {**p, "_ratio": float(p.get(benefit_field, 0)) / max(float(p.get(cost_field, 1)), 1e-12)}
+        for p in projects
+    ]
+    items.sort(key=lambda x: x["_ratio"], reverse=True)
+
+    selected: list[Record] = []
+    total_cost = 0.0
+    total_benefit = 0.0
+
+    for item in items:
+        c = float(item.get(cost_field, 0))
+        if total_cost + c <= budget:
+            selected.append({k: v for k, v in item.items() if k != "_ratio"})
+            total_cost += c
+            total_benefit += float(item.get(benefit_field, 0))
+
+    return {
+        "selected_projects": selected,
+        "total_benefit": total_benefit,
+        "total_cost": total_cost,
+        "budget_remaining": budget - total_cost,
+        "selected_count": len(selected),
+    }
+
+
+__all__ = [
+    "animation_frames",
+    "asset_criticality_ranking",
+    "capital_planning_prioritize",
+    "EventTracker",
+    "extract_z_values",
+    "failure_simulation_monte_carlo",
+    "geometry_3d",
+    "geometry_3d_bounds",
+    "resample_time_series",
+    "rolling_window_stats",
+    "sort_by_time",
+    "surface_profile",
+    "surface_sample_grid",
+    "temporal_join",
+    "temporal_window",
+    "voxel_grid",
+]

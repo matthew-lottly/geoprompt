@@ -1,0 +1,4 @@
+asset_id,shape,demand
+north-hub,"POINT (-111.92 40.78)",94
+west-corridor,"LINESTRING (-112.09 40.73, -112.02 40.69, -111.98 40.63)",79
+east-service-zone,"POLYGON ((-111.83 40.71, -111.74 40.71, -111.74 40.62, -111.83 40.62, -111.83 40.71))",69

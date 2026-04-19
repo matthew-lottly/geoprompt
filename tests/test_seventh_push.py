@@ -4,23 +4,17 @@ workspace lineage, IO zip/alias, and workflow job specs."""
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from geoprompt.frame import GeoPromptFrame
 from geoprompt.geometry import (
     geometry_convex_hull,
-    geometry_delaunay,
     geometry_envelope,
     geometry_is_empty,
     geometry_snap,
     geometry_split,
     geometry_type,
     geometry_validity_reason,
-    geometry_voronoi,
-    validate_geometry,
 )
 from geoprompt.stats import (
     gearys_c,
@@ -28,7 +22,6 @@ from geoprompt.stats import (
     idw_interpolation,
     kernel_density,
     local_morans_i,
-    morans_i,
     spatial_outliers,
 )
 from geoprompt.topology import (

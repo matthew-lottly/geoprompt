@@ -6,7 +6,7 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from .core import NetworkGraph, _as_non_negative
-from .routing import _dijkstra, shortest_path
+from .routing import shortest_path
 from ..equations import utility_capacity_stress_index, utility_service_deficit
 
 if TYPE_CHECKING:
@@ -245,3 +245,9 @@ def capacity_constrained_od_assignment(
         "total_delivered": total_delivered,
         "total_unmet": max(0.0, total_requested - total_delivered),
     }
+
+
+__all__ = [
+    "constrained_flow_assignment",
+    "capacity_constrained_od_assignment",
+]

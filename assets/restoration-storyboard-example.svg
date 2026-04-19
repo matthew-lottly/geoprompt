@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 340" width="840" height="340"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <filter id="card" x="-2%" y="-4%" width="104%" height="112%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.10"/>
+    </filter>
+    <linearGradient id="prog" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#dc2626"/><stop offset="33%" stop-color="#f59e0b"/>
+      <stop offset="66%" stop-color="#22c55e"/><stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="840" height="340" rx="14" fill="#f8fafc"/>
+  <rect x="1" y="1" width="838" height="338" rx="14" fill="none" stroke="#e2e8f0"/>
+
+  <!-- Title -->
+  <text x="40" y="38" font-size="20" font-weight="700" fill="#0f172a">Restoration Storyboard</text>
+  <text x="40" y="58" font-size="12" fill="#64748b">Four-stage outage recovery sequence for feeder F-12</text>
+
+  <!-- Progress bar -->
+  <rect x="40" y="72" width="760" height="6" rx="3" fill="#e2e8f0"/>
+  <rect x="40" y="72" width="760" height="6" rx="3" fill="url(#prog)"/>
+
+  <!-- Connector arrows -->
+  <g>
+    <line x1="218" y1="182" x2="238" y2="182" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="418" y1="182" x2="438" y2="182" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+    <line x1="618" y1="182" x2="638" y2="182" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  </g>
+
+  <!-- Stage 1: Detect -->
+  <g transform="translate(30,100)">
+    <rect width="186" height="164" rx="10" fill="#ffffff" stroke="#fca5a5" stroke-width="2" filter="url(#card)"/>
+    <rect width="186" height="36" rx="10" fill="#fef2f2"/>
+    <rect y="18" width="186" height="18" fill="#fef2f2"/>
+    <!-- Icon circle -->
+    <circle cx="24" cy="18" r="12" fill="#dc2626"/>
+    <text x="24" y="22" font-size="11" fill="#fff" text-anchor="middle" font-weight="700">!</text>
+    <text x="44" y="23" font-size="13" font-weight="600" fill="#991b1b">Detect Fault</text>
+    <!-- Body -->
+    <text x="16" y="58" font-size="11" fill="#475569">SCADA alarm triggers</text>
+    <text x="16" y="76" font-size="11" fill="#475569">isolation of faulted</text>
+    <text x="16" y="94" font-size="11" fill="#475569">segment on edge e1.</text>
+    <!-- Metric chip -->
+    <rect x="12" y="116" width="80" height="22" rx="4" fill="#fef2f2" stroke="#fca5a5"/>
+    <text x="52" y="131" font-size="10" fill="#dc2626" text-anchor="middle" font-weight="600">t = 0 min</text>
+    <rect x="98" y="116" width="76" height="22" rx="4" fill="#fef2f2" stroke="#fca5a5"/>
+    <text x="136" y="131" font-size="10" fill="#dc2626" text-anchor="middle" font-weight="600">0% served</text>
+  </g>
+
+  <!-- Stage 2: Isolate -->
+  <g transform="translate(230,100)">
+    <rect width="186" height="164" rx="10" fill="#ffffff" stroke="#fde68a" stroke-width="2" filter="url(#card)"/>
+    <rect width="186" height="36" rx="10" fill="#fefce8"/>
+    <rect y="18" width="186" height="18" fill="#fefce8"/>
+    <circle cx="24" cy="18" r="12" fill="#d97706"/>
+    <text x="24" y="23" font-size="14" fill="#fff" text-anchor="middle" font-weight="700">&#x26A0;</text>
+    <text x="44" y="23" font-size="13" font-weight="600" fill="#92400e">Isolate Section</text>
+    <text x="16" y="58" font-size="11" fill="#475569">Open sectionaliser S3.</text>
+    <text x="16" y="76" font-size="11" fill="#475569">Re-energise healthy</text>
+    <text x="16" y="94" font-size="11" fill="#475569">upstream segments.</text>
+    <rect x="12" y="116" width="80" height="22" rx="4" fill="#fefce8" stroke="#fde68a"/>
+    <text x="52" y="131" font-size="10" fill="#d97706" text-anchor="middle" font-weight="600">t = 12 min</text>
+    <rect x="98" y="116" width="76" height="22" rx="4" fill="#fefce8" stroke="#fde68a"/>
+    <text x="136" y="131" font-size="10" fill="#d97706" text-anchor="middle" font-weight="600">40% served</text>
+  </g>
+
+  <!-- Stage 3: Repair -->
+  <g transform="translate(430,100)">
+    <rect width="186" height="164" rx="10" fill="#ffffff" stroke="#86efac" stroke-width="2" filter="url(#card)"/>
+    <rect width="186" height="36" rx="10" fill="#f0fdf4"/>
+    <rect y="18" width="186" height="18" fill="#f0fdf4"/>
+    <circle cx="24" cy="18" r="12" fill="#16a34a"/>
+    <text x="24" y="22" font-size="13" fill="#fff" text-anchor="middle" font-weight="700">&#x2699;</text>
+    <text x="44" y="23" font-size="13" font-weight="600" fill="#166534">Repair Edge</text>
+    <text x="16" y="58" font-size="11" fill="#475569">Crew dispatched to e1.</text>
+    <text x="16" y="76" font-size="11" fill="#475569">Splice replaced, joint</text>
+    <text x="16" y="94" font-size="11" fill="#475569">tested and energised.</text>
+    <rect x="12" y="116" width="80" height="22" rx="4" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="52" y="131" font-size="10" fill="#16a34a" text-anchor="middle" font-weight="600">t = 90 min</text>
+    <rect x="98" y="116" width="76" height="22" rx="4" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="136" y="131" font-size="10" fill="#16a34a" text-anchor="middle" font-weight="600">85% served</text>
+  </g>
+
+  <!-- Stage 4: Verify -->
+  <g transform="translate(630,100)">
+    <rect width="186" height="164" rx="10" fill="#ffffff" stroke="#86efac" stroke-width="2" filter="url(#card)"/>
+    <rect width="186" height="36" rx="10" fill="#f0fdf4"/>
+    <rect y="18" width="186" height="18" fill="#f0fdf4"/>
+    <circle cx="24" cy="18" r="12" fill="#166534"/>
+    <text x="24" y="23" font-size="13" fill="#fff" text-anchor="middle" font-weight="700">&#x2713;</text>
+    <text x="44" y="23" font-size="13" font-weight="600" fill="#166534">Verify &amp; Close</text>
+    <text x="16" y="58" font-size="11" fill="#475569">Full load restored.</text>
+    <text x="16" y="76" font-size="11" fill="#475569">Voltage within limits,</text>
+    <text x="16" y="94" font-size="11" fill="#475569">incident report filed.</text>
+    <rect x="12" y="116" width="80" height="22" rx="4" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="52" y="131" font-size="10" fill="#166534" text-anchor="middle" font-weight="600">t = 105 min</text>
+    <rect x="98" y="116" width="76" height="22" rx="4" fill="#f0fdf4" stroke="#86efac"/>
+    <text x="136" y="131" font-size="10" fill="#166534" text-anchor="middle" font-weight="600">100% served</text>
+  </g>
+
+  <!-- Bottom timeline bar -->
+  <g transform="translate(40, 290)">
+    <line x1="0" y1="10" x2="760" y2="10" stroke="#cbd5e1" stroke-width="2"/>
+    <!-- Time dots -->
+    <circle cx="0" cy="10" r="5" fill="#dc2626"/>
+    <text x="0" y="32" font-size="10" fill="#64748b" text-anchor="middle">0 min</text>
+    <circle cx="253" cy="10" r="5" fill="#d97706"/>
+    <text x="253" y="32" font-size="10" fill="#64748b" text-anchor="middle">12 min</text>
+    <circle cx="506" cy="10" r="5" fill="#16a34a"/>
+    <text x="506" y="32" font-size="10" fill="#64748b" text-anchor="middle">90 min</text>
+    <circle cx="760" cy="10" r="5" fill="#166534"/>
+    <text x="760" y="32" font-size="10" fill="#64748b" text-anchor="middle">105 min</text>
+  </g>
+</svg>

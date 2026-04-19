@@ -3,11 +3,9 @@ viz, stats, db, and io modules.
 """
 from __future__ import annotations
 
-import json
-import math
 import pytest
 
-from geoprompt.frame import GeoPromptFrame, GroupedGeoPromptFrame
+from geoprompt.frame import GeoPromptFrame
 from geoprompt.table import PromptTable
 
 

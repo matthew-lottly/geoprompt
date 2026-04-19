@@ -13,7 +13,8 @@ Requires the comparison extras to be installed:
 
 
 def main() -> None:
-    output_dir = Path("outputs")
+    output_dir = Path(__file__).resolve().parents[1] / "outputs"
+    output_dir.mkdir(parents=True, exist_ok=True)
     report = build_comparison_report(output_dir=output_dir)
     summary = benchmark_summary_table(report)
     written = export_comparison_bundle(report, output_dir)

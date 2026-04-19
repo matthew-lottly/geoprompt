@@ -24,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("info", help="Show package summary and install guidance")
     subparsers.add_parser("version", help="Print the installed version")
 
+    wizard_parser = subparsers.add_parser("wizard", help="Suggest a no-code workflow plan")
+    wizard_parser.add_argument("goal", nargs="+", help="Plain-English workflow goal")
+    wizard_parser.add_argument("--persona", default="analyst")
+    wizard_parser.add_argument("--industry", default="general")
+
     demo_parser = subparsers.add_parser("demo", help="Run the built-in demo workflow")
     demo_parser.add_argument("demo_args", nargs=argparse.REMAINDER)
 
@@ -44,7 +49,7 @@ def _print_info() -> None:
     print("GeoPrompt")
     print(f"Version: {_version()}")
     print("Install profiles: core, viz, io, excel, db, overlay, compare, raster, service, all")
-    print("Commands: info, version, demo, compare, history, serve")
+    print("Commands: info, version, wizard, demo, compare, history, serve")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -57,6 +62,25 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "version":
         print(_version())
+        return 0
+
+    if args.command == "wizard":
+        from .ecosystem import build_workflow_wizard
+
+        plan = build_workflow_wizard(
+            " ".join(args.goal),
+            persona=args.persona,
+            industry=args.industry,
+        )
+        print(plan["message"])
+        if plan["recommended_recipes"]:
+            print("Recipes:")
+            for recipe in plan["recommended_recipes"]:
+                print(f"- {recipe['name']}: {', '.join(recipe['steps'])}")
+        else:
+            print("Steps:")
+            for step in plan["suggested_steps"]:
+                print(f"- {step}")
         return 0
 
     if args.command == "demo":

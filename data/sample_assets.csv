@@ -1,0 +1,6 @@
+asset_id,longitude,latitude,demand
+north-hub,-111.92,40.78,94
+central-yard,-111.96,40.71,88
+west-lab,-112.08,40.69,73
+south-node,-111.90,40.58,81
+east-reserve,-111.78,40.66,69

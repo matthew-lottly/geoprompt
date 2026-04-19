@@ -1,8 +1,6 @@
 """Tests for the features implemented in the latest parity push."""
 from __future__ import annotations
 
-import json
-import math
 import tempfile
 from pathlib import Path
 
@@ -300,7 +298,7 @@ class TestDependencyGraphOverlay:
 
 class TestVizPresets:
     def test_resilience_style_map(self):
-        from geoprompt.viz import resilience_style_map, RESILIENCE_STYLE_PRESETS
+        from geoprompt.viz import resilience_style_map
 
         col, smap = resilience_style_map()
         assert col == "risk_tier"

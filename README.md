@@ -1,6 +1,6 @@
 # Geoprompt
 
-Custom spatial analysis package for point, line, polygon, and multi-part geometry workflows, GeoPandas-style frame access, GeoJSON-compatible inputs and outputs, CRS-aware reprojection, WKT-friendly tabular ingestion, spatial joins, geographic distance options, and GeoPrompt-specific equations for influence, interaction, corridor strength, and neighborhood pressure.
+Custom spatial analysis package for point, line, polygon, and multi-part geometry workflows, a lightweight native frame API, GeoJSON-compatible inputs and outputs, CRS-aware reprojection, WKT-friendly tabular ingestion, spatial joins, geographic distance options, and GeoPrompt-specific equations for influence, interaction, corridor strength, and neighborhood pressure.
 
 ![Generated neighborhood pressure plot from the GeoPrompt demo](assets/neighborhood-pressure-review-live.png)
 
@@ -8,10 +8,18 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 ![PyPI](https://img.shields.io/pypi/v/geoprompt)
 ![Python Versions](https://img.shields.io/pypi/pyversions/geoprompt)
 
+- Start here: [docs/start-here.md](docs/start-here.md)
 - Quickstart: [docs/quickstart-cookbook.md](docs/quickstart-cookbook.md)
 - API guidance: [docs/api-stability.md](docs/api-stability.md)
+- Reference guide: [docs/reference-api.md](docs/reference-api.md)
+- Performance and scale: [docs/performance-and-scale.md](docs/performance-and-scale.md)
 - Benchmarks and proof: [docs/benchmarks.md](docs/benchmarks.md)
+- Notebook and output gallery: [docs/notebook-gallery.md](docs/notebook-gallery.md)
 - Network recipes: [docs/network-scenario-recipes.md](docs/network-scenario-recipes.md)
+- Connectors and recipes: [docs/connectors-and-recipes.md](docs/connectors-and-recipes.md)
+- Deployment guide: [docs/deployment-guide.md](docs/deployment-guide.md)
+- Governance and support: [docs/governance-and-support.md](docs/governance-and-support.md)
+- Flagship workflows: [docs/flagship-workflows.md](docs/flagship-workflows.md)
 - Interop and reporting: [docs/geopandas-interop-and-reporting.md](docs/geopandas-interop-and-reporting.md)
 - Migration guide: [docs/migration-from-geopandas.md](docs/migration-from-geopandas.md)
 - Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
@@ -20,7 +28,9 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 ## Install Profiles
 
 - Core install: `pip install geoprompt`
+- Core workflows do not require GeoPandas; it is only used in optional interop, compare, and extended file-format extras.
 - Developer tooling: `pip install geoprompt[dev]`
+- Notebook workflows: `pip install geoprompt[notebook]`
 - Network-heavy workloads: `pip install geoprompt[network]`
 - Visualization stack: `pip install geoprompt[viz]`
 - Geospatial IO stack: `pip install geoprompt[io]`
@@ -48,7 +58,7 @@ docker run --rm geoprompt geoprompt-demo --help
 
 ## Overview
 
-This project starts a reusable spatial package lane instead of another one-off analysis repo. The goal is to build a custom package that users can import directly, similar to how they would reach for GeoPandas, but focused first on a small and clear set of spatial equations that can grow over time.
+This project starts a reusable spatial package lane instead of another one-off analysis repo. The goal is to build a custom package that users can import directly through its own lightweight frame and workflow surface, focused first on a small and clear set of spatial equations that can grow over time.
 
 The initial version still stays intentionally simple, but it now goes beyond points: the frame can work with points, lines, polygons, and multi-part geometry represented through a small GeoJSON-like geometry mapping. It also accepts common WKT geometry strings in tabular inputs. That keeps the package small enough to iterate on while still showing a real package design direction.
 
@@ -81,50 +91,53 @@ The initial version still stays intentionally simple, but it now goes beyond poi
 
 ## Example Usage
 
-Unified data-loading example (GeoJSON, CSV/TSV, WKT-backed tables, and optional geospatial files):
+Unified data-loading example using checked-in sample inputs (GeoJSON, CSV/TSV, WKT-backed tables, and optional geospatial files):
 
 ```python
+from pathlib import Path
 import geoprompt as gp
 
-# GeoJSON / JSON FeatureCollection
-features = gp.read_data("data/sample_features.json", limit_rows=100000)
+root = Path(".")
+output_dir = root / "outputs"
+output_dir.mkdir(exist_ok=True)
 
-# CSV/TSV with point columns
+# GeoJSON / JSON FeatureCollection
+features = gp.read_data(root / "data" / "sample_features.json", limit_rows=100000)
+
+# CSV with point columns
 points = gp.read_data(
-    "assets.csv",
+    root / "data" / "sample_assets.csv",
     x_column="longitude",
     y_column="latitude",
     use_columns=["asset_id", "longitude", "latitude", "demand"],
-    sample_step=2,
 )
 
 # Tabular WKT geometry column
 shapes = gp.read_table(
-    "assets_with_wkt.csv",
+    root / "data" / "sample_assets_with_wkt.csv",
     geometry_column="shape",
 )
 
 # Optional geospatial formats (requires geopandas extras): .shp, .gpkg, .gdb, .fgb
 # parcels = gp.read_data("city.gdb", layer="parcels", bbox=(-112.1, 40.5, -111.7, 40.9))
 
-gp.write_data("outputs/points_out.csv", points)
-gp.write_data("outputs/features_out.geojson", features)
+gp.write_data(output_dir / "points_out.csv", points)
+gp.write_data(output_dir / "features_out.geojson", features)
 
 # Chunked iteration for very large datasets
-for chunk in gp.iter_data("assets.csv", x_column="longitude", y_column="latitude", chunk_size=50000):
-    # run analysis per chunk
+for chunk in gp.iter_data(root / "data" / "sample_assets.csv", x_column="longitude", y_column="latitude", chunk_size=2):
     _ = chunk.head(1)
 
-# Preset-driven wrappers for large workloads
+# Preset-driven wrappers for larger workloads
 preset_frame = gp.read_data_with_preset(
-    "assets.csv",
+    root / "data" / "sample_assets.csv",
     preset="large",
     x_column="longitude",
     y_column="latitude",
 )
 
 for chunk in gp.iter_data_with_preset(
-    "assets.csv",
+    root / "data" / "sample_assets.csv",
     preset="huge",
     x_column="longitude",
     y_column="latitude",
@@ -200,7 +213,7 @@ export_resilience_summary_report(report, "outputs/resilience-summary.html")
 export_resilience_portfolio_report(portfolio, "outputs/resilience-portfolio.html")
 ```
 
-GeoPandas interop and report export example:
+Optional interop bridge example:
 
 ```python
 import geoprompt as gp
@@ -437,33 +450,56 @@ geoprompt/
 |-- data/
 |   |-- benchmark_features.json
 |   |-- benchmark_regions.json
+|   |-- sample_assets.csv
+|   |-- sample_assets_with_wkt.csv
 |   |-- sample_features.json
 |   `-- sample_points.json
 |-- assets/
-|   `-- neighborhood-pressure-review-live.png
-|-- .github/
-|   `-- workflows/
-|       `-- geoprompt-ci.yml
-|-- src/geoprompt/
-|   |-- __init__.py
-|   |-- compare.py
-|   |-- demo.py
-|   |-- geometry.py
-|   |-- overlay.py
-|   |-- equations.py
-|   |-- frame.py
-|   `-- io.py
-|-- tests/
-|   `-- test_geoprompt.py
+|   |-- before-after-scenario-example.svg
+|   |-- neighborhood-pressure-review-live.png
+|   |-- portfolio-scorecard-example.svg
+|   `-- restoration-storyboard-example.svg
 |-- docs/
-|   |-- architecture.md
 |   |-- api-stability.md
-|   `-- demo-storyboard.md
-|   `-- quickstart-cookbook.md
-|-- outputs/
-|   |-- charts/
-|   |   `-- .gitkeep
-|   `-- .gitkeep
+|   |-- benchmarks.md
+|   |-- connectors-and-recipes.md
+|   |-- flagship-workflows.md
+|   |-- notebook-gallery.md
+|   |-- performance-and-scale.md
+|   |-- quickstart-cookbook.md
+|   |-- reference-api.md
+|   `-- start-here.md
+|-- examples/
+|   |-- benchmark_report_bundle.py
+|   |-- geopandas_roundtrip_report.py
+|   |-- network/
+|   |-- notebooks/
+|   `-- personas/
+|-- src/geoprompt/
+|   |-- ai.py
+|   |-- cartography.py
+|   |-- cli.py
+|   |-- compare.py
+|   |-- data_management.py
+|   |-- db.py
+|   |-- ecosystem.py
+|   |-- enterprise.py
+|   |-- frame.py
+|   |-- geometry.py
+|   |-- io.py
+|   |-- raster.py
+|   |-- service.py
+|   |-- stats.py
+|   |-- temporal.py
+|   |-- tools.py
+|   |-- viz.py
+|   `-- network/
+|-- tests/
+|   |-- test_geoprompt.py
+|   |-- test_network.py
+|   |-- test_network_robustness.py
+|   `-- test_tools_advanced.py
+|-- CHANGELOG.md
 |-- pyproject.toml
 `-- README.md
 ```
@@ -622,7 +658,7 @@ The project now includes:
 - License: [LICENSE](LICENSE)
 - Standalone publishing notes: [PUBLISHING.md](PUBLISHING.md)
 - Changelog: [CHANGELOG.md](CHANGELOG.md)
-- Release notes: [docs/release-notes-0.1.6.md](docs/release-notes-0.1.6.md)
+- Latest changes: [CHANGELOG.md](CHANGELOG.md)
 - Tool roadmap: [docs/tool-roadmap.md](docs/tool-roadmap.md)
 
 ## Repository Notes

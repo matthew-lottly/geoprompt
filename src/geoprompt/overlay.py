@@ -10,7 +10,7 @@ import importlib
 from functools import lru_cache
 from typing import Any
 
-from .geometry import Geometry, geometry_bounds, geometry_type
+from .geometry import Geometry, geometry_bounds, geometry_type, normalize_geometry
 
 
 def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[float, float, float, float]) -> bool:
@@ -35,6 +35,7 @@ def _load_shapely() -> tuple[Any, Any, Any, Any]:
 
 
 def geometry_to_geojson(geometry: Geometry) -> dict[str, Any]:
+    geometry = normalize_geometry(geometry)
     geometry_kind = geometry_type(geometry)
     coordinates = geometry["coordinates"]
     if geometry_kind == "Point":
@@ -48,6 +49,7 @@ def geometry_to_geojson(geometry: Geometry) -> dict[str, Any]:
 
 def geometry_to_shapely(geometry: Geometry) -> Any:
     shapely_geometry, _, _, _ = _load_shapely()
+    geometry = normalize_geometry(geometry)
     geometry_kind = geometry_type(geometry)
     coordinates = geometry["coordinates"]
     if geometry_kind == "Point":

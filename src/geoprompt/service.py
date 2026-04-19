@@ -11,7 +11,6 @@ via HTTP. Teams can extend this template for their own deployments.
 from __future__ import annotations
 
 import importlib
-import json
 import logging
 import os
 import time
@@ -124,3 +123,5 @@ try:
     app = build_app()
 except RuntimeError:
     app = None  # FastAPI not installed — module can still be imported
+
+__all__ = ["build_app"]

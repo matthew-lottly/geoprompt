@@ -16,7 +16,7 @@ Point out that the package-level building blocks now include decay, influence, i
 
 ## 4. Run the demo
 
-Generate `outputs/geoprompt_demo_report.json`, then open `assets/neighborhood-pressure-review-live.png` as the committed real visual. Call out that the plot is drawing multiple geometry types but still ranking them through one package API.
+Run `geoprompt-demo` from the repository root. It generates `outputs/geoprompt_demo_report.json`, `outputs/geoprompt_demo_features.geojson`, and the chart used for the committed proof visual in `assets/neighborhood-pressure-review-live.png`. Call out that the plot is drawing multiple geometry types from checked-in sample data while still ranking them through one package API.
 
 ## 5. Explain the extension path
 

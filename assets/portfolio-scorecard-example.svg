@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" width="720" height="420"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <defs>
+    <linearGradient id="bar1" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3b82f6"/><stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="bar2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#22c55e"/><stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="bar3" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="bar4" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a78bfa"/><stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+
+  <!-- Card background -->
+  <rect width="720" height="420" rx="14" fill="#f8fafc"/>
+  <rect x="1" y="1" width="718" height="418" rx="14" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- Title block -->
+  <text x="40" y="44" font-size="20" font-weight="700" fill="#0f172a">Portfolio Scorecard</text>
+  <text x="40" y="66" font-size="12" fill="#64748b">Composite scores across four key infrastructure categories</text>
+
+  <!-- Axis area: labels at left, bars to the right -->
+  <!-- Grid lines (25, 50, 75, 100 marks) mapped to x 200..680 => 200+120n -->
+  <g stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4 4">
+    <line x1="200" y1="88" x2="200" y2="365"/>
+    <line x1="320" y1="88" x2="320" y2="365"/>
+    <line x1="440" y1="88" x2="440" y2="365"/>
+    <line x1="560" y1="88" x2="560" y2="365"/>
+    <line x1="680" y1="88" x2="680" y2="365"/>
+  </g>
+  <g font-size="10" fill="#94a3b8" text-anchor="middle">
+    <text x="200" y="385">0</text>
+    <text x="320" y="385">25</text>
+    <text x="440" y="385">50</text>
+    <text x="560" y="385">75</text>
+    <text x="680" y="385">100</text>
+  </g>
+
+  <!-- Row 1: Water Distribution  score=80 => width=80/100*480=384 -->
+  <text x="190" y="126" font-size="13" fill="#334155" font-weight="500" text-anchor="end">Water Distribution</text>
+  <rect x="200" y="108" width="384" height="32" rx="6" fill="url(#bar1)" filter="url(#shadow)"/>
+  <text x="592" y="130" font-size="12" font-weight="700" fill="#1e40af">80</text>
+
+  <!-- Row 2: Storm Drainage  score=95 => width=456 -->
+  <text x="190" y="196" font-size="13" fill="#334155" font-weight="500" text-anchor="end">Storm Drainage</text>
+  <rect x="200" y="178" width="456" height="32" rx="6" fill="url(#bar2)" filter="url(#shadow)"/>
+  <text x="664" y="200" font-size="12" font-weight="700" fill="#15803d">95</text>
+
+  <!-- Row 3: Electric Feeders  score=60 => width=288 -->
+  <text x="190" y="266" font-size="13" fill="#334155" font-weight="500" text-anchor="end">Electric Feeders</text>
+  <rect x="200" y="248" width="288" height="32" rx="6" fill="url(#bar3)" filter="url(#shadow)"/>
+  <text x="496" y="270" font-size="12" font-weight="700" fill="#b45309">60</text>
+
+  <!-- Row 4: Telecom Trunk  score=42 => width=201.6 -->
+  <text x="190" y="336" font-size="13" fill="#334155" font-weight="500" text-anchor="end">Telecom Trunk</text>
+  <rect x="200" y="318" width="202" height="32" rx="6" fill="url(#bar4)" filter="url(#shadow)"/>
+  <text x="410" y="340" font-size="12" font-weight="700" fill="#6d28d9">42</text>
+
+  <!-- Target reference line  target=76 => x=200+76/100*480=564.8 -->
+  <line x1="565" y1="92" x2="565" y2="362" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="6 3"/>
+  <rect x="539" y="92" width="52" height="18" rx="4" fill="#fef2f2"/>
+  <text x="565" y="104" font-size="10" fill="#dc2626" text-anchor="middle" font-weight="600">Target 76</text>
+
+  <!-- Legend -->
+  <text x="40" y="408" font-size="10" fill="#94a3b8">Higher is better  ·  Scores normalised 0–100</text>
+</svg>
