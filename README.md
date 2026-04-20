@@ -7,6 +7,8 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 ![CI](https://github.com/matthew-lottly/geoprompt/actions/workflows/geoprompt-ci.yml/badge.svg)
 ![PyPI](https://img.shields.io/pypi/v/geoprompt)
 ![Python Versions](https://img.shields.io/pypi/pyversions/geoprompt)
+![License](https://img.shields.io/github/license/matthew-lottly/geoprompt)
+![Coverage](https://img.shields.io/badge/coverage-validated-brightgreen)
 
 - Start here: [docs/start-here.md](docs/start-here.md)
 - Quickstart: [docs/quickstart-cookbook.md](docs/quickstart-cookbook.md)
@@ -22,6 +24,9 @@ Custom spatial analysis package for point, line, polygon, and multi-part geometr
 - Flagship workflows: [docs/flagship-workflows.md](docs/flagship-workflows.md)
 - Interop and reporting: [docs/geopandas-interop-and-reporting.md](docs/geopandas-interop-and-reporting.md)
 - Migration guide: [docs/migration-from-geopandas.md](docs/migration-from-geopandas.md)
+- ArcPy migration guide: [docs/migration-from-arcpy.md](docs/migration-from-arcpy.md)
+- Environment and optional dependencies: [docs/environment-and-optional-dependencies.md](docs/environment-and-optional-dependencies.md)
+- Video walkthrough index: [docs/video-walkthroughs.md](docs/video-walkthroughs.md)
 - Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md)
 - Tool-selection guide: [docs/when-to-use-geoprompt.md](docs/when-to-use-geoprompt.md)
 

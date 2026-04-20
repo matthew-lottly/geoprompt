@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -13,6 +14,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "sample_features.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_ASSET_PATH = PROJECT_ROOT / "assets" / "neighborhood-pressure-review-live.png"
+
+logger = logging.getLogger("geoprompt")
 
 
 def export_pressure_plot(records: list[dict[str, object]], output_path: Path) -> Path:
@@ -165,9 +168,9 @@ def main() -> None:
     )
     geojson_path = write_geojson(args.output_dir / "geoprompt_demo_features.geojson", enriched_frame)
     export_pressure_plot(report["records"], args.asset_path)
-    print(f"Wrote GeoPrompt report to {report_path}")
-    print(f"Wrote GeoPrompt GeoJSON to {geojson_path}")
-    print(f"Wrote GeoPrompt asset to {args.asset_path}")
+    logger.info("Wrote GeoPrompt report to %s", report_path)
+    logger.info("Wrote GeoPrompt GeoJSON to %s", geojson_path)
+    logger.info("Wrote GeoPrompt asset to %s", args.asset_path)
 
 
 __all__ = ["build_demo_report", "export_pressure_plot", "main"]

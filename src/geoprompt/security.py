@@ -10,9 +10,10 @@ import hashlib
 import hmac
 import json
 import math
-import os
 import re
+import secrets
 import time
+from pathlib import PurePath
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 
@@ -209,7 +210,7 @@ def validate_file_upload(
     allowed_extensions: Optional[Set[str]] = None,
 ) -> Dict[str, Any]:
     """Validate a file upload for geospatial data."""
-    ext = os.path.splitext(filename)[1].lower()
+    ext = PurePath(filename).suffix.lower()
     exts = allowed_extensions or _ALLOWED_GEO_EXTENSIONS
     issues: List[str] = []
     if ext not in exts:
@@ -347,7 +348,7 @@ class APIKeyManager:
         self._keys: Dict[str, Dict[str, Any]] = {}
 
     def generate_key(self, name: str, *, scopes: Optional[Sequence[str]] = None) -> str:
-        key = hashlib.sha256(os.urandom(32)).hexdigest()[:40]
+        key = secrets.token_hex(20)
         self._keys[key] = {
             "name": name,
             "scopes": set(scopes or []),

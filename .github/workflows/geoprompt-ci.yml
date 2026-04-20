@@ -24,11 +24,12 @@ on:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -52,6 +53,9 @@ jobs:
 
       - name: Run comparison corpus
         run: python -m geoprompt.compare
+
+      - name: Execute notebooks with timeout
+        run: python examples/notebooks/execute_notebooks_with_timeout.py --timeout 20
 
       - name: Run flagship persona examples
         run: |

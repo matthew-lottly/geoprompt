@@ -126,7 +126,9 @@ def _extract_simple_data(placemark: ET.Element) -> dict[str, Any]:
                     props[field_name] = sd.text
             elif tag == "Data":
                 field_name = sd.get("name", "")
-                val_el = sd.find("kml:value", _KML_NS) or sd.find("value")
+                val_el = sd.find("kml:value", _KML_NS)
+                if val_el is None:
+                    val_el = sd.find("value")
                 if field_name and val_el is not None and val_el.text:
                     props[field_name] = val_el.text
 
@@ -255,13 +257,19 @@ def read_gpx(path: str | Path) -> list[dict[str, Any]]:
         lon = float(wpt.get("lon", "0"))
         lat = float(wpt.get("lat", "0"))
         props: dict[str, Any] = {"type": "waypoint"}
-        name_el = wpt.find("gpx:name", _GPX_NS) or wpt.find("name")
+        name_el = wpt.find("gpx:name", _GPX_NS)
+        if name_el is None:
+            name_el = wpt.find("name")
         if name_el is not None and name_el.text:
             props["name"] = name_el.text
-        ele_el = wpt.find("gpx:ele", _GPX_NS) or wpt.find("ele")
+        ele_el = wpt.find("gpx:ele", _GPX_NS)
+        if ele_el is None:
+            ele_el = wpt.find("ele")
         if ele_el is not None and ele_el.text:
             props["elevation"] = float(ele_el.text)
-        time_el = wpt.find("gpx:time", _GPX_NS) or wpt.find("time")
+        time_el = wpt.find("gpx:time", _GPX_NS)
+        if time_el is None:
+            time_el = wpt.find("time")
         if time_el is not None and time_el.text:
             props["time"] = time_el.text
         features.append({
@@ -276,7 +284,9 @@ def read_gpx(path: str | Path) -> list[dict[str, Any]]:
         if tag != "trk":
             continue
         props = {"type": "track"}
-        name_el = trk.find("gpx:name", _GPX_NS) or trk.find("name")
+        name_el = trk.find("gpx:name", _GPX_NS)
+        if name_el is None:
+            name_el = trk.find("name")
         if name_el is not None and name_el.text:
             props["name"] = name_el.text
 
@@ -315,7 +325,9 @@ def read_gpx(path: str | Path) -> list[dict[str, Any]]:
         if tag != "rte":
             continue
         props = {"type": "route"}
-        name_el = rte.find("gpx:name", _GPX_NS) or rte.find("name")
+        name_el = rte.find("gpx:name", _GPX_NS)
+        if name_el is None:
+            name_el = rte.find("name")
         if name_el is not None and name_el.text:
             props["name"] = name_el.text
         coords = []

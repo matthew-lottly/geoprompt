@@ -23,6 +23,7 @@ from .routing import (
     multi_criteria_shortest_path,
     shortest_path,
     service_area,
+    time_dependent_shortest_path,
     NetworkRouter,
 )
 from .demand import (
@@ -118,6 +119,7 @@ __all__ = [
     "multi_criteria_shortest_path",
     "shortest_path",
     "service_area",
+    "time_dependent_shortest_path",
     "NetworkRouter",
     # Demand functions
     "allocate_demand_to_supply",

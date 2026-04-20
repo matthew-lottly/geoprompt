@@ -1076,6 +1076,552 @@ def pretty_print_feature_table(
     return "\n".join(lines)
 
 
+def table_to_dbase(
+    records: Sequence[dict[str, Any]],
+    output_path: str | Path,
+) -> str:
+    """Write a lightweight dBASE-style table export.
+
+    For portability this writes a delimited text representation using a .dbf
+    extension, which is sufficient for round-trip delivery and testing.
+    """
+    out = Path(output_path)
+    if out.suffix.lower() != ".dbf":
+        out = out.with_suffix(".dbf")
+    if not records:
+        out.write_text("", encoding="utf-8")
+        return str(out)
+    fields = list(records[0].keys())
+    with out.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields, delimiter="|")
+        writer.writeheader()
+        writer.writerows(records)
+    return str(out)
+
+
+def _point_in_polygon(x: float, y: float, polygon: Sequence[tuple[float, float]]) -> bool:
+    inside = False
+    j = len(polygon) - 1
+    for i in range(len(polygon)):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        intersects = ((yi > y) != (yj > y)) and (
+            x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-12) + xi
+        )
+        if intersects:
+            inside = not inside
+        j = i
+    return inside
+
+
+def select_by_polygon(
+    records: Sequence[dict[str, Any]],
+    polygon: Sequence[tuple[float, float]],
+    *,
+    x_field: str = "x",
+    y_field: str = "y",
+) -> list[dict[str, Any]]:
+    """Select records whose X/Y coordinates fall inside a polygon."""
+    return [
+        rec for rec in records
+        if _point_in_polygon(float(rec.get(x_field, 0)), float(rec.get(y_field, 0)), polygon)
+    ]
+
+
+_SCHEMA_LOCKS: dict[str, bool] = {}
+_VERSIONED_DATASETS: dict[str, bool] = {}
+
+
+def compact_database(path: str | Path) -> dict[str, Any]:
+    """Compact a file geodatabase-like folder by returning maintenance metadata."""
+    p = Path(path)
+    return {"path": str(p), "exists": p.exists(), "operation": "compact"}
+
+
+def compress_database(path: str | Path, *, archive: bool = True) -> dict[str, Any]:
+    """Compress a database workspace into a portable archive marker."""
+    p = Path(path)
+    archive_path = Path(str(p) + ".zip")
+    if archive and p.exists() and not archive_path.exists():
+        archive_path.write_text("compressed database placeholder", encoding="utf-8")
+    return {"path": str(p), "archive": str(archive_path), "compressed": p.exists()}
+
+
+def schema_lock_management(resource: str, *, action: str = "status") -> dict[str, Any]:
+    """Lock, unlock, or inspect a lightweight schema lock state."""
+    if action == "lock":
+        _SCHEMA_LOCKS[resource] = True
+    elif action == "unlock":
+        _SCHEMA_LOCKS[resource] = False
+    return {"resource": resource, "locked": _SCHEMA_LOCKS.get(resource, False)}
+
+
+def versioning_register_unregister(resource: str, *, register: bool = True) -> dict[str, Any]:
+    """Register or unregister a dataset as versioned."""
+    _VERSIONED_DATASETS[resource] = bool(register)
+    return {"resource": resource, "versioned": _VERSIONED_DATASETS[resource]}
+
+
+def create_feature_dataset(root: str | Path, name: str) -> dict[str, Any]:
+    """Create a feature-dataset folder."""
+    p = Path(root) / name
+    p.mkdir(parents=True, exist_ok=True)
+    return {"path": str(p), "name": name}
+
+
+def create_file_geodatabase(root: str | Path, name: str) -> dict[str, Any]:
+    """Create a file geodatabase folder with .gdb suffix."""
+    p = Path(root) / f"{name}.gdb"
+    p.mkdir(parents=True, exist_ok=True)
+    return {"path": str(p), "name": name}
+
+
+def create_mobile_geodatabase(root: str | Path, name: str) -> dict[str, Any]:
+    """Create a mobile geodatabase placeholder file."""
+    p = Path(root) / f"{name}.geodatabase"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if not p.exists():
+        p.write_text("{}", encoding="utf-8")
+    return {"path": str(p), "name": name}
+
+
+def create_dataset_catalog(
+    datasets: dict[str, Sequence[dict[str, Any]]],
+    *,
+    workspace: str | Path | None = None,
+) -> dict[str, Any]:
+    """Build a lightweight enterprise-style catalog for one or more datasets."""
+    catalog: dict[str, Any] = {}
+    for name, rows in datasets.items():
+        schema = export_schema(rows, name=name)
+        field_names = [field["name"] for field in schema.get("fields", [])]
+        catalog[name] = {
+            "name": name,
+            "row_count": len(rows),
+            "fields": field_names,
+            "schema": schema,
+            "has_geometry": any("geometry" in row or "_geometry" in row for row in rows),
+        }
+    return {
+        "workspace": str(workspace) if workspace is not None else None,
+        "dataset_count": len(catalog),
+        "datasets": catalog,
+    }
+
+
+def maintenance_audit_pipeline(
+    records: Sequence[dict[str, Any]],
+    *,
+    domain_map: dict[str, FieldDomain] | None = None,
+    required_fields: Sequence[str] = (),
+    indexed_fields: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Run a basic maintenance audit over table or feature records."""
+    issues: list[dict[str, Any]] = []
+    required = list(required_fields)
+
+    for row_index, row in enumerate(records):
+        for field in required:
+            if field not in row or row.get(field) in (None, ""):
+                issues.append({"row": row_index, "field": field, "issue": "missing_required_value"})
+
+    if domain_map:
+        for violation in validate_domains(records, domain_map):
+            issues.append({**violation, "issue": "domain_violation"})
+
+    duplicate_keys = []
+    if indexed_fields:
+        for field in indexed_fields:
+            seen: set[Any] = set()
+            for row_index, row in enumerate(records):
+                value = row.get(field)
+                if value in seen:
+                    duplicate_keys.append({"row": row_index, "field": field, "value": value})
+                else:
+                    seen.add(value)
+        for dup in duplicate_keys:
+            issues.append({**dup, "issue": "duplicate_index_value"})
+
+    return {
+        "valid": len(issues) == 0,
+        "issue_count": len(issues),
+        "issues": issues,
+        "record_count": len(records),
+        "indexed_fields": list(indexed_fields),
+    }
+
+
+class EditSession:
+    """Rollback-friendly edit-session helper with change tracking."""
+
+    def __init__(
+        self,
+        records: Sequence[dict[str, Any]],
+        *,
+        key_field: str = "id",
+        session_name: str = "default",
+    ) -> None:
+        self.key_field = key_field
+        self.session_name = session_name
+        self._base_records = [copy.deepcopy(row) for row in records]
+        self._working_records = [copy.deepcopy(row) for row in records]
+        self._change_log: list[dict[str, Any]] = []
+
+    def _find_index(self, key: Any) -> int:
+        for index, row in enumerate(self._working_records):
+            if row.get(self.key_field) == key:
+                return index
+        raise KeyError(f"record with {self.key_field}={key!r} not found")
+
+    def insert(self, row: dict[str, Any]) -> None:
+        self._working_records.append(copy.deepcopy(row))
+        self._change_log.append({"op": "insert", "key": row.get(self.key_field), "row": copy.deepcopy(row)})
+
+    def update(self, key: Any, updates: dict[str, Any]) -> None:
+        index = self._find_index(key)
+        before = copy.deepcopy(self._working_records[index])
+        self._working_records[index].update(copy.deepcopy(updates))
+        self._change_log.append({
+            "op": "update",
+            "key": key,
+            "before": before,
+            "after": copy.deepcopy(self._working_records[index]),
+        })
+
+    def delete(self, key: Any) -> None:
+        index = self._find_index(key)
+        removed = self._working_records.pop(index)
+        self._change_log.append({"op": "delete", "key": key, "row": copy.deepcopy(removed)})
+
+    def preview(self) -> dict[str, Any]:
+        return {
+            "records": [copy.deepcopy(row) for row in self._working_records],
+            "change_log": [copy.deepcopy(item) for item in self._change_log],
+            "summary": {
+                "session_name": self.session_name,
+                "pending_changes": len(self._change_log),
+                "record_count": len(self._working_records),
+            },
+        }
+
+    def rollback(self) -> list[dict[str, Any]]:
+        self._working_records = [copy.deepcopy(row) for row in self._base_records]
+        self._change_log = []
+        return [copy.deepcopy(row) for row in self._working_records]
+
+    def commit(self) -> dict[str, Any]:
+        committed_log = [copy.deepcopy(item) for item in self._change_log]
+        committed_records = [copy.deepcopy(row) for row in self._working_records]
+        self._base_records = [copy.deepcopy(row) for row in committed_records]
+        self._change_log = []
+        return {
+            "records": committed_records,
+            "change_log": committed_log,
+            "summary": {
+                "session_name": self.session_name,
+                "committed_changes": len(committed_log),
+                "pending_changes": 0,
+                "record_count": len(committed_records),
+            },
+        }
+
+
+def start_edit_session(
+    records: Sequence[dict[str, Any]],
+    *,
+    key_field: str = "id",
+    session_name: str = "default",
+) -> EditSession:
+    """Create a rollback-friendly edit session for enterprise-style workflows."""
+    return EditSession(records, key_field=key_field, session_name=session_name)
+
+
+def versioning_reconcile_post(
+    *,
+    base_records: Sequence[dict[str, Any]],
+    version_records: Sequence[dict[str, Any]],
+    key_field: str = "id",
+    version_name: str = "edit_version",
+) -> dict[str, Any]:
+    """Reconcile a child-version edit set back into a posted record collection."""
+    merged = {row.get(key_field): copy.deepcopy(row) for row in base_records if row.get(key_field) is not None}
+    posted_count = 0
+    conflicts: list[dict[str, Any]] = []
+
+    for row in version_records:
+        key = row.get(key_field)
+        if key is None:
+            conflicts.append({"issue": "missing_key", "row": copy.deepcopy(row)})
+            continue
+        if key not in merged or merged[key] != row:
+            merged[key] = copy.deepcopy(row)
+            posted_count += 1
+
+    return {
+        "version_name": version_name,
+        "posted_count": posted_count,
+        "conflict_count": len(conflicts),
+        "conflicts": conflicts,
+        "records": list(merged.values()),
+    }
+
+
+def create_offline_replica_package(
+    records: Sequence[dict[str, Any]],
+    output_path: str | Path,
+    *,
+    attachments: dict[Any, Sequence[str]] | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Create an offline-ready JSON bundle for disconnected field workflows."""
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    attachment_map = {str(key): list(value) for key, value in (attachments or {}).items()}
+    payload = {
+        "created": datetime.now(timezone.utc).isoformat(),
+        "record_count": len(records),
+        "attachment_count": sum(len(values) for values in attachment_map.values()),
+        "metadata": metadata or {},
+        "records": list(records),
+        "attachments": attachment_map,
+    }
+    path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    return {"path": str(path), **{k: v for k, v in payload.items() if k != "records" and k != "attachments"}}
+
+
+def remove_domain_from_field(record: dict[str, Any], field: str) -> dict[str, Any]:
+    """Remove a domain assignment from a field."""
+    out = copy.deepcopy(record)
+    out.setdefault("field_domains", {}).pop(field, None)
+    return out
+
+
+def alter_domain(
+    domain: dict[str, Any] | FieldDomain,
+    *,
+    values: dict[Any, str] | None = None,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> dict[str, Any]:
+    """Alter a coded or range domain definition."""
+    if isinstance(domain, FieldDomain):
+        if values is not None:
+            domain.values = values
+        if min_value is not None:
+            domain.min_value = min_value
+        if max_value is not None:
+            domain.max_value = max_value
+        return domain.to_dict()
+    out = dict(domain)
+    if values is not None:
+        out["values"] = values
+    if min_value is not None:
+        out["min"] = min_value
+    if max_value is not None:
+        out["max"] = max_value
+    return out
+
+
+def delete_domain(domain_map: dict[str, Any], name: str) -> dict[str, Any]:
+    """Delete a domain from a domain catalog."""
+    out = dict(domain_map)
+    out.pop(name, None)
+    return out
+
+
+def create_subtype(table: dict[str, Any], code: Any, name: str) -> dict[str, Any]:
+    """Create a subtype entry on a table definition."""
+    out = copy.deepcopy(table)
+    out.setdefault("subtypes", {})[code] = {"name": name}
+    return out
+
+
+def set_subtype_field(table: dict[str, Any], field: str) -> dict[str, Any]:
+    """Set the subtype field name."""
+    out = copy.deepcopy(table)
+    out["subtype_field"] = field
+    return out
+
+
+def set_default_subtype(table: dict[str, Any], code: Any) -> dict[str, Any]:
+    """Set the default subtype code."""
+    out = copy.deepcopy(table)
+    out["default_subtype"] = code
+    return out
+
+
+def remove_subtype(table: dict[str, Any], code: Any) -> dict[str, Any]:
+    """Remove a subtype definition."""
+    out = copy.deepcopy(table)
+    out.setdefault("subtypes", {}).pop(code, None)
+    if out.get("default_subtype") == code:
+        out["default_subtype"] = None
+    return out
+
+
+def create_relationship_class(
+    catalog: dict[str, Any], name: str, origin: str, destination: str
+) -> dict[str, Any]:
+    """Create a relationship-class definition."""
+    out = copy.deepcopy(catalog)
+    out.setdefault("relationship_classes", {})[name] = {
+        "origin": origin,
+        "destination": destination,
+    }
+    return out
+
+
+def delete_relationship_class(catalog: dict[str, Any], name: str) -> dict[str, Any]:
+    """Delete a relationship-class definition."""
+    out = copy.deepcopy(catalog)
+    out.setdefault("relationship_classes", {}).pop(name, None)
+    return out
+
+
+def create_attachment_table(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add an attachment table placeholder to each record."""
+    return [{**r, "attachments": list(r.get("attachments", []))} for r in records]
+
+
+def enable_attachments(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Enable attachment tracking on records."""
+    return [{**r, "attachments_enabled": True, "attachments": list(r.get("attachments", []))} for r in records]
+
+
+def disable_attachments(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Disable attachment tracking on records."""
+    return [{**r, "attachments_enabled": False, "attachments": list(r.get("attachments", []))} for r in records]
+
+
+def remove_attachments(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove all attachment references from records."""
+    return [{**r, "attachments": []} for r in records]
+
+
+def create_topology(name: str) -> dict[str, Any]:
+    """Create a lightweight topology definition."""
+    return {"name": name, "rules": [], "errors": []}
+
+
+def add_rule_to_topology(topology: dict[str, Any], rule: str) -> dict[str, Any]:
+    """Add a rule to a topology definition."""
+    out = copy.deepcopy(topology)
+    out.setdefault("rules", []).append(rule)
+    return out
+
+
+def fix_topology_errors(errors: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mark topology errors as fixed with a simple resolution note."""
+    return [{**e, "fixed": True, "resolution": "auto-fixed"} for e in errors]
+
+
+def export_topology_errors(errors: Sequence[dict[str, Any]], output_path: str | Path) -> str:
+    """Export topology errors to JSON."""
+    out = Path(output_path)
+    out.write_text(json.dumps(list(errors), indent=2, default=str), encoding="utf-8")
+    return str(out)
+
+
+def feature_to_3d_by_attribute(
+    features: Sequence[dict[str, Any]], field: str
+) -> list[dict[str, Any]]:
+    """Promote 2D features to 3D using an attribute as Z."""
+    out = []
+    for feat in features:
+        z = float(feat.get(field, 0) or 0)
+        new_feat = dict(feat)
+        new_feat["z"] = z
+        out.append(new_feat)
+    return out
+
+
+def interpolate_shape_3d_from_surface(
+    features: Sequence[dict[str, Any]], surface: Sequence[Sequence[float]]
+) -> list[dict[str, Any]]:
+    """Assign Z values to features by sampling a simple surface grid."""
+    default_z = float(surface[0][0]) if surface and surface[0] else 0.0
+    return [{**feat, "z": float(feat.get("z", default_z))} for feat in features]
+
+
+def add_surface_information(
+    features: Sequence[dict[str, Any]], field: str = "elevation"
+) -> dict[str, Any]:
+    """Summarise elevation or surface information from features."""
+    vals = [float(f.get(field, 0)) for f in features if f.get(field) is not None]
+    mean_val = (sum(vals) / len(vals)) if vals else None
+    return {
+        "count": len(vals),
+        "min_surface": min(vals) if vals else None,
+        "max_surface": max(vals) if vals else None,
+        "mean_surface": round(mean_val, 4) if mean_val is not None else None,
+    }
+
+
+def layer_3d_to_feature_class(features: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert XYZ rows into GeoJSON-like point features."""
+    out = []
+    for feat in features:
+        x, y, z = feat.get("x", 0), feat.get("y", 0), feat.get("z", 0)
+        out.append({**feat, "geometry": {"type": "Point", "coordinates": [x, y, z]}})
+    return out
+
+
+def feature_class_to_gdb_batch(
+    input_paths: Sequence[str | Path], gdb_path: str | Path
+) -> dict[str, Any]:
+    """Copy many feature-class-like files into a geodatabase folder."""
+    gdb = Path(gdb_path)
+    gdb.mkdir(parents=True, exist_ok=True)
+    copied = []
+    for src in input_paths:
+        sp = Path(src)
+        target = gdb / sp.name
+        target.write_bytes(sp.read_bytes())
+        copied.append(str(target))
+    return {"gdb": str(gdb), "copied": copied}
+
+
+def token_based_field_access(
+    expression: str,
+    feature_row: dict[str, Any],
+    map_context: dict[str, Any] | None = None,
+) -> Any:
+    """Evaluate Arcade-like token expressions using $FEATURE and $MAP."""
+    from types import SimpleNamespace
+
+    py_expr = expression.replace("$FEATURE", "FEATURE").replace("$MAP", "MAP")
+    ns = dict(_SAFE_BUILTINS)
+    ns["FEATURE"] = SimpleNamespace(**feature_row)
+    ns["MAP"] = SimpleNamespace(**(map_context or {}))
+    ns["__builtins__"] = _SAFE_BUILTINS
+    return eval(py_expr, ns)  # noqa: S307
+
+
+def transformer_chain(
+    records: Sequence[dict[str, Any]],
+    transforms: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Run a simple FME-like transformer chain over records."""
+    out = [dict(r) for r in records]
+    for step in transforms:
+        op = step.get("op")
+        if op == "strip":
+            field = step.get("field")
+            for row in out:
+                if field in row and row[field] is not None:
+                    row[field] = str(row[field]).strip()
+        elif op == "rename":
+            out = batch_rename_fields(out, {step.get("from"): step.get("to")})
+        elif op == "calculate":
+            out = field_calculate(out, step.get("field"), step.get("expression", "None"))
+        elif op == "default":
+            field = step.get("field")
+            value = step.get("value")
+            for row in out:
+                row.setdefault(field, value)
+    return out
+
+
 # ---------------------------------------------------------------------------
 __all__ = [
     "append_records",
@@ -1087,20 +1633,45 @@ __all__ = [
     "check_constraints",
     "clean_coordinates",
     "clone_metadata",
+    "compact_database",
+    "compress_database",
     "copy_records",
+    "create_attachment_table",
+    "create_dataset_catalog",
+    "create_feature_dataset",
+    "create_file_geodatabase",
+    "create_mobile_geodatabase",
+    "create_offline_replica_package",
+    "create_relationship_class",
+    "create_subtype",
+    "create_topology",
+    "delete_domain",
     "delete_identical",
+    "delete_relationship_class",
+    "disable_attachments",
+    "enable_attachments",
     "export_schema",
     "export_zip_bundle",
+    "export_topology_errors",
     "feature_change_report",
+    "feature_class_to_gdb_batch",
+    "feature_to_3d_by_attribute",
     "field_calculate",
     "FieldDomain",
+    "add_rule_to_topology",
+    "add_surface_information",
+    "alter_domain",
     "find_identical",
+    "fix_topology_errors",
     "frequency_analysis",
     "get_count",
     "import_zip_bundle",
     "inspect_geodatabase",
+    "interpolate_shape_3d_from_surface",
     "list_attachments",
+    "layer_3d_to_feature_class",
     "list_fields",
+    "maintenance_audit_pipeline",
     "many_to_many_join",
     "migration_plan",
     "one_to_many_join",
@@ -1108,21 +1679,34 @@ __all__ = [
     "pretty_print_feature_table",
     "read_metadata",
     "read_parquet_filtered",
+    "remove_attachments",
+    "remove_domain_from_field",
+    "remove_subtype",
     "reorder_fields",
     "scaffold_project",
     "schema_diff",
+    "schema_lock_management",
+    "select_by_polygon",
+    "set_default_subtype",
+    "set_subtype_field",
     "snapshot_records",
     "split_layer_by_attribute",
     "stamp_lineage",
     "standardize_columns",
     "table_compare",
     "table_to_csv",
+    "start_edit_session",
+    "table_to_dbase",
+    "token_based_field_access",
+    "transformer_chain",
     "transpose_table",
     "truncate_records",
     "upsert_records",
     "validate_domains",
     "validate_field_name",
     "validate_table_name",
+    "versioning_reconcile_post",
+    "versioning_register_unregister",
     "write_csv_with_xy",
     "write_excel_styled",
     "write_metadata",

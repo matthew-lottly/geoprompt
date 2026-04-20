@@ -78,6 +78,11 @@ def to_folium_map(
     style_column: str | None = None,
     style_map: dict[Any, dict[str, Any]] | None = None,
     tiles: str = "OpenStreetMap",
+    custom_tile_url: str | None = None,
+    cluster_points: bool = False,
+    fullscreen: bool = False,
+    minimap: bool = False,
+    measure_control: bool = False,
     zoom_start: int | None = None,
     width: str | int = "100%",
     height: str | int = 600,
@@ -96,6 +101,11 @@ def to_folium_map(
         style_column: Column used to pick per-feature style from ``style_map``.
         style_map: Dict mapping style_column values to folium style kwargs.
         tiles: Tile layer name.
+        custom_tile_url: Optional XYZ tile template URL.
+        cluster_points: If ``True``, cluster point markers.
+        fullscreen: If ``True``, add a fullscreen map control.
+        minimap: If ``True``, add a mini-map overview control.
+        measure_control: If ``True``, add a line/area measurement control.
         zoom_start: Initial zoom level; auto-fit if ``None``.
         width: Map width (CSS value or pixels).
         height: Map height (CSS value or pixels).
@@ -114,12 +124,28 @@ def to_folium_map(
     center_lat = (min_y + max_y) / 2
     center_lon = (min_x + max_x) / 2
 
+    base_tiles = None if custom_tile_url else tiles
     m = folium.Map(
         location=[center_lat, center_lon],
-        tiles=tiles,
+        tiles=base_tiles,
         width=width,
         height=height,
     )
+
+    if custom_tile_url:
+        folium.TileLayer(tiles=custom_tile_url, attr="Custom tiles", name="basemap").add_to(m)
+
+    if fullscreen or minimap or measure_control:
+        try:
+            plugins = importlib.import_module("folium.plugins")
+            if fullscreen:
+                plugins.Fullscreen().add_to(m)
+            if minimap:
+                plugins.MiniMap(toggle_display=True).add_to(m)
+            if measure_control:
+                plugins.MeasureControl().add_to(m)
+        except ImportError:
+            pass
 
     if zoom_start is not None:
         m.zoom_start = zoom_start
@@ -127,6 +153,13 @@ def to_folium_map(
         m.fit_bounds([[min_y, min_x], [max_y, max_x]])
 
     feature_group = folium.FeatureGroup(name="features")
+    point_group: Any = feature_group
+    if cluster_points:
+        try:
+            plugins = importlib.import_module("folium.plugins")
+            point_group = plugins.MarkerCluster(name="points")
+        except ImportError:
+            point_group = feature_group
 
     for row in rows:
         geom = row[geometry_column]
@@ -168,7 +201,7 @@ def to_folium_map(
                 weight=feat_weight,
                 tooltip=tooltip,
                 popup=popup,
-            ).add_to(feature_group)
+            ).add_to(point_group)
         else:
             geojson = _geojson_coords(geom)
             folium.GeoJson(
@@ -183,6 +216,8 @@ def to_folium_map(
                 popup=popup,
             ).add_to(feature_group)
 
+    if point_group is not feature_group:
+        point_group.add_to(m)
     feature_group.add_to(m)
     if add_layer_control:
         folium.LayerControl().add_to(m)

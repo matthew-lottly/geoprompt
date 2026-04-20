@@ -390,7 +390,7 @@ def bmp_sizing(
     *,
     bmp_type: str = "retention",
     target_capture_pct: float = 0.9,
-) -> Dict[str, float]:
+) -> Dict[str, float | str]:
     """Size a best-management practice (BMP) for stormwater treatment."""
     runoff_volume = drainage_area_m2 * design_storm_mm / 1000.0 * runoff_coefficient
     capture_volume = runoff_volume * target_capture_pct

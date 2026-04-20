@@ -265,6 +265,47 @@ def multi_criteria_shortest_path(
     return result
 
 
+def time_dependent_shortest_path(
+    graph: NetworkGraph,
+    origin: str,
+    destination: str,
+    *,
+    departure_hour: int,
+    time_cost_field: str = "time_costs",
+    max_cost: float | None = None,
+    blocked_edges: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Shortest path with hour-specific edge costs.
+
+    Each edge may include a mapping like ``{"time_costs": {8: 2, 18: 6}}``.
+    When an hour is not present, the base edge cost is used.
+    """
+    normalized_hour = int(departure_hour) % 24
+    overrides: dict[str, float] = {}
+    for edge_id, edge in graph.edge_attributes.items():
+        raw = edge.get(time_cost_field, {})
+        if isinstance(raw, dict):
+            matched = raw.get(normalized_hour)
+            if matched is None:
+                matched = raw.get(str(normalized_hour))
+            if matched is not None:
+                overrides[edge_id] = _as_non_negative(matched, f"{time_cost_field}[{normalized_hour}]")
+                continue
+        overrides[edge_id] = float(edge.get("cost", edge.get("length", 1.0)))
+
+    result = shortest_path(
+        graph,
+        origin=origin,
+        destination=destination,
+        max_cost=max_cost,
+        blocked_edges=blocked_edges,
+        edge_cost_overrides=overrides,
+    )
+    result["departure_hour"] = normalized_hour
+    result["cost_mode"] = "time_dependent"
+    return result
+
+
 class NetworkRouter:
     """Cached routing helper for repeated OD queries on stable networks."""
 
@@ -368,6 +409,7 @@ __all__ = [
     "service_area",
     "edge_impedance_cost",
     "multi_criteria_shortest_path",
+    "time_dependent_shortest_path",
     "NetworkRouter",
     "build_landmark_index",
     "landmark_lower_bound",

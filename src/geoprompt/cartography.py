@@ -318,8 +318,8 @@ def map_series(
         for r in recs:
             geom = r.get(geometry_field)
             if geom:
-                b = geometry_bounds(geom)
-                all_bounds.append((b["min_x"], b["min_y"], b["max_x"], b["max_y"]))
+                min_x, min_y, max_x, max_y = geometry_bounds(geom)
+                all_bounds.append((min_x, min_y, max_x, max_y))
 
         if all_bounds:
             extent = (

@@ -298,6 +298,7 @@ class GeoPromptFrame:
         self.geometry_column = geometry_column
         self.crs = _normalize_crs(crs)
         self._index_column: str | None = None
+        self._spatial_index: GeoPromptSpatialIndex | None = None
         self._rows = [dict(row) for row in rows]
         for row in self._rows:
             row[self.geometry_column] = normalize_geometry(row[self.geometry_column])
@@ -330,7 +331,29 @@ class GeoPromptFrame:
         frame.geometry_column = geometry_column
         frame.crs = _normalize_crs(crs)
         frame._index_column = None
+        frame._spatial_index = None
         frame._rows = [dict(row) for row in rows]
+        return frame
+
+    def _clone_with_rows(
+        self,
+        rows: Sequence[Record],
+        *,
+        geometry_column: str | None = None,
+        crs: str | None = None,
+        index_column: Any = None,
+    ) -> "GeoPromptFrame":
+        frame = GeoPromptFrame._from_internal_rows(
+            rows,
+            geometry_column=geometry_column or self.geometry_column,
+            crs=self.crs if crs is None else crs,
+        )
+        if index_column is False:
+            frame._index_column = None  # type: ignore[attr-defined]
+        else:
+            resolved_index = getattr(self, "_index_column", None) if index_column is None else index_column
+            if resolved_index and all(resolved_index in row for row in frame._rows):
+                frame._index_column = resolved_index  # type: ignore[attr-defined]
         return frame
 
     def __len__(self) -> int:
@@ -344,21 +367,83 @@ class GeoPromptFrame:
         """
         return iter(self._rows)
 
-    def __getitem__(self, item: int | slice) -> Record | list[Record]:
-        """Return one row by index or a list of rows by slice."""
+    def __getitem__(self, item: Any) -> Any:
+        """Return rows, row slices, columns, or filtered subsets.
+
+        Supported patterns include integer positions, slices, column names,
+        lists of column names, integer-position lists, and boolean masks.
+        """
         if isinstance(item, slice):
             return [dict(row) for row in self._rows[item]]
-        return dict(self._rows[item])
+        if isinstance(item, int):
+            return dict(self._rows[item])
+        if isinstance(item, str):
+            self._require_column(item)
+            return [row.get(item) for row in self._rows]
+        if isinstance(item, Sequence) and not isinstance(item, (str, bytes, bytearray)):
+            values = list(item)
+            if not values:
+                return self.select_columns([])
+            if all(isinstance(value, bool) for value in values):
+                if len(values) != len(self._rows):
+                    raise ValueError("boolean mask length must match the number of rows")
+                rows = [dict(row) for row, include in _zip_strict(self._rows, values) if include]
+                return self._clone_with_rows(rows)
+            if all(isinstance(value, int) for value in values):
+                rows = [dict(self._rows[index]) for index in values]
+                return self._clone_with_rows(rows)
+            if all(isinstance(value, str) for value in values):
+                return self.select_columns(values)
+        raise TypeError("unsupported selection; use an int, slice, column name, column list, row index list, or boolean mask")
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        """Set or replace a column in place using scalar or row-aligned values."""
+        if not isinstance(key, str):
+            raise TypeError("column name must be a string")
+        if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            values = list(value)
+            if len(values) != len(self._rows):
+                raise ValueError("column length must match the frame length")
+        else:
+            values = [value for _ in self._rows]
+        for row, item_value in _zip_strict(self._rows, values):
+            row[key] = normalize_geometry(item_value) if key == self.geometry_column else item_value
+        self.clear_spatial_index()
 
     @property
     def columns(self) -> list[str]:
-        """Return the column names of the first row, or an empty list if the frame is empty."""
-        return list(self._rows[0].keys()) if self._rows else []
+        """Return stable column order across all rows in the frame."""
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for row in self._rows:
+            for key in row.keys():
+                if key not in seen:
+                    seen.add(key)
+                    ordered.append(key)
+        return ordered
 
     @property
     def geom(self) -> GeoPromptGeometryAccessor:
         """Return a geometry accessor for row-wise geometry metrics and validation."""
         return GeoPromptGeometryAccessor(self)
+
+    @property
+    def spatial_index(self) -> GeoPromptSpatialIndex | None:
+        """Return the cached spatial index if one has been built."""
+        return self._spatial_index
+
+    def build_spatial_index(self, cell_size: float | None = None) -> GeoPromptSpatialIndex:
+        """Build and cache a spatial index for the frame."""
+        self._spatial_index = GeoPromptSpatialIndex.from_frame(self, cell_size=cell_size)
+        return self._spatial_index
+
+    def clear_spatial_index(self) -> None:
+        """Clear any cached spatial index from the frame."""
+        self._spatial_index = None
+
+    def copy(self) -> "GeoPromptFrame":
+        """Return a shallow structural copy of the frame."""
+        return self._clone_with_rows(self.to_records())
 
     def head(self, count: int = 5) -> list[Record]:
         """Return the first ``count`` rows as a list of dicts.
@@ -370,6 +455,12 @@ class GeoPromptFrame:
             List of row dicts, each a shallow copy.
         """
         return [dict(row) for row in self._rows[:count]]
+
+    def tail(self, count: int = 5) -> list[Record]:
+        """Return the last ``count`` rows as a list of dicts."""
+        if count <= 0:
+            return []
+        return [dict(row) for row in self._rows[-count:]]
 
     def iloc(self, index: int) -> Record:
         """Return one row by zero-based integer position."""
@@ -412,9 +503,7 @@ class GeoPromptFrame:
                 unique_rows.append(dict(row))
         else:
             unique_rows = [seen[key] for key in ordered_keys]
-        frame = GeoPromptFrame._from_internal_rows(unique_rows, geometry_column=self.geometry_column, crs=self.crs)
-        frame._index_column = getattr(self, "_index_column", None)  # type: ignore[attr-defined]
-        return frame
+        return self._clone_with_rows(unique_rows)
 
     def to_records(self) -> list[Record]:
         """Return all rows as a list of shallow-copied dicts."""
@@ -492,6 +581,7 @@ class GeoPromptFrame:
             "column_count": len(self.columns),
             "columns": self.columns,
             "crs": self.crs,
+            "geometry_column": self.geometry_column,
             "geometry_types": sorted(geom_types),
             "bounds": bounds,
             "column_stats": col_stats,
@@ -504,6 +594,93 @@ class GeoPromptFrame:
         path.write_text(json.dumps(self.to_records(), indent=indent), encoding="utf-8")
         return str(path)
 
+    def to_pandas(self) -> Any:
+        """Export the frame as a Pandas DataFrame."""
+        from .interop import to_pandas as _to_pandas
+
+        return _to_pandas(self)
+
+    @classmethod
+    def from_pandas(
+        cls,
+        dataframe: Any,
+        *,
+        geometry_column: str = "geometry",
+        crs: str | None = None,
+        x_column: str | None = None,
+        y_column: str | None = None,
+    ) -> "GeoPromptFrame":
+        """Create a frame from a Pandas DataFrame."""
+        from .interop import from_pandas as _from_pandas
+
+        return _from_pandas(
+            dataframe,
+            geometry_column=geometry_column,
+            crs=crs,
+            x_column=x_column,
+            y_column=y_column,
+        )
+
+    def to_polars(self) -> Any:
+        """Export the frame as a Polars DataFrame."""
+        from .interop import to_polars as _to_polars
+
+        return _to_polars(self)
+
+    @classmethod
+    def from_polars(
+        cls,
+        dataframe: Any,
+        *,
+        geometry_column: str = "geometry",
+        crs: str | None = None,
+        x_column: str | None = None,
+        y_column: str | None = None,
+    ) -> "GeoPromptFrame":
+        """Create a frame from a Polars DataFrame."""
+        from .interop import from_polars as _from_polars
+
+        return _from_polars(
+            dataframe,
+            geometry_column=geometry_column,
+            crs=crs,
+            x_column=x_column,
+            y_column=y_column,
+        )
+
+    def to_arrow(self) -> Any:
+        """Export the frame as a PyArrow table."""
+        from .interop import to_arrow as _to_arrow
+
+        return _to_arrow(self)
+
+    @classmethod
+    def from_arrow(
+        cls,
+        table: Any,
+        *,
+        geometry_column: str = "geometry",
+        crs: str | None = None,
+        x_column: str | None = None,
+        y_column: str | None = None,
+    ) -> "GeoPromptFrame":
+        """Create a frame from a PyArrow table."""
+        from .interop import from_arrow as _from_arrow
+
+        return _from_arrow(
+            table,
+            geometry_column=geometry_column,
+            crs=crs,
+            x_column=x_column,
+            y_column=y_column,
+        )
+
+    def __dataframe__(self, nan_as_null: bool = False, allow_copy: bool = True) -> Any:
+        """Return a dataframe interchange object for compatible consumers."""
+        from .interop import dataframe_protocol
+
+        return dataframe_protocol(self, nan_as_null=nan_as_null, allow_copy=allow_copy)
+
     def select_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
         """Return a new frame containing the requested columns and the geometry column."""
         resolved = list(columns)
@@ -511,8 +688,10 @@ class GeoPromptFrame:
             self._require_column(column)
         if self.geometry_column not in resolved:
             resolved.append(self.geometry_column)
-        rows = [{column: row[column] for column in resolved if column in row} for row in self._rows]
-        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+        rows = [{column: row.get(column) for column in resolved} for row in self._rows]
+        current_index = getattr(self, "_index_column", None)
+        preserved_index = current_index if current_index and current_index in resolved else False
+        return self._clone_with_rows(rows, index_column=preserved_index)
 
     def where(self, predicate: Any | None = None, **equals: Any) -> "GeoPromptFrame":
         """Filter rows by equality conditions, a callable predicate, or a boolean mask list."""
@@ -533,7 +712,7 @@ class GeoPromptFrame:
             if callable(predicate) and not bool(predicate(row)):
                 continue
             rows.append(dict(row))
-        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def sort_values(self, by: str, descending: bool = False) -> "GeoPromptFrame":
         """Return a new frame sorted by a column, with nulls placed last."""
@@ -541,7 +720,7 @@ class GeoPromptFrame:
         non_null_rows = [dict(row) for row in self._rows if row.get(by) is not None]
         null_rows = [dict(row) for row in self._rows if row.get(by) is None]
         non_null_sorted = sorted(non_null_rows, key=lambda row: (row.get(by), _row_sort_key(row)), reverse=descending)
-        return GeoPromptFrame(rows=[*non_null_sorted, *null_rows], geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows([*non_null_sorted, *null_rows])
 
     def melt(
         self,
@@ -575,7 +754,9 @@ class GeoPromptFrame:
                 melted[var_name] = column
                 melted[value_name] = row.get(column)
                 rows.append(melted)
-        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+        current_index = getattr(self, "_index_column", None)
+        preserved_index = current_index if current_index and current_index in id_columns_with_geometry else False
+        return self._clone_with_rows(rows, index_column=preserved_index)
 
     def bounds(self) -> Bounds:
         """Return the bounding box of all geometries in the frame.
@@ -1971,8 +2152,9 @@ class GeoPromptFrame:
         )
 
     def build_spatial_index(self, cell_size: float | None = None) -> GeoPromptSpatialIndex:
-        """Build a lightweight bounds index for repeated bounding-box queries."""
-        return GeoPromptSpatialIndex.from_frame(self, cell_size=cell_size)
+        """Build and cache a lightweight bounds index for repeated spatial queries."""
+        self._spatial_index = GeoPromptSpatialIndex.from_frame(self, cell_size=cell_size)
+        return self._spatial_index
 
     def _require_column(self, name: str) -> None:
         if name not in self.columns:
@@ -2494,7 +2676,9 @@ class GeoPromptFrame:
                         populated = True
                 if populated:
                     rows.append(long_row)
-        return GeoPromptFrame(rows=rows, geometry_column=self.geometry_column, crs=self.crs)
+        current_index = getattr(self, "_index_column", None)
+        preserved_index = current_index if current_index and current_index in id_columns else False
+        return self._clone_with_rows(rows, index_column=preserved_index)
 
     def pivot(
         self,
@@ -2548,6 +2732,37 @@ class GeoPromptFrame:
         table = PromptTable(self.to_records())
         return table.describe(columns=selected)
 
+    def isna(self) -> PromptTable:
+        """Return a boolean table showing which values are missing."""
+        rows: list[Record] = []
+        for row in self._rows:
+            rows.append({column: row.get(column) is None for column in self.columns})
+        return PromptTable(rows)
+
+    def notna(self) -> PromptTable:
+        """Return a boolean table showing which values are present."""
+        rows: list[Record] = []
+        for row in self._rows:
+            rows.append({column: row.get(column) is not None for column in self.columns})
+        return PromptTable(rows)
+
+    def profile(self) -> Record:
+        """Return an analyst-friendly profile summary of the frame."""
+        summary = self.summary()
+        null_counts = {
+            column: sum(1 for row in self._rows if row.get(column) is None)
+            for column in self.columns
+        }
+        unique_counts = {
+            column: len({json.dumps(row.get(column), sort_keys=True, default=str) for row in self._rows})
+            for column in self.columns
+            if column != self.geometry_column
+        }
+        summary["null_counts"] = null_counts
+        summary["unique_counts"] = unique_counts
+        summary["preview"] = self.head(5)
+        return summary
+
     def fillna(self, value: Any = None, column: str | None = None, method: FillMethod | None = None) -> "GeoPromptFrame":
         """Fill null values in the frame.
 
@@ -2570,7 +2785,7 @@ class GeoPromptFrame:
                         row[col] = last[col]
                     elif row.get(col) is not None:
                         last[col] = row[col]
-            return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+            return self._clone_with_rows(rows)
         if method == "bfill":
             last = {}
             for row in reversed(rows):
@@ -2580,7 +2795,7 @@ class GeoPromptFrame:
                         row[col] = last[col]
                     elif row.get(col) is not None:
                         last[col] = row[col]
-            return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+            return self._clone_with_rows(rows)
 
         fill_map: dict[str, Any] = {}
         if isinstance(value, dict):
@@ -2596,7 +2811,7 @@ class GeoPromptFrame:
             for col, fill_val in fill_map.items():
                 if row.get(col) is None:
                     row[col] = fill_val
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def dropna(self, subset: Sequence[str] | None = None, how: str = "any") -> "GeoPromptFrame":
         """Drop rows with null values.
@@ -2621,7 +2836,7 @@ class GeoPromptFrame:
             if how == "all" and all(nulls):
                 continue
             rows.append(dict(row))
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def rename_columns(self, mapping: dict[str, str]) -> "GeoPromptFrame":
         """Return a new frame with columns renamed according to ``mapping``.
@@ -2638,7 +2853,9 @@ class GeoPromptFrame:
         rows: list[Record] = []
         for row in self._rows:
             rows.append({mapping.get(k, k): v for k, v in row.items()})
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=new_geom, crs=self.crs)
+        current_index = getattr(self, "_index_column", None)
+        renamed_index = mapping.get(current_index, current_index) if current_index else None
+        return self._clone_with_rows(rows, geometry_column=new_geom, index_column=renamed_index)
 
     def drop_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
         """Return a new frame with the specified columns removed.
@@ -2655,7 +2872,9 @@ class GeoPromptFrame:
         if self.geometry_column in drop_set:
             raise ValueError("cannot drop the geometry column")
         rows = [{k: v for k, v in row.items() if k not in drop_set} for row in self._rows]
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        current_index = getattr(self, "_index_column", None)
+        preserved_index = current_index if current_index and current_index not in drop_set else False
+        return self._clone_with_rows(rows, index_column=preserved_index)
 
     def reorder_columns(self, columns: Sequence[str]) -> "GeoPromptFrame":
         """Return a new frame with columns reordered.
@@ -2674,8 +2893,8 @@ class GeoPromptFrame:
         full_order = ordered + remaining
         if self.geometry_column not in full_order:
             full_order.append(self.geometry_column)
-        rows = [{col: row.get(col) for col in full_order if col in row} for row in self._rows]
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        rows = [{col: row.get(col) for col in full_order} for row in self._rows]
+        return self._clone_with_rows(rows)
 
     def astype(self, column: str, dtype: str) -> "GeoPromptFrame":
         """Cast a column to a new type.
@@ -2692,7 +2911,7 @@ class GeoPromptFrame:
         for row in rows:
             if row.get(column) is not None:
                 row[column] = _cast_frame_value(row[column], dtype)
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def replace(self, column: str, mapping: dict[Any, Any]) -> "GeoPromptFrame":
         """Replace values in a column according to a mapping.
@@ -2710,7 +2929,7 @@ class GeoPromptFrame:
             val = row.get(column)
             if val in mapping:
                 row[column] = mapping[val]
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def map_column(self, column: str, func: Any, *, new_column: str | None = None) -> "GeoPromptFrame":
         """Map a callable across a single column.
@@ -2731,14 +2950,14 @@ class GeoPromptFrame:
         rows = self.to_records()
         for row in rows:
             row[target] = func(row.get(column))
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def apply_rows(self, func: Any) -> "GeoPromptFrame":
         """Apply a row-wise transformation callable to each record."""
         if not callable(func):
             raise TypeError("func must be callable")
         rows = [dict(func(dict(row))) for row in self._rows]
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(rows)
 
     def pipe(self, func: Any, *args: Any, **kwargs: Any) -> Any:
         """Pipe the frame through a callable for chainable workflows."""
@@ -2957,7 +3176,10 @@ class GeoPromptFrame:
         geom_col = self.geometry_column
         if geom_col in collision_cols:
             geom_col = _suffixed(geom_col, lsuffix)
-        return GeoPromptFrame._from_internal_rows(rows, geometry_column=geom_col, crs=self.crs)
+        preserved_index = getattr(self, "_index_column", None)
+        if preserved_index and preserved_index not in rows[0] if rows else True:
+            preserved_index = False
+        return self._clone_with_rows(rows, geometry_column=geom_col, index_column=preserved_index)
 
     @staticmethod
     def concat(frames: Sequence["GeoPromptFrame"]) -> "GeoPromptFrame":
@@ -2976,10 +3198,22 @@ class GeoPromptFrame:
             return GeoPromptFrame([], geometry_column="geometry")
         geom_col = frames[0].geometry_column
         crs = frames[0].crs
+        ordered_columns: list[str] = []
+        seen: set[str] = set()
+        for frame in frames:
+            for column in frame.columns:
+                if column not in seen:
+                    seen.add(column)
+                    ordered_columns.append(column)
         all_rows: list[Record] = []
         for frame in frames:
-            all_rows.extend(frame.to_records())
-        return GeoPromptFrame._from_internal_rows(all_rows, geometry_column=geom_col, crs=crs)
+            for row in frame.to_records():
+                all_rows.append({column: row.get(column) for column in ordered_columns})
+        combined = GeoPromptFrame._from_internal_rows(all_rows, geometry_column=geom_col, crs=crs)
+        common_index = getattr(frames[0], "_index_column", None)
+        if common_index and all(getattr(frame, "_index_column", None) == common_index for frame in frames):
+            combined._index_column = common_index  # type: ignore[attr-defined]
+        return combined
 
     def sample(self, n: int, seed: int | None = None) -> "GeoPromptFrame":
         """Return a random sample of ``n`` rows.
@@ -2995,7 +3229,7 @@ class GeoPromptFrame:
         rng = random.Random(seed)
         n = min(n, len(self._rows))
         sampled = rng.sample(self._rows, n)
-        return GeoPromptFrame._from_internal_rows(sampled, geometry_column=self.geometry_column, crs=self.crs)
+        return self._clone_with_rows(sampled)
 
     def unique(self, column: str) -> list[Any]:
         """Return unique values from a column.

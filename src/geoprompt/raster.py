@@ -73,6 +73,27 @@ def inspect_raster(raster: RasterLike) -> dict[str, Any]:
     }
 
 
+def raster_compare(raster_a: Sequence[Sequence[float]], raster_b: Sequence[Sequence[float]]) -> dict[str, Any]:
+    """Compare two raster grids and report changed cells and summary deltas."""
+    rows = min(len(raster_a), len(raster_b))
+    cols = min(len(raster_a[0]) if raster_a else 0, len(raster_b[0]) if raster_b else 0)
+    changed = 0
+    diffs: list[float] = []
+    for y in range(rows):
+        for x in range(cols):
+            a = float(raster_a[y][x])
+            b = float(raster_b[y][x])
+            if a != b:
+                changed += 1
+            diffs.append(b - a)
+    return {
+        "rows": rows,
+        "cols": cols,
+        "changed_cells": changed,
+        "mean_difference": (sum(diffs) / len(diffs)) if diffs else 0.0,
+    }
+
+
 def _sample_value(info: dict[str, Any], x: float, y: float) -> Any:
     data = info["data"]
     min_x, max_y, cell_width, cell_height = info["transform"]

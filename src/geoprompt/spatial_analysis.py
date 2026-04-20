@@ -955,7 +955,6 @@ def similarity_search(
             v = feat.get(f)
             if isinstance(v, (int, float)):
                 all_vals[f].append(float(v))
-    tv = feat.get(f)
     ranges: dict[str, tuple[float, float]] = {}
     for f in fields:
         vals = all_vals[f]

@@ -194,8 +194,10 @@ class AuthProfile:
 
     def get_token(self, *, password: str | None = None, refresh_token: str | None = None) -> str:
         """Obtain or refresh an access token."""
-        if self._token and self._expiry and datetime.datetime.now() < self._expiry:
-            return self._token
+        if self._token and self._expiry:
+            now = datetime.datetime.now(self._expiry.tzinfo) if self._expiry.tzinfo else datetime.datetime.now()
+            if now < self._expiry:
+                return self._token
 
         requests = _get_requests()
         token_url = f"{self.portal_url}/sharing/rest/generateToken"
@@ -222,7 +224,10 @@ class AuthProfile:
 
     @property
     def is_valid(self) -> bool:
-        return bool(self._token and self._expiry and datetime.datetime.now() < self._expiry)
+        if not (self._token and self._expiry):
+            return False
+        now = datetime.datetime.now(self._expiry.tzinfo) if self._expiry.tzinfo else datetime.datetime.now()
+        return bool(now < self._expiry)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -284,6 +289,47 @@ def paginated_request(
             break
 
     return all_records
+
+
+def service_resilience_profile(
+    url: str,
+    *,
+    auth_profile: AuthProfile | None = None,
+    roles: Sequence[str] = (),
+    retry_count: int = 3,
+    backoff_seconds: float = 1.0,
+    rate_limit_per_minute: int = 60,
+    failure_threshold: int | None = None,
+) -> dict[str, Any]:
+    """Build a production-minded request profile for remote GeoPrompt jobs.
+
+    The returned plan can be used by callers to standardize headers, retry
+    policy, circuit-breaker thresholds, and simple rate-limiting defaults.
+    """
+    headers = {"Accept": "application/json"}
+    if auth_profile and auth_profile.is_valid and getattr(auth_profile, "_token", None):
+        headers["Authorization"] = f"Bearer {auth_profile._token}"
+
+    threshold = int(failure_threshold if failure_threshold is not None else max(1, retry_count))
+    return {
+        "url": url,
+        "headers": headers,
+        "roles": list(roles),
+        "retry": {
+            "max_attempts": max(1, int(retry_count)),
+            "backoff_seconds": max(0.0, float(backoff_seconds)),
+            "strategy": "exponential",
+        },
+        "rate_limit": {
+            "requests_per_minute": max(1, int(rate_limit_per_minute)),
+            "recommended_spacing_seconds": round(60.0 / max(1, int(rate_limit_per_minute)), 4),
+        },
+        "circuit_breaker": {
+            "failure_threshold": threshold,
+            "recovery_timeout_seconds": round(max(float(backoff_seconds) * threshold, 1.0), 4),
+            "state": "closed",
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -587,5 +633,6 @@ __all__ = [
     "project_health_dashboard",
     "publish_package",
     "run_job_batch",
+    "service_resilience_profile",
     "share_item",
 ]

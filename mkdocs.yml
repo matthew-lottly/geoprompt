@@ -1,0 +1,10 @@
+site_name: Geoprompt
+site_description: Lightweight spatial analysis workflows and parity documentation
+nav:
+  - Home: README.md
+  - Start Here: docs/start-here.md
+  - ArcPy Migration: docs/migration-from-arcpy.md
+  - Environment and Optional Dependencies: docs/environment-and-optional-dependencies.md
+  - Video Walkthroughs: docs/video-walkthroughs.md
+  - Performance and Scale: docs/performance-and-scale.md
+  - Troubleshooting: docs/troubleshooting.md

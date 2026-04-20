@@ -1,0 +1,9 @@
+[run]
+branch = True
+source =
+    src/geoprompt
+
+[report]
+show_missing = True
+skip_covered = False
+precision = 2

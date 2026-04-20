@@ -11,6 +11,7 @@ import json
 import math
 import re
 import threading
+import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterable, Sequence
@@ -44,6 +45,18 @@ def _pyproj_module() -> Any | None:
         return importlib.import_module("pyproj")
     except Exception:
         return None
+
+
+def _safe_proj4_string(resolved: Any) -> str | None:
+    if not hasattr(resolved, "to_proj4"):
+        return None
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="You will likely lose important projection information when converting to a PROJ string.*",
+            category=UserWarning,
+        )
+        return resolved.to_proj4()
 
 
 @lru_cache(maxsize=256)
@@ -80,7 +93,7 @@ def _resolve_crs_cached(user_input: str) -> tuple[tuple[str, Any], ...]:
                     "is_geographic": bool(resolved.is_geographic),
                     "is_projected": bool(resolved.is_projected),
                     "wkt": resolved.to_wkt(),
-                    "proj": resolved.to_proj4() if hasattr(resolved, "to_proj4") else None,
+                    "proj": _safe_proj4_string(resolved),
                 }
             )
         except Exception:

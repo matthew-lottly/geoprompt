@@ -16,7 +16,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 from .frame import GeoPromptFrame
-from .geometry import geometry_type
+from .geometry import geometry_intersects, geometry_type, normalize_geometry
 
 
 WORKLOAD_PRESETS: dict[str, dict[str, int | None]] = {
@@ -641,6 +641,41 @@ def _frame_from_path(path: str | Path, geometry: str = "geometry", crs: str | No
     )
 
 
+def _row_matches_filter(row: dict[str, Any], where: Any | None) -> bool:
+    if where is None:
+        return True
+    if callable(where):
+        return bool(where(dict(row)))
+    if isinstance(where, dict):
+        return all(row.get(key) == value for key, value in where.items())
+    if isinstance(where, str):
+        try:
+            return bool(eval(where, {"__builtins__": {}}, dict(row)))
+        except Exception as exc:  # pragma: no cover - invalid expressions are user input issues
+            raise ValueError(f"invalid where expression: {where}") from exc
+    raise TypeError("where must be a mapping, callable, or expression string")
+
+
+def _apply_read_filters(
+    rows: Iterable[dict[str, Any]],
+    *,
+    geometry: str,
+    where: Any | None = None,
+    geometry_mask: Any | None = None,
+) -> list[dict[str, Any]]:
+    resolved_mask = normalize_geometry(geometry_mask) if geometry_mask is not None else None
+    filtered: list[dict[str, Any]] = []
+    for row in rows:
+        if not _row_matches_filter(row, where):
+            continue
+        if resolved_mask is not None:
+            candidate = row.get(geometry)
+            if candidate is None or not geometry_intersects(candidate, resolved_mask):
+                continue
+        filtered.append(dict(row))
+    return filtered
+
+
 def read_data(
     path: str | Path,
     *,
@@ -654,6 +689,8 @@ def read_data(
     sample_step: int = 1,
     layer: str | None = None,
     bbox: tuple[float, float, float, float] | None = None,
+    where: Any | None = None,
+    geometry_mask: Any | None = None,
     delimiter: str = ",",
     encoding: str = "utf-8",
 ) -> GeoPromptFrame:
@@ -664,16 +701,21 @@ def read_data(
     - ``sample_step``: keep every Nth row
     - ``use_columns``: read selected attributes only
     - ``bbox`` and ``layer`` for geospatial stores
+    - ``where`` and ``geometry_mask`` for lightweight read-time filtering
     """
     if _is_url_source(path):
-        return read_service_url(
+        frame = read_service_url(
             str(path),
             geometry=geometry,
             crs=crs,
             use_columns=use_columns,
             limit_rows=limit_rows,
             sample_step=sample_step,
+            where=where if isinstance(where, str) else None,
+            bbox=bbox,
         )
+        rows = _apply_read_filters(frame.to_records(), geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=frame.crs)
 
     data_path = Path(path)
     _validate_read_options(
@@ -687,6 +729,7 @@ def read_data(
         payload = _read_json(data_path)
         rows = _records_from_payload(payload, geometry=geometry)
         rows = _apply_row_limits(rows, limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
         if use_columns:
             keep = set(use_columns)
             rows = [
@@ -709,10 +752,11 @@ def read_data(
             delimiter=delim,
             encoding=encoding,
         )
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
         return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs)
 
     if suffix in {".shp", ".gpkg", ".fgb", ".gdb", ".parquet"}:
-        return _read_with_geopandas(
+        frame = _read_with_geopandas(
             data_path,
             geometry=geometry,
             crs=crs,
@@ -722,6 +766,8 @@ def read_data(
             limit_rows=limit_rows,
             sample_step=sample_step,
         )
+        rows = _apply_read_filters(frame.to_records(), geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=frame.crs)
 
     raise ValueError(f"unsupported input format for path: {data_path}")
 
@@ -913,6 +959,7 @@ def iter_data_with_preset(
     path: str | Path,
     *,
     preset: str = "large",
+    workload: str | None = None,
     geometry: str = "geometry",
     crs: str | None = None,
     x_column: str | None = None,
@@ -929,7 +976,8 @@ def iter_data_with_preset(
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> Iterable[GeoPromptFrame]:
     """Iterate data in chunks with workload defaults and explicit overrides."""
-    settings = get_workload_preset(preset)
+    resolved_preset = workload or preset
+    settings = get_workload_preset(resolved_preset)
     resolved_limit = limit_rows if limit_rows is not None else settings["limit_rows"]
     resolved_sample = sample_step if sample_step is not None else int(settings["sample_step"] or 1)
     resolved_chunk = chunk_size if chunk_size is not None else int(settings["chunk_size"] or 50000)
@@ -1027,6 +1075,8 @@ def read_table(
     use_columns: Sequence[str] | None = None,
     limit_rows: int | None = None,
     sample_step: int = 1,
+    where: Any | None = None,
+    geometry_mask: Any | None = None,
     delimiter: str = ",",
     encoding: str = "utf-8",
 ) -> GeoPromptFrame:
@@ -1041,6 +1091,8 @@ def read_table(
         use_columns=use_columns,
         limit_rows=limit_rows,
         sample_step=sample_step,
+        where=where,
+        geometry_mask=geometry_mask,
         delimiter=delimiter,
         encoding=encoding,
     )
@@ -1196,28 +1248,50 @@ def write_data(
     encoding: str = "utf-8",
     layer: str | None = None,
     driver: str | None = None,
+    mode: str = "overwrite",
 ) -> Path:
     """Unified writer for GeoJSON/JSON/CSV and optional geospatial file formats."""
+    if mode not in {"overwrite", "append"}:
+        raise ValueError("mode must be 'overwrite' or 'append'")
+
     output_path = Path(path)
     suffix = output_path.suffix.lower()
 
     if suffix in {".geojson", ".json"}:
+        if mode == "append" and output_path.exists() and output_path.stat().st_size > 0:
+            existing = read_data(output_path, geometry=geometry)
+            combined = GeoPromptFrame.from_records(
+                [*existing.to_records(), *frame.to_records()],
+                geometry=geometry,
+                crs=frame.crs or existing.crs,
+            )
+            return write_geojson(output_path, combined, geometry=geometry, id_column=id_column)
         return write_geojson(output_path, frame, geometry=geometry, id_column=id_column)
 
     if suffix in {".csv", ".tsv", ".txt"}:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         rows = frame.to_records()
         if not rows:
-            output_path.write_text("", encoding=encoding)
+            if mode == "overwrite" or not output_path.exists():
+                output_path.write_text("", encoding=encoding)
             return output_path
-        fieldnames = list(rows[0].keys())
+
         delim = "\t" if suffix == ".tsv" else delimiter
-        with output_path.open("w", encoding=encoding, newline="") as handle:
+        existing_fields: list[str] = []
+        append_mode = mode == "append" and output_path.exists() and output_path.stat().st_size > 0
+        if append_mode:
+            with output_path.open("r", encoding=encoding, newline="") as handle:
+                reader = csv.DictReader(handle, delimiter=delim)
+                existing_fields = list(reader.fieldnames or [])
+
+        fieldnames = list(dict.fromkeys([*existing_fields, *(key for row in rows for key in row.keys())]))
+        with output_path.open("a" if append_mode else "w", encoding=encoding, newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames, delimiter=delim)
-            writer.writeheader()
+            if not append_mode:
+                writer.writeheader()
             for row in rows:
-                serialized = dict(row)
-                if geometry in serialized:
+                serialized = {field: row.get(field) for field in fieldnames}
+                if geometry in serialized and serialized[geometry] is not None:
                     serialized[geometry] = json.dumps(serialized[geometry], separators=(",", ":"))
                 writer.writerow(serialized)
         return output_path
@@ -1239,12 +1313,15 @@ def write_data(
         if driver is not None:
             to_file_kwargs["driver"] = driver
         if suffix == ".parquet":
+            if mode == "append":
+                raise ValueError("append mode is not supported for parquet outputs")
             if layer is not None:
                 raise ValueError("layer is not supported for parquet outputs")
             if driver is not None:
                 raise ValueError("driver is not supported for parquet outputs")
             gdf.to_parquet(output_path)
         else:
+            to_file_kwargs["mode"] = "a" if mode == "append" else "w"
             gdf.to_file(output_path, **to_file_kwargs)
         return output_path
 
@@ -1481,6 +1558,42 @@ def read_excel(
         record["geometry"] = {"type": "Point", "coordinates": [x, y]}
         rows.append(record)
     return GeoPromptFrame(rows, geometry_column="geometry", crs=crs)
+
+
+def write_feather(
+    frame: GeoPromptFrame,
+    path: str | Path,
+) -> str:
+    """Write a frame to Apache Feather while preserving GeoPrompt metadata."""
+    try:
+        import pyarrow.feather as feather
+    except ImportError as exc:
+        raise ImportError("pyarrow is required to write Feather files") from exc
+
+    from .interop import to_arrow
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    feather.write_feather(to_arrow(frame), str(out))
+    return str(out)
+
+
+def read_feather(
+    path: str | Path,
+    *,
+    geometry_column: str = "geometry",
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    """Read a GeoPrompt Feather file back into a frame."""
+    try:
+        import pyarrow.feather as feather
+    except ImportError as exc:
+        raise ImportError("pyarrow is required to read Feather files") from exc
+
+    from .interop import from_arrow
+
+    table = feather.read_table(str(path))
+    return from_arrow(table, geometry_column=geometry_column, crs=crs)
 
 
 def write_excel(
@@ -1987,6 +2100,7 @@ __all__ = [
     "read_data",
     "read_data_with_preset",
     "read_excel",
+    "read_feather",
     "read_features",
     "read_geojson",
     "read_geopackage",
@@ -2002,6 +2116,7 @@ __all__ = [
     "write_cloud_json",
     "write_data",
     "write_excel",
+    "write_feather",
     "write_geojson",
     "write_geopackage",
     "write_geoparquet",

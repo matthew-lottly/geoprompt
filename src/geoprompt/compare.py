@@ -4,6 +4,7 @@ import argparse
 import html
 import importlib
 import json
+import logging
 import statistics
 import time
 from dataclasses import dataclass
@@ -23,6 +24,8 @@ DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "sample_features.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
 DEFAULT_BENCHMARK_PATH = PROJECT_ROOT / "data" / "benchmark_features.json"
 DEFAULT_JOIN_PATH = PROJECT_ROOT / "data" / "benchmark_regions.json"
+
+logger = logging.getLogger("geoprompt")
 
 
 @dataclass(frozen=True)
@@ -1002,14 +1005,14 @@ def main() -> None:
         join_path=args.join_path,
     )
     written = export_comparison_bundle(report, args.output_dir)
-    print("Wrote GeoPrompt comparison bundle:")
-    print(f"- JSON: {written['json']}")
-    print(f"- Markdown: {written['markdown']}")
-    print(f"- HTML: {written['html']}")
+    logger.info("Wrote GeoPrompt comparison bundle")
+    logger.info("JSON output: %s", written["json"])
+    logger.info("Markdown output: %s", written["markdown"])
+    logger.info("HTML output: %s", written["html"])
     if args.export_history:
         history = export_benchmark_history(args.output_dir)
-        print(f"- Benchmark history HTML: {history['html']}")
-        print(f"- Benchmark history JSON: {history['json']}")
+        logger.info("Benchmark history HTML: %s", history["html"])
+        logger.info("Benchmark history JSON: %s", history["json"])
 
 
 __all__ = [
