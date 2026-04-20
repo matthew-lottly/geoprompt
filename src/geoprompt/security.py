@@ -432,6 +432,30 @@ class GracefulShutdown:
                 pass
 
 
+def release_security_gates() -> Dict[str, Any]:
+    """Return the standard release-time security and supply-chain gates."""
+    return {
+        "release_gates": ["sbom", "signing", "provenance", "secrets_scan", "config_review"],
+        "recommended_tools": {
+            "sbom": "CycloneDX",
+            "signing": "sigstore or trusted publisher",
+            "provenance": "workspace manifest and release evidence bundle",
+            "secrets_scan": "pre-release secrets scan plus CI checks",
+        },
+        "cve_triage_sla_hours": 72,
+    }
+
+
+def support_window_policy() -> Dict[str, Any]:
+    """Publish the support-window and hotfix expectations for enterprise adoption."""
+    return {
+        "supported_versions": ["current beta", "latest patch line"],
+        "lts_style_support": True,
+        "security_hotfix_target": "critical fixes acknowledged within 72 hours",
+        "rollback_guidance": "keep prior wheel and evidence bundle available for rollback",
+    }
+
+
 # ---------------------------------------------------------------------------
 # 1868. Priority queue for jobs
 # ---------------------------------------------------------------------------

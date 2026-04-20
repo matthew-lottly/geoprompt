@@ -21,6 +21,7 @@ from .routing import (
     edge_impedance_cost,
     landmark_lower_bound,
     multi_criteria_shortest_path,
+    multimodal_shortest_path,
     shortest_path,
     service_area,
     time_dependent_shortest_path,
@@ -46,6 +47,8 @@ from .topology import (
 from .utility import (
     attribute_aware_headloss,
     capital_planning_prioritization,
+    accessibility_equity_audit,
+    closest_facility_dispatch,
     crew_dispatch_optimizer,
     critical_customer_coverage_audit,
     criticality_ranking_by_node_removal,
@@ -85,7 +88,9 @@ from .utility import (
     stormwater_flow_accumulation,
     trace_electric_feeder,
     trace_water_pressure_zones,
+    utility_monte_carlo_resilience,
     utility_outage_isolation,
+    utility_stress_scenario_library,
 )
 from .graph_algorithms import (
     astar_shortest_path,
@@ -117,6 +122,7 @@ __all__ = [
     "edge_impedance_cost",
     "landmark_lower_bound",
     "multi_criteria_shortest_path",
+    "multimodal_shortest_path",
     "shortest_path",
     "service_area",
     "time_dependent_shortest_path",
@@ -137,7 +143,9 @@ __all__ = [
     "co_location_conflict_scan",
     # Utility domain analysis
     "attribute_aware_headloss",
+    "accessibility_equity_audit",
     "capital_planning_prioritization",
+    "closest_facility_dispatch",
     "crew_dispatch_optimizer",
     "critical_customer_coverage_audit",
     "criticality_ranking_by_node_removal",
@@ -177,7 +185,9 @@ __all__ = [
     "stormwater_flow_accumulation",
     "trace_electric_feeder",
     "trace_water_pressure_zones",
+    "utility_monte_carlo_resilience",
     "utility_outage_isolation",
+    "utility_stress_scenario_library",
     # Graph algorithms
     "astar_shortest_path",
     "bellman_ford_shortest_path",

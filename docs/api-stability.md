@@ -2,6 +2,14 @@
 
 This page distinguishes stable APIs from advanced/experimental APIs.
 
+## Support matrix
+
+| Surface | Status | Guidance |
+| --- | --- | --- |
+| Core frame, geometry, IO, reporting, network routing | Stable | Safe default for long-lived analyst workflows |
+| Raster, database, service, and interop extras | Optional but supported | Use when the dependency stack is available |
+| AI, ML, and fast-evolving enterprise helpers | Experimental | Pin versions and expect faster iteration |
+
 ## Stable APIs
 
 These are intended for long-term use with backward compatibility within minor releases.
@@ -15,7 +23,7 @@ These are intended for long-term use with backward compatibility within minor re
 
 Core routing and analysis functions suitable for production use:
 
-- `built_network_graph()` — graph construction and validation
+- `build_network_graph()` — graph construction and validation
 - `shortest_path()` — single-origin, single-destination routing
 - `service_area()` — reachable nodes within cost threshold
 - `od_cost_matrix()` — origin-destination distance matrix
@@ -46,6 +54,19 @@ These APIs are powerful but may evolve faster.
 - Patch releases: bug fixes and compatibility-safe improvements.
 - Minor releases: additive features and occasional advanced-API adjustments.
 - Major releases: breaking changes when needed.
+- Deprecations should normally stay documented for at least one minor release before removal.
+
+## Release quality bar
+
+### Alpha to Beta
+- stable core workflows must stay green across the full regression suite
+- flagship docs and examples must describe real data and real workflow intent
+- experimental helpers must be clearly labeled instead of implied as equivalent to hardened enterprise platforms
+
+### Beta to 1.0
+- public core APIs should have stable signatures and migration notes
+- major docs, gallery, and comparison outputs should be evidence-backed and reproducible
+- release candidates should ship with repeatable benchmark and smoke-run proof
 
 ## Guidance
 

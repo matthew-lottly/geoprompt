@@ -1695,7 +1695,7 @@ def lint_recipe(recipe: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def mypy_plugin_stub() -> str:
-    """Return a minimal mypy plugin stub for GeoPromptFrame (1188)."""
+    """Return a simulation-only mypy plugin stub for GeoPromptFrame (1188)."""
     return textwrap.dedent("""\
         from mypy.plugin import Plugin
 
@@ -1879,7 +1879,7 @@ def notify_email_stub(
     smtp_host: str = "localhost",
     smtp_port: int = 25,
 ) -> dict[str, Any]:
-    """Build an email notification payload (1220). Actual sending requires smtplib."""
+    """Build a simulation-only email notification payload (1220). Actual sending requires smtplib."""
     return {
         "to": to,
         "subject": subject,
@@ -1894,7 +1894,7 @@ def notify_slack_stub(
     webhook_url: str,
     message: str,
 ) -> dict[str, Any]:
-    """Build a Slack notification payload (1221)."""
+    """Build a simulation-only Slack notification payload (1221)."""
     return {
         "webhook_url": webhook_url,
         "payload": {"text": message},
@@ -2122,7 +2122,7 @@ def sso_saml_metadata_stub(
     entity_id: str,
     acs_url: str,
 ) -> str:
-    """Generate a minimal SAML SP metadata XML stub (1244)."""
+    """Generate a simulation-only SAML SP metadata XML stub (1244)."""
     return textwrap.dedent(f"""\
         <?xml version="1.0"?>
         <EntityDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata"
@@ -2271,7 +2271,7 @@ def kubernetes_helm_values(
 
 
 def serverless_endpoint_stub() -> str:
-    """Generate a serverless geo-processing endpoint handler (1215)."""
+    """Generate a simulation-only serverless geo-processing endpoint handler (1215)."""
     return textwrap.dedent("""\
         import json
         import geoprompt

@@ -85,6 +85,40 @@ frame = gp.read_data("assets.parquet")
 gp.write_data("assets_out.parquet", frame)
 ```
 
+## 7. Clean Strings, Dates, and Rank Priorities
+
+```python
+import geoprompt as gp
+
+sites = gp.geopromptframe.from_records(records)
+cleaned = (
+    sites
+    .str.strip("facility_name")
+    .dt.year("inspection_date", new_column="inspection_year")
+    .query("priority >= 2 and status == 'open'")
+    .nlargest(10, "priority")
+)
+```
+
+## 8. Check Raster Alignment Before Map Algebra
+
+```python
+import geoprompt as gp
+
+report = gp.raster_alignment_report([risk_surface, outage_surface])
+if report["aligned"]:
+    combined = gp.raster_lazy_algebra("risk + outage", {"risk": risk_surface, "outage": outage_surface})
+```
+
+## 9. Inspect Enterprise Persistence and Index Guidance
+
+```python
+import geoprompt as gp
+
+matrix = gp.enterprise_persistence_matrix()
+index_plan = gp.index_planning_suggestions(records, candidate_fields=["asset_id", "status", "owner"])
+```
+
 ## Preset Reference
 
 - `small`: low memory and bounded default reads.

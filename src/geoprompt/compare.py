@@ -8,6 +8,7 @@ import logging
 import statistics
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Callable
@@ -883,6 +884,12 @@ def build_comparison_report(
 
     return {
         "package": "geoprompt",
+        "metadata": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generation_script": "geoprompt.compare",
+            "data_version": "repository-benchmark-corpus-v1",
+            "refresh_cadence": "each release and benchmark refresh",
+        },
         "comparison": {
             "output_dir": str(output_dir),
             "tolerance": tolerance,

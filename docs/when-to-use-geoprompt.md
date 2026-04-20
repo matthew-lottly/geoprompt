@@ -1,5 +1,15 @@
 # When to Use GeoPrompt
 
+## Top three flagship lanes
+
+1. utility, outage, and resilience analysis
+2. scenario comparison and decision-ready reporting
+3. lightweight GeoJSON-first analyst workflows that are easy to automate and test
+
+## Why GeoPrompt exists
+
+GeoPrompt exists to give analysts a lighter-weight, automation-friendly spatial toolkit that is especially strong for infrastructure, utility, resilience, and stakeholder-ready reporting workflows.
+
 ## Use GeoPrompt when you want
 
 - fast analyst workflows with a lightweight spatial frame
@@ -32,3 +42,12 @@ Use GeoPrompt as the core package and default engine when the workflow is center
 Use GeoPrompt together with GeoPandas only when you explicitly need a bridge:
 - GeoPrompt for the main analysis, reporting, and domain logic
 - GeoPandas for broader ecosystem interop where needed
+
+## Out of scope
+
+GeoPrompt is not trying to be a full clone of every ArcPy surface. The following remain integration-first or intentionally secondary:
+- heavyweight enterprise geodatabase administration beyond documented helpers
+- full raster production shop replacement across all imagery workflows
+- proprietary ArcGIS platform publishing and governance features that require Esri infrastructure
+
+That scope discipline keeps the package focused on where it can genuinely lead rather than just accumulate function count.

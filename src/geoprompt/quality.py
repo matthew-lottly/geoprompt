@@ -6,9 +6,15 @@ B1 code-quality cleanup work across selected files.
 from __future__ import annotations
 
 import ast
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover
+    tomllib = None  # type: ignore[assignment]
 
 
 @dataclass(slots=True, frozen=True)
@@ -132,6 +138,125 @@ def quality_scorecard(paths: Iterable[str | Path]) -> dict[str, Any]:
     return {"files": file_summaries, "total_issues": total_issues, "passed": total_issues == 0}
 
 
+def packaging_smoke_matrix(pyproject_path: str | Path = "pyproject.toml") -> list[dict[str, Any]]:
+    """Build a simple packaging smoke-test matrix from the project extras."""
+    path = _to_path(pyproject_path)
+    extras: dict[str, Any] = {}
+    if tomllib is not None and path.exists():
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        extras = data.get("project", {}).get("optional-dependencies", {})
+
+    ordered_profiles = ["core", *sorted(extras.keys())]
+    matrix: list[dict[str, Any]] = []
+    for profile in ordered_profiles:
+        install_cmd = "pip install -e ." if profile == "core" else f"pip install -e .[{profile}]"
+        matrix.append({
+            "profile": profile,
+            "install": install_cmd,
+            "purpose": "base package" if profile == "core" else "optional extra validation",
+        })
+    return matrix
+
+
+def placeholder_inventory(paths: Iterable[str | Path]) -> dict[str, Any]:
+    """Inventory public functions that are explicitly marked as stubs or placeholders."""
+    markers = ("stub", "placeholder", "simulation-only", "demo-only")
+    found: list[dict[str, Any]] = []
+    for path in paths:
+        resolved, tree = _module_tree(path)
+        for node in _public_functions(tree):
+            doc = (ast.get_docstring(node) or "").lower()
+            reasons = [marker for marker in markers if marker in node.name.lower() or marker in doc]
+            if reasons:
+                found.append({"path": str(resolved), "name": node.name, "markers": sorted(set(reasons))})
+    return {"functions": found, "count": len(found), "passed": True}
+
+
+def subsystem_maturity_matrix() -> dict[str, Any]:
+    """Return a concise maturity map for the major GeoPrompt subsystems."""
+    return {
+        "stable_core": ["frame", "geometry", "network", "equations", "io"],
+        "supported_optional": ["service", "viz", "db", "raster", "compare"],
+        "experimental_surface": ["domain", "ml", "imagery", "geoprocessing extras"],
+        "simulation_only": [
+            "mypy_plugin_stub",
+            "notify_email_stub",
+            "notify_slack_stub",
+            "sso_saml_metadata_stub",
+            "serverless_endpoint_stub",
+        ],
+    }
+
+
+def documentation_asset_manifest(manifest_path: str | Path = "docs/figures-manifest.json") -> dict[str, Any]:
+    """Validate the committed figure manifest and its provenance fields."""
+    path = _to_path(manifest_path)
+    if not path.exists():
+        return {"passed": False, "count": 0, "issues": [f"missing manifest: {path}"]}
+
+    data = json.loads(path.read_text(encoding="utf-8"))
+    figures = list(data.get("figures", []))
+    required = {"path", "caption", "data_source", "generation_script", "last_verified"}
+    issues: list[str] = []
+    for item in figures:
+        missing = sorted(required - set(item.keys()))
+        if missing:
+            issues.append(f"{item.get('path', 'unknown')}: missing {', '.join(missing)}")
+    return {"passed": not issues, "count": len(figures), "issues": issues, "figures": figures}
+
+
+def release_readiness_report(
+    paths: Iterable[str | Path],
+    *,
+    pyproject_path: str | Path = "pyproject.toml",
+    api_stability_path: str | Path = "docs/api-stability.md",
+) -> dict[str, Any]:
+    """Summarize whether the package has enough proof to be treated as beta-ready."""
+    quality = quality_scorecard(paths)
+    packaging = packaging_smoke_matrix(pyproject_path)
+    api_doc = _to_path(api_stability_path)
+    api_stability = {
+        "documented": api_doc.exists(),
+        "path": str(api_doc),
+        "status": "tracked" if api_doc.exists() else "missing",
+    }
+    benchmark_evidence = {
+        "comparison_bundle_support": Path("src/geoprompt/compare.py").exists(),
+        "benchmarks_doc": Path("docs/benchmarks.md").exists(),
+    }
+    placeholder_audit = placeholder_inventory([
+        "src/geoprompt/geoprocessing.py",
+        "src/geoprompt/domain.py",
+        "src/geoprompt/ml.py",
+        "src/geoprompt/imagery.py",
+    ])
+    docs_assets = documentation_asset_manifest("docs/figures-manifest.json")
+    evidence_realism = {
+        "manifest_tracked": docs_assets.get("passed", False),
+        "figures_count": docs_assets.get("count", 0),
+        "release_evidence_doc": Path("docs/release-evidence.md").exists(),
+    }
+
+    if quality["passed"] and api_stability["documented"] and len(packaging) >= 6 and docs_assets.get("passed"):
+        release_stage = "release-candidate"
+    elif api_stability["documented"] and len(packaging) >= 3:
+        release_stage = "beta"
+    else:
+        release_stage = "alpha"
+
+    return {
+        "release_stage": release_stage,
+        "quality": quality,
+        "packaging_smoke_matrix": packaging,
+        "api_stability": api_stability,
+        "benchmark_evidence": benchmark_evidence,
+        "placeholder_audit": placeholder_audit,
+        "docs_assets": docs_assets,
+        "evidence_realism": evidence_realism,
+        "trust_milestone": release_stage in {"beta", "release-candidate"},
+    }
+
+
 __all__ = [
     "QualityAuditResult",
     "audit_public_docstrings",
@@ -139,5 +264,10 @@ __all__ = [
     "audit_mutable_defaults",
     "audit_pathlib_usage",
     "audit_print_debugging",
+    "documentation_asset_manifest",
+    "packaging_smoke_matrix",
+    "placeholder_inventory",
     "quality_scorecard",
+    "release_readiness_report",
+    "subsystem_maturity_matrix",
 ]

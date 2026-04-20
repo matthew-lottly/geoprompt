@@ -1192,20 +1192,33 @@ def create_dataset_catalog(
 ) -> dict[str, Any]:
     """Build a lightweight enterprise-style catalog for one or more datasets."""
     catalog: dict[str, Any] = {}
+    workspace_text = str(workspace) if workspace is not None else None
+    persistence = "simulated"
+    if workspace_text:
+        lowered = workspace_text.lower()
+        if lowered.endswith((".gpkg", ".sqlite", ".db", ".duckdb", ".gdb", ".geodatabase")):
+            persistence = "real"
+        else:
+            persistence = "mixed"
+
     for name, rows in datasets.items():
         schema = export_schema(rows, name=name)
         field_names = [field["name"] for field in schema.get("fields", [])]
+        health = maintenance_audit_pipeline(rows, indexed_fields=[field for field in field_names if field.lower().endswith("id")])
         catalog[name] = {
             "name": name,
             "row_count": len(rows),
             "fields": field_names,
             "schema": schema,
             "has_geometry": any("geometry" in row or "_geometry" in row for row in rows),
+            "health": health,
+            "persistence": persistence,
         }
     return {
-        "workspace": str(workspace) if workspace is not None else None,
+        "workspace": workspace_text,
         "dataset_count": len(catalog),
         "datasets": catalog,
+        "persistence": persistence,
     }
 
 
@@ -1248,6 +1261,53 @@ def maintenance_audit_pipeline(
         "issues": issues,
         "record_count": len(records),
         "indexed_fields": list(indexed_fields),
+        "index_plan": index_planning_suggestions(records, candidate_fields=indexed_fields),
+    }
+
+
+def index_planning_suggestions(
+    records: Sequence[dict[str, Any]],
+    *,
+    candidate_fields: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Recommend practical indexes for tabular or feature datasets."""
+    if not records:
+        return {"record_count": 0, "recommended_indexes": [], "notes": ["No records supplied."]}
+
+    fields = list(candidate_fields) or [
+        key for key in records[0].keys() if key not in {"geometry", "_geometry"}
+    ]
+    recommendations: list[dict[str, Any]] = []
+
+    for field in fields:
+        values = [row.get(field) for row in records if row.get(field) not in (None, "")]
+        if not values:
+            continue
+        distinct = len({json.dumps(value, sort_keys=True, default=str) for value in values})
+        ratio = distinct / len(values)
+        normalized = field.lower()
+        if normalized.endswith("id") or ratio >= 0.9:
+            recommendations.append({"field": field, "kind": "unique_or_primary", "uniqueness_ratio": round(ratio, 3), "reason": "high-cardinality lookup or identifier"})
+        elif normalized in {"status", "owner", "category", "type", "priority"} or 0.2 <= ratio <= 0.8:
+            recommendations.append({"field": field, "kind": "btree_lookup", "uniqueness_ratio": round(ratio, 3), "reason": "common filter or grouping field"})
+
+    return {
+        "record_count": len(records),
+        "recommended_indexes": recommendations,
+        "notes": ["Recommendations are advisory and tuned for GeoPackage/SQLite/PostGIS-style operational tables."],
+    }
+
+
+def enterprise_persistence_matrix() -> dict[str, dict[str, str]]:
+    """Publish which enterprise-style workflows are durable versus simulated."""
+    return {
+        "geopackage": {"persistence": "real", "status": "supported", "notes": "Uses actual file-backed GeoPackage reads and writes."},
+        "sqlite_spatialite": {"persistence": "real", "status": "supported", "notes": "SQLite/SpatiaLite-style reads and writes persist to disk."},
+        "postgis": {"persistence": "real", "status": "supported", "notes": "Database connectors operate against real PostGIS tables when dependencies are installed."},
+        "duckdb": {"persistence": "real", "status": "supported", "notes": "DuckDB spatial workflows persist when backed by a file database."},
+        "edit_session": {"persistence": "simulated", "status": "safe-preview", "notes": "Change tracking, commit, and rollback operate in-memory for deterministic testing and workflow rehearsal."},
+        "version_reconcile_post": {"persistence": "simulated", "status": "safe-preview", "notes": "Conflict reporting is real logic, but the posting target is an in-memory record collection."},
+        "offline_replica_bundle": {"persistence": "real", "status": "supported", "notes": "Bundle manifests and attachments are written to disk for portable handoff workflows."},
     }
 
 
@@ -1657,6 +1717,7 @@ __all__ = [
     "feature_class_to_gdb_batch",
     "feature_to_3d_by_attribute",
     "field_calculate",
+    "enterprise_persistence_matrix",
     "FieldDomain",
     "add_rule_to_topology",
     "add_surface_information",
@@ -1668,6 +1729,7 @@ __all__ = [
     "import_zip_bundle",
     "inspect_geodatabase",
     "interpolate_shape_3d_from_surface",
+    "index_planning_suggestions",
     "list_attachments",
     "layer_3d_to_feature_class",
     "list_fields",

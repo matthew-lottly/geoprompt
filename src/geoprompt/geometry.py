@@ -244,8 +244,8 @@ def _point_in_polygon(point: Coordinate, polygon: Geometry) -> bool:
 
     inside = False
     for index in range(len(ring) - 1):
-        start_x, start_y = ring[index]
-        end_x, end_y = ring[index + 1]
+        start_x, start_y = _coord_xy(ring[index])
+        end_x, end_y = _coord_xy(ring[index + 1])
         intersects = (start_y > point[1]) != (end_y > point[1])
         if not intersects:
             continue
@@ -360,12 +360,7 @@ def geometry_area(geometry: Geometry) -> float:
     if geometry_kind != "Polygon":
         return 0.0
     ring = geometry_vertices(geometry)
-    area = 0.0
-    for index in range(len(ring) - 1):
-        x1, y1 = ring[index]
-        x2, y2 = ring[index + 1]
-        area += (x1 * y2) - (x2 * y1)
-    return abs(area) / 2.0
+    return abs(_ring_signed_area(ring))
 
 
 def geometry_centroid(geometry: Geometry) -> Coordinate:
@@ -414,8 +409,8 @@ def geometry_centroid(geometry: Geometry) -> Coordinate:
         centroid_x = 0.0
         centroid_y = 0.0
         for index in range(len(ring) - 1):
-            x1, y1 = ring[index]
-            x2, y2 = ring[index + 1]
+            x1, y1 = _coord_xy(ring[index])
+            x2, y2 = _coord_xy(ring[index + 1])
             cross = (x1 * y2) - (x2 * y1)
             area_factor += cross
             centroid_x += (x1 + x2) * cross
@@ -452,6 +447,77 @@ def _dedupe_consecutive_vertices(vertices: tuple[Coordinate, ...]) -> tuple[Coor
         if not deduped or deduped[-1] != vertex:
             deduped.append(vertex)
     return tuple(deduped)
+
+
+def _coord_xy(coord: Coordinate) -> tuple[float, float]:
+    return (float(coord[0]), float(coord[1]))
+
+
+def _force_2d_vertices(vertices: tuple[Coordinate, ...]) -> tuple[Coordinate, ...]:
+    return tuple((float(vertex[0]), float(vertex[1])) for vertex in vertices)
+
+
+def _has_non_planar_dimensions(vertices: tuple[Coordinate, ...]) -> bool:
+    return any(len(vertex) != 2 for vertex in vertices)
+
+
+def _ring_signed_area(ring: tuple[Coordinate, ...]) -> float:
+    area = 0.0
+    for index in range(len(ring) - 1):
+        x1, y1 = _coord_xy(ring[index])
+        x2, y2 = _coord_xy(ring[index + 1])
+        area += (x1 * y2) - (x2 * y1)
+    return area / 2.0
+
+
+def _polygon_has_narrow_spike(ring: tuple[Coordinate, ...], tolerance: float = 0.12) -> bool:
+    open_ring = ring[:-1] if ring and ring[0] == ring[-1] else ring
+    if len(open_ring) < 3:
+        return False
+    for index, current in enumerate(open_ring):
+        previous = open_ring[index - 1]
+        following = open_ring[(index + 1) % len(open_ring)]
+        prev_x, prev_y = _coord_xy(previous)
+        curr_x, curr_y = _coord_xy(current)
+        next_x, next_y = _coord_xy(following)
+        first_len = math.hypot(curr_x - prev_x, curr_y - prev_y)
+        second_len = math.hypot(next_x - curr_x, next_y - curr_y)
+        denominator = first_len * second_len
+        if denominator == 0:
+            return True
+        bend_ratio = abs(_cross_product(previous, current, following)) / denominator
+        if bend_ratio < tolerance:
+            return True
+    return False
+
+
+def _remove_narrow_spikes(ring: tuple[Coordinate, ...], tolerance: float = 0.12) -> tuple[Coordinate, ...]:
+    open_ring = list(ring[:-1] if ring and ring[0] == ring[-1] else ring)
+    if len(open_ring) < 4:
+        return tuple(open_ring + ([open_ring[0]] if open_ring else []))
+
+    kept: list[Coordinate] = []
+    total = len(open_ring)
+    for index, current in enumerate(open_ring):
+        previous = open_ring[index - 1]
+        following = open_ring[(index + 1) % total]
+        prev_x, prev_y = _coord_xy(previous)
+        curr_x, curr_y = _coord_xy(current)
+        next_x, next_y = _coord_xy(following)
+        first_len = math.hypot(curr_x - prev_x, curr_y - prev_y)
+        second_len = math.hypot(next_x - curr_x, next_y - curr_y)
+        denominator = first_len * second_len
+        if denominator == 0:
+            continue
+        bend_ratio = abs(_cross_product(previous, current, following)) / denominator
+        if bend_ratio < tolerance:
+            continue
+        kept.append(current)
+
+    if len(kept) < 3:
+        kept = open_ring
+    kept.append(kept[0])
+    return tuple(kept)
 
 
 def _line_has_self_intersection(vertices: tuple[Coordinate, ...]) -> bool:
@@ -492,6 +558,8 @@ def validate_geometry(geometry: Geometry) -> dict[str, object]:
             issues.append("duplicate_vertices")
     elif geometry_kind == "LineString":
         vertices = geometry_vertices(normalized)
+        if _has_non_planar_dimensions(vertices):
+            issues.append("mixed_dimension_coordinates")
         if _has_consecutive_duplicate_vertices(vertices):
             issues.append("duplicate_vertices")
         if len(set(vertices)) < 2:
@@ -502,14 +570,20 @@ def validate_geometry(geometry: Geometry) -> dict[str, object]:
             issues.append("self_intersection")
     elif geometry_kind == "Polygon":
         ring = geometry_vertices(normalized)
+        if _has_non_planar_dimensions(ring):
+            issues.append("mixed_dimension_coordinates")
         if _has_consecutive_duplicate_vertices(ring):
             issues.append("duplicate_vertices")
         if len(set(ring[:-1])) < 3:
             issues.append("insufficient_distinct_vertices")
         if geometry_area(normalized) == 0.0:
             issues.append("zero_area")
+        if _ring_signed_area(ring) < 0:
+            issues.append("clockwise_exterior")
         if len(ring) >= 4 and _polygon_has_self_intersection(ring):
             issues.append("self_intersection")
+        if len(ring) >= 4 and _polygon_has_narrow_spike(ring):
+            issues.append("narrow_spike")
     elif geometry_kind in {"MultiLineString", "MultiPolygon"}:
         part_reports = [validate_geometry(part) for part in _component_geometries(normalized)]
         seen: set[str] = set()
@@ -522,10 +596,14 @@ def validate_geometry(geometry: Geometry) -> dict[str, object]:
     suggestions: list[str] = []
     if "duplicate_vertices" in issues:
         suggestions.append("Use repair to remove repeated vertices.")
+    if "mixed_dimension_coordinates" in issues:
+        suggestions.append("Project the geometry into a consistent 2D analytic form before running planar checks.")
     if "insufficient_distinct_vertices" in issues or "zero_length" in issues or "zero_area" in issues:
         suggestions.append("Review the source coordinates and repair collapsed geometry parts.")
-    if "self_intersection" in issues:
-        suggestions.append("Use repair or simplify the polygon to remove self intersections.")
+    if "clockwise_exterior" in issues:
+        suggestions.append("Repair can rewind polygon rings into a standard counter-clockwise exterior orientation.")
+    if "self_intersection" in issues or "narrow_spike" in issues:
+        suggestions.append("Use repair or simplify the polygon to remove self intersections and narrow spikes.")
 
     return {
         "geometry_type": geometry_kind,
@@ -552,7 +630,7 @@ def repair_geometry(geometry: Geometry) -> Geometry:
             coordinates.append(vertex)
         return {"type": "MultiPoint", "coordinates": tuple(coordinates)}
     if geometry_kind == "LineString":
-        vertices = _dedupe_consecutive_vertices(geometry_vertices(normalized))
+        vertices = _force_2d_vertices(_dedupe_consecutive_vertices(geometry_vertices(normalized)))
         return {"type": "LineString", "coordinates": vertices}
     if geometry_kind == "MultiLineString":
         repaired_lines = []
@@ -563,9 +641,12 @@ def repair_geometry(geometry: Geometry) -> Geometry:
                 repaired_lines.append(tuple(coordinates))  # type: ignore[arg-type]
         return {"type": "MultiLineString", "coordinates": tuple(repaired_lines)}
     if geometry_kind == "Polygon":
-        ring = _dedupe_consecutive_vertices(geometry_vertices(normalized))
+        ring = _force_2d_vertices(_dedupe_consecutive_vertices(geometry_vertices(normalized)))
         if ring and ring[0] != ring[-1]:
             ring = (*ring, ring[0])
+        ring = _remove_narrow_spikes(ring)
+        if _ring_signed_area(ring) < 0:
+            ring = tuple(reversed(ring))
         return {"type": "Polygon", "coordinates": ring}
     if geometry_kind == "MultiPolygon":
         repaired_polygons = []

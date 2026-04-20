@@ -14,15 +14,43 @@ def _version() -> str:
         return "local-dev"
 
 
+def shell_completion_script(program: str = "geoprompt", *, shell: str = "bash") -> str:
+    """Return a starter shell-completion script for the GeoPrompt CLI."""
+    commands = "info version wizard demo compare history serve plugins recipes doctor completion"
+    if shell == "powershell":
+        return (
+            f"Register-ArgumentCompleter -Native -CommandName {program} -ScriptBlock {{\n"
+            f"    param($wordToComplete, $commandAst, $cursorPosition)\n"
+            f"    '{commands}'.Split(' ') | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{\n"
+            f"        [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n"
+            f"    }}\n"
+            f"}}"
+        )
+    return (
+        f"_{program}_complete() {{\n"
+        f"    local commands=\"{commands}\"\n"
+        f"    COMPREPLY=( $(compgen -W \"$commands\" -- \"${{COMP_WORDS[1]}}\") )\n"
+        f"}}\n"
+        f"complete -F _{program}_complete {program}\n"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level GeoPrompt command-line parser."""
     parser = argparse.ArgumentParser(
         prog="geoprompt",
-        description="Unified CLI for GeoPrompt demos, comparisons, and package info.",
+        description="Unified CLI for GeoPrompt demos, comparisons, workflows, and package diagnostics.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("info", help="Show package summary and install guidance")
     subparsers.add_parser("version", help="Print the installed version")
+    subparsers.add_parser("plugins", help="List registered plugins and extension hooks")
+    subparsers.add_parser("recipes", help="List built-in workflow recipes")
+    subparsers.add_parser("doctor", help="Run a lightweight release-readiness audit")
+
+    completion_parser = subparsers.add_parser("completion", help="Print a starter shell completion script")
+    completion_parser.add_argument("--shell", choices=["bash", "powershell"], default="bash")
 
     wizard_parser = subparsers.add_parser("wizard", help="Suggest a no-code workflow plan")
     wizard_parser.add_argument("goal", nargs="+", help="Plain-English workflow goal")
@@ -49,10 +77,11 @@ def _print_info() -> None:
     print("GeoPrompt")
     print(f"Version: {_version()}")
     print("Install profiles: core, viz, io, excel, db, overlay, compare, raster, service, all")
-    print("Commands: info, version, wizard, demo, compare, history, serve")
+    print("Commands: info, version, wizard, demo, compare, history, serve, plugins, recipes, doctor, completion")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the GeoPrompt command-line interface."""
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -62,6 +91,37 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "version":
         print(_version())
+        return 0
+
+    if args.command == "plugins":
+        from .ecosystem import list_plugins
+
+        plugins = list_plugins()
+        if not plugins:
+            print("No plugins are registered yet. Use register_plugin(...) to add one.")
+            return 0
+        for plugin in plugins:
+            print(f"- {plugin['name']}: {plugin.get('description', '').strip()}")
+        return 0
+
+    if args.command == "recipes":
+        from .ecosystem import list_recipes
+
+        for recipe in list_recipes():
+            print(f"- {recipe['name']}: {', '.join(recipe.get('steps', []))}")
+        return 0
+
+    if args.command == "doctor":
+        from .quality import release_readiness_report
+
+        report = release_readiness_report([Path(__file__), Path(__file__).with_name("ecosystem.py")])
+        print(f"Release stage: {report['release_stage']}")
+        print(f"Quality passed: {report['quality'].get('passed')}")
+        print(f"Smoke profiles: {', '.join(item['profile'] for item in report['packaging_smoke_matrix'])}")
+        return 0
+
+    if args.command == "completion":
+        print(shell_completion_script(shell=args.shell))
         return 0
 
     if args.command == "wizard":
@@ -126,7 +186,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["build_parser", "main"]
+__all__ = ["build_parser", "main", "shell_completion_script"]
 
 
 if __name__ == "__main__":

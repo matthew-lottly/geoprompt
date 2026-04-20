@@ -2,6 +2,14 @@
 
 This page provides practical, fast-to-run examples for utility operations workflows.
 
+## Top-tier network and utility analysis track
+
+GeoPrompt’s flagship lane is utility, outage, resilience, and restoration decision support. The goal is not just to draw network lines, but to help teams answer operational questions such as:
+- what fails first under disruption
+- who loses service and how much demand is exposed
+- which repair or switching action restores the most critical service fastest
+- where dispatch, staging, and redundancy investments matter most
+
 ## Electric Feeder Outage and Restoration
 
 Run:
@@ -81,7 +89,16 @@ What it shows:
 - a lightweight dashboard image for stakeholder review
 - a reproducible starter for resilience scorecards
 
+## Why this beats a generic dataframe GIS workflow
+
+A generic dataframe GIS workflow can store edges and nodes, but it usually leaves routing, outage isolation, restoration sequencing, and resilience ranking to custom one-off code. GeoPrompt already packages those operational steps into reusable, report-ready workflows.
+
+## Calibration and validation notes
+
+Use the included examples as deterministic baselines, then calibrate travel times, repair durations, demand, and hazard assumptions against your own utility or infrastructure records. That keeps the recipes reproducible while still supporting real operational-style scenario tuning.
+
 ## Notes
 
 - These recipes are intentionally small and deterministic.
 - They are suitable for onboarding, CI smoke checks, and reproducible demos.
+- The fastest path to real-world adoption is to keep validating them against observed outage, dispatch, and recovery behavior.

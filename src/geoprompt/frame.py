@@ -7,11 +7,12 @@ dependencies (geometry engines like Shapely/GeoPandas are opt-in via methods).
 """
 from __future__ import annotations
 
+import ast
 import importlib
 import json
 from dataclasses import dataclass
 from datetime import date, datetime
-from heapq import nsmallest
+from heapq import nlargest, nsmallest
 from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Iterable, Literal, Sequence
@@ -155,6 +156,119 @@ class GeoPromptGeometryAccessor:
 
     def types(self) -> list[str]:
         return [geometry_type(row[self._frame.geometry_column]) for row in self._frame]
+
+
+class GeoPromptStringAccessor:
+    """String helper accessor for common analyst cleanup workflows."""
+
+    def __init__(self, frame: "GeoPromptFrame") -> None:
+        self._frame = frame
+
+    def _apply(self, column: str, func: Any, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._frame.map_column(
+            column,
+            lambda value: None if value is None else func(str(value)),
+            new_column=new_column,
+        )
+
+    def strip(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.strip(), new_column=new_column)
+
+    def upper(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.upper(), new_column=new_column)
+
+    def lower(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.lower(), new_column=new_column)
+
+    def title(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.title(), new_column=new_column)
+
+    def contains(self, column: str, pattern: str, *, case: bool = True) -> list[bool | None]:
+        self._frame._require_column(column)
+        needle = pattern if case else pattern.lower()
+        results: list[bool | None] = []
+        for value in self._frame[column]:
+            if value is None:
+                results.append(None)
+                continue
+            haystack = str(value) if case else str(value).lower()
+            results.append(needle in haystack)
+        return results
+
+
+class GeoPromptDateTimeAccessor:
+    """Datetime helper accessor for common analyst derivations."""
+
+    def __init__(self, frame: "GeoPromptFrame") -> None:
+        self._frame = frame
+
+    def _apply(self, column: str, func: Any, *, new_column: str | None = None) -> "GeoPromptFrame":
+        self._frame._require_column(column)
+        return self._frame.map_column(
+            column,
+            lambda value: None if value is None else func(_cast_frame_value(value, "datetime")),
+            new_column=new_column,
+        )
+
+    def to_datetime(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value, new_column=new_column)
+
+    def year(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.year, new_column=new_column)
+
+    def month(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.month, new_column=new_column)
+
+    def day(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.day, new_column=new_column)
+
+    def weekday(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
+        return self._apply(column, lambda value: value.weekday(), new_column=new_column)
+
+
+def _compile_frame_query(expression: str) -> Any:
+    tree = ast.parse(expression, mode="eval")
+    allowed_nodes = (
+        ast.Expression,
+        ast.BoolOp,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.Compare,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+        ast.List,
+        ast.Tuple,
+        ast.Set,
+        ast.And,
+        ast.Or,
+        ast.Not,
+        ast.In,
+        ast.NotIn,
+        ast.Eq,
+        ast.NotEq,
+        ast.Gt,
+        ast.GtE,
+        ast.Lt,
+        ast.LtE,
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.Mod,
+        ast.Pow,
+        ast.USub,
+        ast.UAdd,
+        ast.Call,
+    )
+    allowed_functions = {"abs", "len", "min", "max", "round"}
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed_nodes):
+            raise ValueError("unsupported query syntax")
+        if isinstance(node, ast.Call):
+            if not isinstance(node.func, ast.Name) or node.func.id not in allowed_functions:
+                raise ValueError("query only allows simple built-in functions")
+    return compile(tree, "<geoprompt-query>", "eval")
 
 
 @dataclass(frozen=True)
@@ -426,6 +540,16 @@ class GeoPromptFrame:
     def geom(self) -> GeoPromptGeometryAccessor:
         """Return a geometry accessor for row-wise geometry metrics and validation."""
         return GeoPromptGeometryAccessor(self)
+
+    @property
+    def str(self) -> GeoPromptStringAccessor:
+        """Return a string accessor for Pandas-like cleanup workflows."""
+        return GeoPromptStringAccessor(self)
+
+    @property
+    def dt(self) -> GeoPromptDateTimeAccessor:
+        """Return a datetime accessor for analyst time-derived columns."""
+        return GeoPromptDateTimeAccessor(self)
 
     @property
     def spatial_index(self) -> GeoPromptSpatialIndex | None:
@@ -714,6 +838,31 @@ class GeoPromptFrame:
             rows.append(dict(row))
         return self._clone_with_rows(rows)
 
+    def query(self, expression: str) -> "GeoPromptFrame":
+        """Filter rows using a small Pandas-like expression language.
+
+        Example:
+            ``frame.query("priority >= 2 and status == 'open'")``
+        """
+        compiled = _compile_frame_query(expression)
+        safe_globals = {
+            "__builtins__": {},
+            "abs": abs,
+            "len": len,
+            "min": min,
+            "max": max,
+            "round": round,
+            "None": None,
+            "True": True,
+            "False": False,
+        }
+        rows = [
+            dict(row)
+            for row in self._rows
+            if bool(eval(compiled, safe_globals, dict(row)))  # noqa: S307
+        ]
+        return self._clone_with_rows(rows)
+
     def sort_values(self, by: str, descending: bool = False) -> "GeoPromptFrame":
         """Return a new frame sorted by a column, with nulls placed last."""
         self._require_column(by)
@@ -721,6 +870,28 @@ class GeoPromptFrame:
         null_rows = [dict(row) for row in self._rows if row.get(by) is None]
         non_null_sorted = sorted(non_null_rows, key=lambda row: (row.get(by), _row_sort_key(row)), reverse=descending)
         return self._clone_with_rows([*non_null_sorted, *null_rows])
+
+    def nlargest(self, n: int, columns: str | Sequence[str]) -> "GeoPromptFrame":
+        """Return the top ``n`` rows ranked by one or more columns."""
+        if n <= 0:
+            return self._clone_with_rows([])
+        rank_columns = [columns] if isinstance(columns, str) else list(columns)
+        for column in rank_columns:
+            self._require_column(column)
+        candidates = [dict(row) for row in self._rows if all(row.get(column) is not None for column in rank_columns)]
+        ranked = nlargest(n, candidates, key=lambda row: tuple(row.get(column) for column in rank_columns))
+        return self._clone_with_rows(ranked)
+
+    def nsmallest(self, n: int, columns: str | Sequence[str]) -> "GeoPromptFrame":
+        """Return the bottom ``n`` rows ranked by one or more columns."""
+        if n <= 0:
+            return self._clone_with_rows([])
+        rank_columns = [columns] if isinstance(columns, str) else list(columns)
+        for column in rank_columns:
+            self._require_column(column)
+        candidates = [dict(row) for row in self._rows if all(row.get(column) is not None for column in rank_columns)]
+        ranked = nsmallest(n, candidates, key=lambda row: tuple(row.get(column) for column in rank_columns))
+        return self._clone_with_rows(ranked)
 
     def melt(
         self,

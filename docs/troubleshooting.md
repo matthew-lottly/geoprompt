@@ -6,6 +6,15 @@ This page covers the most common setup and runtime issues.
 
 GeoPrompt keeps several features behind optional extras.
 
+## Installation decision tree
+
+- Need only core frame, geometry, and reporting? install the base package.
+- Need interactive maps or dashboards? install the viz profile.
+- Need shapefile, GeoPackage, GeoParquet, or GeoPandas interop? install the io profile.
+- Need database connectors? install the db profile.
+- Need raster or service deployment features? install the raster or service profile.
+- Want the complete analyst workstation setup? install the all profile.
+
 ### Symptoms
 - ImportError for `folium`, `geopandas`, `sqlalchemy`, `openpyxl`, or `shapely`
 - mapping, database, or overlay helpers are unavailable

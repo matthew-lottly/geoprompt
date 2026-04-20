@@ -1,0 +1,36 @@
+{
+  "figures": [
+    {
+      "path": "assets/neighborhood-pressure-review-live.png",
+      "caption": "Neighborhood pressure review generated from the package demo.",
+      "data_source": "Representative synthetic utility sample data from the repository fixtures.",
+      "generation_script": "geoprompt-demo",
+      "last_verified": "2026-04-20",
+      "representative_note": "Synthetic but shaped to reflect operational screening workflows."
+    },
+    {
+      "path": "assets/portfolio-scorecard-example.svg",
+      "caption": "Portfolio scorecard example for screening and prioritization.",
+      "data_source": "Repository scenario output sample.",
+      "generation_script": "examples/benchmark_report_bundle.py",
+      "last_verified": "2026-04-20",
+      "representative_note": "Shows benchmark-style summary output from package runs."
+    },
+    {
+      "path": "assets/before-after-scenario-example.svg",
+      "caption": "Before and after scenario comparison view.",
+      "data_source": "Repository scenario output sample.",
+      "generation_script": "examples/benchmark_report_bundle.py",
+      "last_verified": "2026-04-20",
+      "representative_note": "Demonstrates stakeholder-facing comparison output."
+    },
+    {
+      "path": "assets/restoration-storyboard-example.svg",
+      "caption": "Restoration storyboard for outage sequencing and recovery planning.",
+      "data_source": "Repository scenario output sample.",
+      "generation_script": "examples/benchmark_report_bundle.py",
+      "last_verified": "2026-04-20",
+      "representative_note": "Shows a realistic utility restoration narrative using package outputs."
+    }
+  ]
+}

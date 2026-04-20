@@ -311,11 +311,14 @@ def raster_algebra(
     """
     a = _coerce_raster(raster_a)
     b = _coerce_raster(raster_b)
+    alignment = raster_alignment_report([a, b])
+    if not alignment["aligned"]:
+        raise ValueError(f"rasters are not aligned: {alignment['mismatches']}")
+
     data_a = a["data"]
     data_b = b["data"]
-
-    if len(data_a) != len(data_b):
-        raise ValueError("rasters must have the same number of rows")
+    nodata_a = a.get("nodata")
+    nodata_b = b.get("nodata")
 
     ops = {
         "add": lambda x, y: x + y,
@@ -330,12 +333,10 @@ def raster_algebra(
     fn = ops[operation]
 
     result: list[list[Any]] = []
-    for r_idx, (row_a, row_b) in enumerate(zip(data_a, data_b)):
-        if len(row_a) != len(row_b):
-            raise ValueError(f"row {r_idx}: rasters must have the same number of columns")
+    for row_a, row_b in zip(data_a, data_b):
         new_row: list[Any] = []
         for va, vb in zip(row_a, row_b):
-            if va is None or vb is None:
+            if va is None or vb is None or va == nodata_a or vb == nodata_b:
                 new_row.append(None)
             else:
                 new_row.append(fn(va, vb))
@@ -344,9 +345,10 @@ def raster_algebra(
     return {
         "data": result,
         "transform": a["transform"],
-        "nodata": a.get("nodata"),
+        "nodata": nodata_a if nodata_a is not None else nodata_b,
         "width": len(result[0]) if result else 0,
         "height": len(result),
+        "crs": a.get("crs"),
     }
 
 
@@ -403,6 +405,68 @@ def write_raster(
         dst.write(arr, 1)
 
     return str(out)
+
+
+def raster_window(
+    raster: RasterLike,
+    *,
+    row_start: int,
+    row_end: int,
+    col_start: int,
+    col_end: int,
+) -> dict[str, Any]:
+    """Read a window from a raster by row and column offsets."""
+    info = _coerce_raster(raster)
+    data = info["data"]
+    rows = len(data)
+    cols = len(data[0]) if data else 0
+
+    rs = max(0, int(row_start))
+    re = min(rows, int(row_end))
+    cs = max(0, int(col_start))
+    ce = min(cols, int(col_end))
+    if rs >= re or cs >= ce:
+        raise ValueError("requested raster window is empty")
+
+    min_x, max_y, cell_width, cell_height = info["transform"]
+    windowed = [row[cs:ce] for row in data[rs:re]]
+    return {
+        **info,
+        "data": windowed,
+        "transform": (min_x + cs * cell_width, max_y - rs * cell_height, cell_width, cell_height),
+        "width": ce - cs,
+        "height": re - rs,
+    }
+
+
+def raster_alignment_report(rasters: Sequence[RasterLike]) -> dict[str, Any]:
+    """Report whether a set of rasters share shape and transform alignment."""
+    if not rasters:
+        raise ValueError("at least one raster is required")
+
+    infos = [_coerce_raster(raster) for raster in rasters]
+    first = infos[0]
+    reference_shape = (len(first["data"]), len(first["data"][0]) if first["data"] else 0)
+    reference_transform = tuple(first["transform"])
+    mismatches: list[dict[str, Any]] = []
+
+    for index, info in enumerate(infos[1:], start=1):
+        shape = (len(info["data"]), len(info["data"][0]) if info["data"] else 0)
+        transform = tuple(info["transform"])
+        if shape != reference_shape or transform != reference_transform:
+            mismatches.append({
+                "index": index,
+                "shape": shape,
+                "transform": transform,
+            })
+
+    return {
+        "aligned": len(mismatches) == 0,
+        "reference_shape": reference_shape,
+        "reference_transform": reference_transform,
+        "mismatches": mismatches,
+        "raster_count": len(infos),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -716,6 +780,10 @@ def raster_lazy_algebra(
     Example: ``raster_lazy_algebra("a + b * 2", {"a": r1, "b": r2})``
     """
     infos = {k: _coerce_raster(v) for k, v in rasters.items()}
+    alignment = raster_alignment_report(list(infos.values()))
+    if not alignment["aligned"]:
+        raise ValueError(f"rasters are not aligned: {alignment['mismatches']}")
+
     first = next(iter(infos.values()))
     rows = len(first["data"])
     cols = len(first["data"][0]) if first["data"] else 0
@@ -724,11 +792,11 @@ def raster_lazy_algebra(
     for r in range(rows):
         row_vals: list[Any] = []
         for c in range(cols):
-            local_vars: dict[str, Any] = {"__builtins__": {"min": min, "max": max, "abs": abs}}
+            local_vars: dict[str, Any] = {"__builtins__": {"min": min, "max": max, "abs": abs, "round": round}}
             all_valid = True
             for name, info in infos.items():
                 val = info["data"][r][c] if r < len(info["data"]) and c < len(info["data"][r]) else None
-                if val is None:
+                if val is None or val == info.get("nodata"):
                     all_valid = False
                     break
                 local_vars[name] = val
@@ -1404,6 +1472,7 @@ __all__ = [
     "land_cover_summary",
     "polygonize_raster",
     "raster_algebra",
+    "raster_alignment_report",
     "raster_build_overviews",
     "raster_change_detection",
     "raster_chunk_process",
@@ -1429,6 +1498,7 @@ __all__ = [
     "raster_stream_extraction",
     "raster_terrain_ruggedness",
     "raster_tile",
+    "raster_window",
     "raster_viewshed",
     "raster_watershed",
     "rasterize_features",

@@ -40,5 +40,10 @@ print(summary)
 - quickstart-cookbook.md for core usage
 - network-scenario-recipes.md for resilience and utility workflows
 - connectors-and-recipes.md for database, cloud, and raster bridges
+- problem-to-workflow-guide.md for choosing the best workflow by problem type
+- competitive-scorecard.md for the public product positioning and proof story
+- extending-geoprompt.md for plugins, templates, and compatibility guidance
+- release-evidence.md for trust, benchmark, and proof expectations
+- threat-model.md for service deployment security posture
 - deployment-guide.md for service and container rollout
 - governance-and-support.md for stability and release expectations

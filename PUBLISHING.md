@@ -39,15 +39,18 @@
 	- `GEOPROMPT_RUN_GEO_IO=1 python -m pytest tests/test_geoprompt.py::test_geospatial_integration_parquet_round_trip`
 	- `GEOPROMPT_RUN_BENCHMARKS=1 python -m pytest tests/test_benchmark_regression.py`
 8. Confirm the `optional-gated` job in `.github/workflows/geoprompt-ci.yml` is passing in GitHub Actions.
-9. Run `python -m build`.
-10. Run `python -m twine check dist/*`.
-11. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
-12. Confirm the PyPI Trusted Publisher is linked to the correct repository and workflow:
+9. Generate an SBOM and verify the release evidence bundle is current.
+10. Run a secrets scan and config review for service-facing artifacts.
+11. Confirm provenance notes, figure manifests, and benchmark outputs are refreshed for the release.
+12. Run `python -m build`.
+13. Run `python -m twine check dist/*`.
+14. Review `outputs/geoprompt_comparison_report.json` and confirm all summary flags are `true`.
+15. Confirm the PyPI Trusted Publisher is linked to the correct repository and workflow:
 	- monorepo: `matthew-lottly/Matt-Powell` with workflow `.github/workflows/publish-pypi.yml`
 	- standalone repo: `matthew-lottly/geoprompt` with workflow `.github/workflows/publish-pypi.yml`
-13. If the PyPI publisher entry expects an environment, set it to `pypi` so the OIDC claim matches the workflow.
-14. Confirm `pyproject.toml` has the intended release version and that `README.md` still uses the raw GitHub image URL.
-15. Push a version tag such as `geoprompt-v0.1.7` to trigger the monorepo publish workflow, or run the workflow manually from GitHub Actions.
+16. If the PyPI publisher entry expects an environment, set it to `pypi` so the OIDC claim matches the workflow.
+17. Confirm `pyproject.toml` has the intended release version and that `README.md` still uses the raw GitHub image URL.
+18. Push a version tag such as `geoprompt-v0.1.7` to trigger the monorepo publish workflow, or run the workflow manually from GitHub Actions.
 
 ## PyPI Commands
 

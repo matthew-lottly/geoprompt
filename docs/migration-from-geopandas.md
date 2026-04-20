@@ -1,6 +1,8 @@
 # Migration from GeoPandas to GeoPrompt
 
-This guide maps common GeoPandas habits to the GeoPrompt workflow.
+## GeoPandas to GeoPrompt cookbook
+
+This guide maps common GeoPandas habits to the GeoPrompt workflow and expands them into side-by-side daily recipes.
 
 ## Core idea
 
@@ -44,9 +46,19 @@ clean = (
 ```python
 from geoprompt.viz import to_folium_map, save_map
 
-m = to_folium_map(frame, tooltip_fields=["site_id", "region"])
+m = to_folium_map(frame, tooltip_columns=["site_id", "region"])
 save_map(m, "outputs/sites.html")
 ```
+
+## Side-by-side cookbook tasks
+
+| Task | GeoPandas habit | GeoPrompt path |
+|---|---|---|
+| Read a file and inspect columns | `gpd.read_file(...).head()` | `gp.read_data(...).head()` |
+| Filter and sort features | boolean masks and `sort_values` | `frame.query(...)` and `frame.sort_values(...)` |
+| Fix missing fields | `fillna`, `astype`, string ops | `fillna`, `astype`, `frame.str`, `frame.dt` |
+| Export decision outputs | plot then save separately | `save_map`, scenario report exports, briefing packs |
+| Build network workflow | add external stack | use built-in routing, resilience, and utility helpers |
 
 ## When to stay in GeoPandas
 

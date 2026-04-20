@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import math
+import random
 from collections import deque
 from itertools import combinations
 from typing import Any, cast
 
-from ..equations import utility_headloss_hazen_williams, utility_service_deficit
+from ..equations import accessibility_gini, utility_headloss_hazen_williams, utility_service_deficit, weighted_accessibility_score
 from .core import NetworkEdge, NetworkGraph
 from .routing import build_network_graph, service_area, shortest_path
 
@@ -1409,6 +1410,232 @@ def pressure_scenario_sweep(
     return results
 
 
+def closest_facility_dispatch(
+    graph: NetworkGraph,
+    facility_nodes: list[str],
+    incident_nodes: list[str],
+    *,
+    crew_count_by_facility: dict[str, int] | None = None,
+    max_response_cost: float | None = None,
+) -> dict[str, Any]:
+    """Assign each incident to the best reachable facility with crew limits."""
+    if not facility_nodes:
+        raise ValueError("facility_nodes must not be empty")
+
+    crew_count_by_facility = crew_count_by_facility or {}
+    remaining = {
+        facility: (None if facility not in crew_count_by_facility else max(0, int(crew_count_by_facility[facility])))
+        for facility in facility_nodes
+    }
+
+    dispatches: list[dict[str, Any]] = []
+    for incident in incident_nodes:
+        options: list[tuple[float, str, dict[str, Any]]] = []
+        for facility in facility_nodes:
+            if facility not in graph.adjacency:
+                continue
+            crew_remaining = remaining.get(facility)
+            if crew_remaining is not None and crew_remaining <= 0:
+                continue
+            route = shortest_path(graph, facility, incident)
+            if not bool(route["reachable"]):
+                continue
+            cost = float(route["total_cost"])
+            if max_response_cost is not None and cost > max_response_cost:
+                continue
+            options.append((cost, facility, route))
+
+        if not options:
+            dispatches.append({
+                "incident_node": incident,
+                "assigned_facility": None,
+                "response_cost": None,
+                "path_nodes": [],
+                "path_edges": [],
+            })
+            continue
+
+        options.sort(key=lambda item: (item[0], item[1]))
+        cost, facility, route = options[0]
+        if remaining.get(facility) is not None:
+            remaining[facility] = int(cast(int, remaining[facility])) - 1
+        dispatches.append({
+            "incident_node": incident,
+            "assigned_facility": facility,
+            "response_cost": cost,
+            "path_nodes": list(route["path_nodes"]),
+            "path_edges": list(route["path_edges"]),
+        })
+
+    dispatches.sort(key=lambda item: (item["response_cost"] is None, float(item["response_cost"] or math.inf), str(item["incident_node"])))
+    return {
+        "assignment_count": sum(1 for row in dispatches if row["assigned_facility"] is not None),
+        "unassigned_incident_count": sum(1 for row in dispatches if row["assigned_facility"] is None),
+        "dispatches": dispatches,
+    }
+
+
+def accessibility_equity_audit(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    *,
+    demand_by_node: dict[str, float] | None = None,
+    population_by_node: dict[str, float] | None = None,
+    critical_nodes: list[str] | None = None,
+    max_acceptable_cost: float | None = None,
+) -> dict[str, Any]:
+    """Summarize access inequality and flag underserved nodes."""
+    demand_by_node = demand_by_node or {}
+    population_by_node = population_by_node or {}
+    critical = set(critical_nodes or [])
+
+    rows: list[dict[str, Any]] = []
+    scores: list[float] = []
+    finite_costs: list[float] = []
+    for node in sorted(graph.adjacency.keys()):
+        costs = []
+        for source in source_nodes:
+            result = shortest_path(graph, source, node)
+            if bool(result["reachable"]):
+                costs.append(float(result["total_cost"]))
+        best_cost = min(costs) if costs else math.inf
+        if math.isfinite(best_cost):
+            finite_costs.append(best_cost)
+            accessibility_score = weighted_accessibility_score([1.0], [best_cost], scale=2.0, power=1.0)
+        else:
+            accessibility_score = 0.0
+        scores.append(accessibility_score)
+        rows.append({
+            "node": node,
+            "best_cost": None if not math.isfinite(best_cost) else best_cost,
+            "accessibility_score": accessibility_score,
+            "population": float(population_by_node.get(node, 0.0)),
+            "demand": float(demand_by_node.get(node, 0.0)),
+            "is_critical": node in critical,
+        })
+
+    threshold = max_acceptable_cost if max_acceptable_cost is not None else (sum(finite_costs) / len(finite_costs) if finite_costs else 0.0)
+    underserved = [
+        row for row in rows
+        if row["best_cost"] is None or float(row["best_cost"] or 0.0) > threshold or (row["is_critical"] and float(row["best_cost"] or math.inf) > max(threshold / 2.0, 1.0))
+    ]
+    underserved.sort(key=lambda item: (not bool(item["is_critical"]), -(float(item["best_cost"]) if item["best_cost"] is not None else math.inf), str(item["node"])))
+
+    return {
+        "gini": accessibility_gini(scores),
+        "mean_accessibility_score": (sum(scores) / len(scores)) if scores else 0.0,
+        "max_acceptable_cost": threshold,
+        "underserved_nodes": underserved,
+        "node_count": len(rows),
+    }
+
+
+def utility_stress_scenario_library(
+    *,
+    edge_groups: dict[str, list[str]] | None = None,
+    source_nodes: list[str] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Create a reusable library of utility stress scenarios for planning and drills."""
+    edge_groups = edge_groups or {}
+    source_nodes = list(source_nodes or [])
+    fire_edges = list(edge_groups.get("fire_zone", []))
+    flood_edges = list(edge_groups.get("floodplain", []))
+    seismic_edges = list(edge_groups.get("seismic", fire_edges + flood_edges))
+
+    return {
+        "wildfire": {
+            "hazard": "wildfire",
+            "failed_edges": fire_edges,
+            "source_nodes": source_nodes,
+            "demand_multiplier": 1.15,
+        },
+        "flood": {
+            "hazard": "flood",
+            "failed_edges": flood_edges,
+            "source_nodes": source_nodes,
+            "demand_multiplier": 1.10,
+        },
+        "earthquake": {
+            "hazard": "earthquake",
+            "failed_edges": seismic_edges,
+            "source_nodes": source_nodes,
+            "demand_multiplier": 1.20,
+        },
+        "storm": {
+            "hazard": "storm",
+            "failed_edges": sorted(set(flood_edges + fire_edges)),
+            "source_nodes": source_nodes,
+            "demand_multiplier": 1.12,
+        },
+        "compound_event": {
+            "hazard": "compound_event",
+            "failed_edges": sorted(set(fire_edges + flood_edges + seismic_edges)),
+            "source_nodes": source_nodes,
+            "demand_multiplier": 1.30,
+        },
+    }
+
+
+def utility_monte_carlo_resilience(
+    graph: NetworkGraph,
+    source_nodes: list[str],
+    *,
+    candidate_failed_edges: list[str],
+    iterations: int = 100,
+    edge_failure_probability: dict[str, float] | None = None,
+    demand_by_node: dict[str, float] | None = None,
+    critical_nodes: list[str] | None = None,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """Run a reproducible Monte Carlo outage simulation for resilience screening."""
+    if iterations <= 0:
+        raise ValueError("iterations must be greater than zero")
+    rng = random.Random(seed)
+    edge_failure_probability = edge_failure_probability or {}
+    demand_by_node = demand_by_node or {}
+    critical = set(critical_nodes or [])
+
+    deenergized_counts: list[int] = []
+    lost_demand_values: list[float] = []
+    critical_hits: list[int] = []
+    runs: list[dict[str, Any]] = []
+
+    for iteration in range(1, iterations + 1):
+        failed_edges = [
+            edge_id
+            for edge_id in candidate_failed_edges
+            if rng.random() < float(edge_failure_probability.get(edge_id, 0.1))
+        ]
+        outage = utility_outage_isolation(graph, source_nodes, failed_edges=failed_edges)
+        deenergized = list(outage["deenergized_nodes"])
+        lost_demand = sum(float(demand_by_node.get(node, 0.0)) for node in deenergized)
+        critical_out = sum(1 for node in deenergized if node in critical)
+        deenergized_counts.append(int(outage["deenergized_count"]))
+        lost_demand_values.append(lost_demand)
+        critical_hits.append(critical_out)
+        runs.append({
+            "iteration": iteration,
+            "failed_edges": failed_edges,
+            "deenergized_count": int(outage["deenergized_count"]),
+            "lost_demand": lost_demand,
+            "critical_nodes_out": critical_out,
+        })
+
+    ranked_counts = sorted(deenergized_counts)
+    p95_index = min(len(ranked_counts) - 1, max(0, math.ceil(len(ranked_counts) * 0.95) - 1))
+    return {
+        "iterations": iterations,
+        "seed": seed,
+        "summary": {
+            "average_deenergized_nodes": sum(deenergized_counts) / len(deenergized_counts),
+            "p95_deenergized_nodes": float(ranked_counts[p95_index]),
+            "average_lost_demand": sum(lost_demand_values) / len(lost_demand_values),
+            "critical_outage_probability": sum(1 for value in critical_hits if value > 0) / len(critical_hits),
+        },
+        "runs": runs,
+    }
+
+
 def dependency_graph_overlay(
     graphs: dict[str, NetworkGraph],
     shared_nodes: list[str],
@@ -1477,8 +1704,12 @@ __all__ = [
     "demand_weighted_restoration_ranking",
     "cross_utility_dependency_score",
     "attribute_aware_headloss",
+    "accessibility_equity_audit",
+    "closest_facility_dispatch",
     "facility_siting_score",
     "capital_planning_prioritization",
     "pressure_scenario_sweep",
     "dependency_graph_overlay",
+    "utility_monte_carlo_resilience",
+    "utility_stress_scenario_library",
 ]

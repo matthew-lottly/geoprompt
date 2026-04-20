@@ -7,6 +7,7 @@ matplotlib) are optional and lazily imported.
 from __future__ import annotations
 
 import importlib
+import re
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -707,6 +708,33 @@ SYMBOL_PRESETS: dict[str, dict[str, str]] = {
     },
 }
 
+MAP_STYLE_PACKS: dict[str, dict[str, str]] = {
+    "utilities": {
+        "accent": "#1565c0",
+        "accent_soft": "#e8f1ff",
+        "background": "#f7fbff",
+        "text": "#17324d",
+    },
+    "resilience": {
+        "accent": "#b02a37",
+        "accent_soft": "#fdecef",
+        "background": "#fff8f8",
+        "text": "#4a1f24",
+    },
+    "planning": {
+        "accent": "#6f42c1",
+        "accent_soft": "#f3ecff",
+        "background": "#fbf9ff",
+        "text": "#33204c",
+    },
+    "environmental": {
+        "accent": "#2b8a3e",
+        "accent_soft": "#e9f7ed",
+        "background": "#f8fff9",
+        "text": "#1f3a28",
+    },
+}
+
 
 def portfolio_scorecard(
     records: Sequence[Record],
@@ -835,11 +863,91 @@ def before_after_comparison(
     )
 
 
+def build_executive_briefing_pack(
+    sections: Sequence[dict[str, Any]],
+    *,
+    title: str = "Executive Briefing",
+    organization: str = "GeoPrompt",
+    theme: str = "utilities",
+    output_path: str | Path | None = None,
+) -> str:
+    """Build a polished, brandable HTML briefing pack for executive delivery."""
+    pack = MAP_STYLE_PACKS.get(theme, MAP_STYLE_PACKS["utilities"])
+    cards: list[str] = []
+    for section in sections:
+        section_title = str(section.get("title", "Section"))
+        section_type = str(section.get("type", "note"))
+        content = section.get("content", section.get("data", ""))
+        if section_type == "metric":
+            body = f"<div class='metric' aria-label='{section_title} metric'>{content}</div>"
+        elif isinstance(content, list) and content and isinstance(content[0], dict):
+            body = _html_table(content)
+        elif isinstance(content, (list, tuple)):
+            body = "<ul>" + "".join(f"<li>{item}</li>" for item in content) + "</ul>"
+        else:
+            body = f"<p>{content}</p>"
+        cards.append(
+            f"<section class='card' aria-labelledby='section-{len(cards)}'>"
+            f"<h2 id='section-{len(cards)}'>{section_title}</h2>{body}</section>"
+        )
+
+    html = (
+        "<!DOCTYPE html>"
+        "<html lang='en'><head><meta charset='utf-8'>"
+        f"<title>{title}</title>"
+        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+        "<style>"
+        f"body{{font-family:Segoe UI,Arial,sans-serif;background:{pack['background']};color:{pack['text']};margin:0;padding:0;}}"
+        f"header{{background:{pack['accent']};color:white;padding:24px 28px;}}"
+        ".sub{opacity:.9;font-size:0.95rem;margin-top:6px;}"
+        ".wrap{padding:18px 24px 30px 24px;}"
+        f".card{{background:white;border-left:6px solid {pack['accent']};padding:16px 18px;margin:14px 0;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);}}"
+        f".metric{{font-size:2rem;font-weight:700;color:{pack['accent']};}}"
+        f".badge{{display:inline-block;background:{pack['accent_soft']};color:{pack['text']};padding:4px 10px;border-radius:999px;font-weight:600;}}"
+        "table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}"
+        "th{background:#f6f8fa;}footer{padding:12px 24px 24px 24px;font-size:.9rem;color:#555;}"
+        "</style></head><body>"
+        f"<header><h1>{title}</h1><div class='sub'>{organization} executive briefing · theme: <span class='badge'>{theme}</span></div></header>"
+        f"<main class='wrap'>{''.join(cards)}</main>"
+        "<footer>Generated from GeoPrompt reporting and scenario outputs.</footer>"
+        "</body></html>"
+    )
+    if output_path:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(html, encoding="utf-8")
+    return html
+
+
+def audit_html_accessibility(html: str) -> dict[str, Any]:
+    """Run a lightweight accessibility audit for generated HTML outputs."""
+    lowered = html.lower()
+    issues: list[str] = []
+    if "<title>" not in lowered:
+        issues.append("missing_title")
+    if "<main" not in lowered:
+        issues.append("missing_main_landmark")
+    if "<h1" not in lowered:
+        issues.append("missing_h1")
+
+    html_tag = re.search(r"<html\b[^>]*>", html, flags=re.IGNORECASE)
+    if html_tag and "lang=" not in html_tag.group(0).lower():
+        issues.append("missing_lang")
+
+    for tag in re.findall(r"<img\b[^>]*>", html, flags=re.IGNORECASE):
+        if "alt=" not in tag.lower():
+            issues.append("image_missing_alt")
+    return {"passed": not issues, "issues": issues, "issue_count": len(issues)}
+
+
 __all__ = [
     "BASEMAP_PRESETS",
+    "MAP_STYLE_PACKS",
     "RESILIENCE_STYLE_PRESETS",
     "SYMBOL_PRESETS",
+    "audit_html_accessibility",
     "before_after_comparison",
+    "build_executive_briefing_pack",
     "plot_restoration_timeline",
     "plot_scenario_dashboard",
     "plotly_scenario_dashboard",

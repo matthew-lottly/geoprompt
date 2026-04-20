@@ -248,6 +248,84 @@ def _fallback_steps(goal: str) -> list[str]:
     return ["read_data", "quality_control_scan", "write_data"]
 
 
+def compatibility_matrix() -> dict[str, Any]:
+    """Return supported extras, platforms, and extension-API guarantees."""
+    return {
+        "profiles": {
+            "core": "lightweight frame, geometry, and reporting primitives",
+            "viz": "Folium and Plotly mapping and dashboards",
+            "io": "GeoPandas and Arrow-backed file bridges",
+            "db": "database connectors and roundtrip helpers",
+            "raster": "raster inspection and zonal workflows",
+            "service": "FastAPI deployment surface",
+            "all": "full analyst and operations bundle",
+        },
+        "platforms": ["Windows", "Linux", "macOS"],
+        "optional_backends": {
+            "folium": "interactive HTML maps",
+            "plotly": "dashboards and web reporting",
+            "geopandas": "vector IO interop",
+            "shapely": "overlay and advanced geometry paths",
+            "rasterio": "raster access",
+            "fastapi": "service endpoints",
+        },
+        "plugin_api": {
+            "status": "stable",
+            "compatibility_guarantee": "Plugin registration helpers keep backward-compatible call signatures within minor releases.",
+        },
+    }
+
+
+def extension_starter_template(kind: str, *, name: str = "custom_extension") -> str:
+    """Return a starter template for plugins, connectors, reports, or domain modules."""
+    safe_name = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in name.strip()) or "custom_extension"
+    if kind == "plugin":
+        return textwrap.dedent(
+            f"""
+            from typing import Any
+
+
+            def {safe_name}(records: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
+                \"\"\"Example GeoPrompt plugin that tags each record.\"\"\"
+                return [{{**record, \"processed_by\": \"{safe_name}\"}} for record in records]
+            """
+        ).strip() + "\n"
+    if kind == "connector":
+        return textwrap.dedent(
+            f"""
+            from typing import Any
+
+
+            def {safe_name}(path: str, **kwargs: Any) -> dict[str, Any]:
+                \"\"\"Example connector starter that records a target path.\"\"\"
+                return {{"status": "ok", "path": path, "connector": "{safe_name}"}}
+            """
+        ).strip() + "\n"
+    if kind == "report":
+        return textwrap.dedent(
+            f"""
+            from typing import Any
+
+
+            def {safe_name}(metrics: dict[str, Any]) -> str:
+                \"\"\"Example report starter for an HTML or Markdown summary.\"\"\"
+                return f"# {safe_name}\n\nSummary metrics: {{metrics}}"
+            """
+        ).strip() + "\n"
+    if kind == "domain":
+        return textwrap.dedent(
+            f"""
+            from typing import Any
+
+
+            def {safe_name}(records: list[dict[str, Any]], *, threshold: float = 0.5) -> list[dict[str, Any]]:
+                \"\"\"Example domain rule starter for custom scoring.\"\"\"
+                return [{{**record, "threshold": threshold}} for record in records]
+            """
+        ).strip() + "\n"
+    raise ValueError("kind must be one of: plugin, connector, report, domain")
+
+
 def _seed_default_recipes() -> None:
     defaults = [
         {
@@ -285,7 +363,9 @@ _seed_default_recipes()
 
 __all__ = [
     "build_workflow_wizard",
+    "compatibility_matrix",
     "deprecated_alias",
+    "extension_starter_template",
     "get_migration_registry",
     "get_plugin",
     "get_recipe",

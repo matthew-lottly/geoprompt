@@ -306,6 +306,115 @@ def time_dependent_shortest_path(
     return result
 
 
+def multimodal_shortest_path(
+    graph: NetworkGraph,
+    origin: str,
+    destination: str,
+    *,
+    allowed_modes: Sequence[str] | None = None,
+    transfer_penalty: float = 0.0,
+    turn_restrictions: Sequence[tuple[str, str]] | None = None,
+    max_cost: float | None = None,
+    blocked_edges: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Compute a shortest path while respecting modes, transfers, and forbidden turns."""
+    if origin not in graph.adjacency:
+        raise KeyError(f"origin node '{origin}' is not present in the network")
+    if destination not in graph.adjacency:
+        raise KeyError(f"destination node '{destination}' is not present in the network")
+    if transfer_penalty < 0:
+        raise ValueError("transfer_penalty must be zero or greater")
+
+    allowed = None if allowed_modes is None else {str(mode).lower() for mode in allowed_modes}
+    forbidden_turns = {(str(prev_edge), str(next_edge)) for prev_edge, next_edge in (turn_restrictions or [])}
+    blocked = set(blocked_edges or [])
+
+    start_state = (origin, None, None)
+    distances: dict[tuple[str, str | None, str | None], float] = {start_state: 0.0}
+    previous: dict[tuple[str, str | None, str | None], tuple[str, str | None, str | None]] = {}
+    queue: list[tuple[float, tuple[str, str | None, str | None]]] = [(0.0, start_state)]
+    best_destination: tuple[str, str | None, str | None] | None = None
+
+    while queue:
+        current_cost, state = heappop(queue)
+        node, prev_edge, prev_mode = state
+        if current_cost > distances.get(state, math.inf):
+            continue
+        if max_cost is not None and current_cost > max_cost:
+            continue
+        if node == destination:
+            best_destination = state
+            break
+
+        for step in graph.adjacency.get(node, []):
+            if step.edge_id in blocked:
+                continue
+            edge = graph.edge_attributes.get(step.edge_id, {})
+            mode = str(edge.get("mode", "road")).lower()
+            if allowed is not None and mode not in allowed:
+                continue
+            if prev_edge is not None and (prev_edge, step.edge_id) in forbidden_turns:
+                continue
+
+            step_cost = float(step.cost) + float(edge.get("turn_penalty", 0.0))
+            if prev_mode is not None and mode != prev_mode:
+                step_cost += float(transfer_penalty)
+            next_cost = current_cost + step_cost
+            if max_cost is not None and next_cost > max_cost:
+                continue
+
+            next_state = (step.to_node, step.edge_id, mode)
+            if next_cost >= distances.get(next_state, math.inf):
+                continue
+            distances[next_state] = next_cost
+            previous[next_state] = state
+            heappush(queue, (next_cost, next_state))
+
+    if best_destination is None:
+        return {
+            "origin": origin,
+            "destination": destination,
+            "reachable": False,
+            "total_cost": math.inf,
+            "path_nodes": [],
+            "path_edges": [],
+            "mode_sequence": [],
+            "mode_changes": 0,
+            "cost_mode": "multimodal",
+        }
+
+    path_nodes = [destination]
+    path_edges: list[str] = []
+    mode_sequence: list[str] = []
+    current = best_destination
+    while current != start_state:
+        path_nodes.append(previous[current][0])
+        if current[1] is not None:
+            path_edges.append(current[1])
+        if current[2] is not None:
+            mode_sequence.append(current[2])
+        current = previous[current]
+
+    path_nodes.reverse()
+    path_edges.reverse()
+    mode_sequence.reverse()
+    mode_changes = sum(1 for idx in range(1, len(mode_sequence)) if mode_sequence[idx] != mode_sequence[idx - 1])
+
+    return {
+        "origin": origin,
+        "destination": destination,
+        "reachable": True,
+        "total_cost": distances[best_destination],
+        "path_nodes": path_nodes,
+        "path_edges": path_edges,
+        "mode_sequence": mode_sequence,
+        "mode_changes": mode_changes,
+        "cost_mode": "multimodal",
+        "transfer_penalty": float(transfer_penalty),
+        "turn_restriction_count": len(forbidden_turns),
+    }
+
+
 class NetworkRouter:
     """Cached routing helper for repeated OD queries on stable networks."""
 
@@ -408,6 +517,7 @@ __all__ = [
     "shortest_path",
     "service_area",
     "edge_impedance_cost",
+    "multimodal_shortest_path",
     "multi_criteria_shortest_path",
     "time_dependent_shortest_path",
     "NetworkRouter",
