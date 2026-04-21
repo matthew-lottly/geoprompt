@@ -2290,3 +2290,234 @@ def serverless_endpoint_stub() -> str:
             return {"statusCode": 400, "body": json.dumps({"error": "unknown action"})}
     """)
 
+
+# ---------------------------------------------------------------------------
+# G9 additions — geoprocessing tools
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def _geom_to_shape(geom: dict | None) -> "_Any":
+    """Convert a GeoJSON-like geometry dict to a Shapely shape (best-effort)."""
+    try:
+        import shapely.geometry as _sg  # type: ignore[import]
+        if geom is None:
+            return _sg.Point(0, 0)
+        return _sg.shape(geom)
+    except Exception:
+        return None
+
+
+def identity_overlay(frame: _Any, identity_frame: _Any) -> _Any:
+    """Stamp attributes from *identity_frame* onto *frame* using spatial intersection.
+
+    For each feature in *frame*, its geometry is intersected with every
+    overlapping feature in *identity_frame*.  Output features receive the
+    attributes of both input features.
+
+    Args:
+        frame: Input :class:`~geoprompt.GeoPromptFrame`.
+        identity_frame: Identity overlay features.
+
+    Returns:
+        A new frame with combined attributes.
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    src_rows = list(frame)
+    id_rows = list(identity_frame)
+
+    try:
+        import shapely.geometry as sg  # type: ignore[import]
+        id_shapes = [(_geom_to_shape(r.get(geom_col)), r) for r in id_rows]
+        results = []
+        for r in src_rows:
+            shp = _geom_to_shape(r.get(geom_col))
+            matched = False
+            for id_shp, id_row in id_shapes:
+                if id_shp is not None and shp is not None and shp.intersects(id_shp):
+                    merged = {**r, **{f"identity_{k}": v for k, v in id_row.items() if k != geom_col}}
+                    merged[geom_col] = r.get(geom_col)
+                    results.append(merged)
+                    matched = True
+            if not matched:
+                results.append(dict(r))
+        return type(frame).from_records(results)
+    except ImportError:
+        return frame
+
+
+def erase(frame: _Any, erase_frame: _Any) -> _Any:
+    """Remove portions of *frame* features that fall within *erase_frame*.
+
+    Args:
+        frame: Input features.
+        erase_frame: Features whose area is used as the erasing mask.
+
+    Returns:
+        A new frame with erased geometries.
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    src_rows = list(frame)
+    erase_rows = list(erase_frame)
+
+    try:
+        import shapely.ops as so  # type: ignore[import]
+        erase_shapes = [_geom_to_shape(r.get(geom_col)) for r in erase_rows]
+        erase_shapes = [s for s in erase_shapes if s is not None]
+        mask = so.unary_union(erase_shapes) if erase_shapes else None
+        results = []
+        for r in src_rows:
+            shp = _geom_to_shape(r.get(geom_col))
+            if mask is not None and shp is not None:
+                try:
+                    diff = shp.difference(mask)
+                    row = dict(r)
+                    row[geom_col] = diff.__geo_interface__ if not diff.is_empty else None
+                    if row[geom_col] is not None:
+                        results.append(row)
+                except Exception:
+                    results.append(dict(r))
+            else:
+                results.append(dict(r))
+        return type(frame).from_records(results)
+    except ImportError:
+        return frame
+
+
+def select_by_location(frame: _Any, select_frame: _Any, *,
+                       relationship: str = "intersects") -> _Any:
+    """Select features from *frame* based on their spatial relationship to *select_frame*.
+
+    Args:
+        frame: Features to select from.
+        select_frame: Features used as the selection geometry.
+        relationship: Spatial relationship: ``"intersects"``, ``"contains"``,
+            ``"within"``, ``"crosses"``, ``"touches"``.
+
+    Returns:
+        A new frame containing only the selected features.
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    src_rows = list(frame)
+    sel_rows = list(select_frame)
+
+    try:
+        import shapely.geometry as sg  # type: ignore[import]
+        sel_shapes = [_geom_to_shape(r.get(geom_col)) for r in sel_rows]
+        sel_shapes = [s for s in sel_shapes if s is not None]
+        selected = []
+        rel_map = {
+            "intersects": lambda a, b: a.intersects(b),
+            "contains": lambda a, b: a.contains(b),
+            "within": lambda a, b: a.within(b),
+            "crosses": lambda a, b: a.crosses(b),
+            "touches": lambda a, b: a.touches(b),
+        }
+        rel_fn = rel_map.get(relationship, rel_map["intersects"])
+        for r in src_rows:
+            shp = _geom_to_shape(r.get(geom_col))
+            if shp is not None and any(rel_fn(shp, s) for s in sel_shapes):
+                selected.append(r)
+        return type(frame).from_records(selected)
+    except ImportError:
+        return frame
+
+
+def select_by_attributes(frame: _Any, expression: str) -> _Any:
+    """Select features from *frame* using a SQL-style WHERE expression.
+
+    Evaluates *expression* for each row using Python's :func:`eval` with
+    the row's fields available as variables.  Only simple Python expressions
+    are supported (no subqueries).
+
+    Args:
+        frame: Input :class:`~geoprompt.GeoPromptFrame`.
+        expression: Python-compatible boolean expression, e.g.
+            ``"population > 10000 and category == 'urban'"``.
+
+    Returns:
+        A new frame containing only matching features.
+
+    Warning:
+        *expression* is evaluated with :func:`eval`.  Only use this function
+        with trusted input expressions.
+    """
+    rows = list(frame)
+    selected = []
+    for r in rows:
+        try:
+            if eval(expression, {"__builtins__": {}}, r):  # noqa: S307
+                selected.append(r)
+        except Exception:
+            pass
+    return type(frame).from_records(selected)
+
+
+def thiessen_polygons(frame: _Any) -> _Any:
+    """Generate Thiessen (Voronoi) polygons for the input point features.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with Point geometries.
+
+    Returns:
+        A new frame with Voronoi polygon geometries.
+    """
+    try:
+        import shapely.ops as so  # type: ignore[import]
+        import shapely.geometry as sg  # type: ignore[import]
+        geom_col = getattr(frame, "geometry_column", "geometry")
+        rows = list(frame)
+        points = []
+        for r in rows:
+            g = r.get(geom_col) or {}
+            c = g.get("coordinates", (0.0, 0.0))
+            points.append(sg.Point(float(c[0]), float(c[1])))
+        if len(points) < 3:
+            return frame
+        mp = sg.MultiPoint(points)
+        regions = so.voronoi_diagram(mp)
+        results = []
+        for i, (r, poly) in enumerate(zip(rows, regions.geoms)):
+            nr = dict(r)
+            nr[geom_col] = poly.__geo_interface__
+            results.append(nr)
+        return type(frame).from_records(results)
+    except ImportError:
+        return frame
+
+
+def multiple_ring_buffer(frame: _Any, distances: list[float]) -> _Any:
+    """Create multiple concentric ring buffers around each feature.
+
+    Args:
+        frame: Input features.
+        distances: List of buffer distances in the coordinate unit.
+
+    Returns:
+        A new frame where each original feature is expanded to one row per
+        ring (donut polygon) with a ``buffer_distance`` attribute.
+    """
+    try:
+        import shapely.geometry as sg  # type: ignore[import]
+        geom_col = getattr(frame, "geometry_column", "geometry")
+        rows = list(frame)
+        results = []
+        sorted_dists = sorted(distances)
+        for r in rows:
+            shp = _geom_to_shape(r.get(geom_col))
+            if shp is None:
+                continue
+            prev = None
+            for d in sorted_dists:
+                buf = shp.buffer(d)
+                ring = buf if prev is None else buf.difference(prev)
+                nr = dict(r)
+                nr[geom_col] = ring.__geo_interface__
+                nr["buffer_distance"] = d
+                results.append(nr)
+                prev = buf
+        return type(frame).from_records(results)
+    except ImportError:
+        return frame
+

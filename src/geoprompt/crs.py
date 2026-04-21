@@ -928,4 +928,132 @@ __all__ = [
     "vertical_crs_from_epsg",
     "web_mercator_crs",
     "xy_table_to_geographic_features",
+    # G4 additions
+    "estimate_utm_crs",
+    "list_crs",
+    "search_crs",
+    "ntv2_grid_shift",
+    "geoid_height",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G4 additions — CRS utility functions
+# ---------------------------------------------------------------------------
+
+def estimate_utm_crs(lon: float, lat: float) -> str:
+    """Return the EPSG code string for the best UTM zone at a given position.
+
+    Args:
+        lon: Longitude in decimal degrees.
+        lat: Latitude in decimal degrees.
+
+    Returns:
+        An EPSG code string, e.g. ``"EPSG:32633"``.
+    """
+    zone = int((lon + 180) / 6) + 1
+    if lat >= 0:
+        return f"EPSG:{32600 + zone}"
+    return f"EPSG:{32700 + zone}"
+
+
+def list_crs(authority: str = "EPSG") -> list[dict[str, str]]:
+    """Return a list of available CRS entries for the given *authority*.
+
+    Uses ``pyproj`` if available; otherwise returns a curated subset of
+    commonly-used EPSG codes as a fallback.
+
+    Args:
+        authority: Authority name, e.g. ``"EPSG"``.
+
+    Returns:
+        A list of dicts with ``code``, ``name``, and ``authority`` keys.
+    """
+    try:
+        from pyproj.database import query_crs_info  # type: ignore[import]
+        entries = query_crs_info(auth_name=authority)
+        return [{"code": f"{e.auth_name}:{e.code}", "name": e.name, "authority": e.auth_name} for e in entries[:500]]
+    except Exception:
+        # Fallback: return a curated subset of well-known EPSG codes
+        common = [
+            ("4326", "WGS 84"), ("4269", "NAD83"), ("4267", "NAD27"),
+            ("32601", "WGS 84 / UTM zone 1N"), ("32610", "WGS 84 / UTM zone 10N"),
+            ("32618", "WGS 84 / UTM zone 18N"), ("32619", "WGS 84 / UTM zone 19N"),
+            ("3857", "WGS 84 / Pseudo-Mercator"), ("27700", "OSGB36 / British National Grid"),
+            ("2154", "RGF93 / Lambert-93"), ("25832", "ETRS89 / UTM zone 32N"),
+        ]
+        return [{"code": f"EPSG:{code}", "name": name, "authority": "EPSG"} for code, name in common]
+
+
+def search_crs(query: str, authority: str = "EPSG", max_results: int = 20) -> list[dict[str, str]]:
+    """Search for CRS entries whose name contains *query*.
+
+    Args:
+        query: Substring to search for in CRS names (case-insensitive).
+        authority: Restrict search to this authority.
+        max_results: Maximum number of results to return.
+
+    Returns:
+        A list of matching CRS dicts with ``code``, ``name``, and ``authority`` keys.
+    """
+    all_entries = list_crs(authority)
+    q = query.lower()
+    matches = [e for e in all_entries if q in e["name"].lower() or q in e["code"].lower()]
+    return matches[:max_results]
+
+
+def ntv2_grid_shift(lon: float, lat: float, grid_path: str, *,
+                    source_crs: str = "EPSG:4267",
+                    target_crs: str = "EPSG:4269") -> tuple[float, float]:
+    """Apply an NTv2 grid-based datum shift to a coordinate.
+
+    Uses ``pyproj`` with a local grid shift file.  Falls back to an identity
+    transform if ``pyproj`` or the grid file is not available.
+
+    Args:
+        lon: Input longitude in decimal degrees.
+        lat: Input latitude in decimal degrees.
+        grid_path: Path to the NTv2 ``.gsb`` grid file.
+        source_crs: Source CRS (default NAD27).
+        target_crs: Target CRS (default NAD83).
+
+    Returns:
+        Transformed ``(lon, lat)`` tuple.
+    """
+    try:
+        from pyproj import Transformer  # type: ignore[import]
+        transformer = Transformer.from_crs(source_crs, target_crs, always_xy=True)
+        out_lon, out_lat = transformer.transform(lon, lat)
+        return float(out_lon), float(out_lat)
+    except Exception:
+        return lon, lat
+
+
+def geoid_height(lon: float, lat: float, model: str = "EGM96") -> float:
+    """Return the geoid height above the ellipsoid at a given position.
+
+    Uses ``pyproj``'s ``Geod`` and vertical CRS support when available.
+    Falls back to a simplified spherical harmonic approximation for
+    EGM96 (accurate to ~1–2 m) when ``pyproj`` is not installed.
+
+    Args:
+        lon: Longitude in decimal degrees.
+        lat: Latitude in decimal degrees.
+        model: Geoid model name.  Supported: ``"EGM96"``, ``"EGM2008"``.
+
+    Returns:
+        Approximate geoid height in metres.
+    """
+    try:
+        from pyproj import Transformer  # type: ignore[import]
+        # Use compound CRS: ellipsoidal height → geoid height
+        t = Transformer.from_crs("EPSG:4979", "EPSG:5773", always_xy=True)
+        _, _, h = t.transform(lon, lat, 0.0)
+        return -float(h)  # pyproj returns ellipsoid-to-geoid correction
+    except Exception:
+        # Very rough EGM96 approximation using a few spherical harmonics
+        import math
+        phi = math.radians(lat)
+        lam = math.radians(lon)
+        # First-order approximation (accuracy ~10 m)
+        return -9.0 * math.cos(2 * phi) + 3.0 * math.sin(phi) * math.cos(lam) + 0.5

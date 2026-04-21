@@ -496,4 +496,143 @@ __all__ = [
     "training_sample_creation",
     "tree_canopy_height_model",
     "water_body_extraction",
+    # G7b additions
+    "image_classification_nn",
+    "change_detection",
+    "object_detection_yolo",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G7b additions — imagery / remote sensing
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any, Sequence as _Seq
+
+
+def image_classification_nn(image_bands: list[list[list[float]]], *,
+                             n_classes: int = 5,
+                             model: _Any = None) -> list[list[int]]:
+    """Classify a multi-band image using a neural network (or fallback k-means).
+
+    If *model* is provided it must be callable as ``model(pixel_vector) -> int``.
+    Otherwise, a simple spectral k-means classifier is applied.
+
+    Args:
+        image_bands: List of 2-D band arrays (all the same shape).
+        n_classes: Number of classes for the fallback k-means classifier.
+        model: Optional callable that accepts a list of band values and returns
+            a class index.
+
+    Returns:
+        2-D list of class indices (same spatial extent as the input bands).
+    """
+    import random, math
+    rows = len(image_bands[0])
+    cols = len(image_bands[0][0]) if rows else 0
+    n_bands = len(image_bands)
+
+    def _vec(r: int, c: int) -> list[float]:
+        return [float(image_bands[b][r][c]) for b in range(n_bands)]
+
+    out: list[list[int]] = [[0] * cols for _ in range(rows)]
+
+    if model is not None:
+        for r in range(rows):
+            for c in range(cols):
+                out[r][c] = int(model(_vec(r, c)))
+        return out
+
+    # Fallback: simple k-means on pixel vectors
+    pixels = [_vec(r, c) for r in range(rows) for c in range(cols)]
+    k = min(n_classes, len(pixels))
+    centres = random.sample(pixels, k)
+    labels = [0] * len(pixels)
+    for _ in range(20):
+        new_labels = [min(range(k), key=lambda i: sum((a - b) ** 2 for a, b in zip(p, centres[i]))) for p in pixels]
+        if new_labels == labels:
+            break
+        labels = new_labels
+        new_centres = [[0.0] * n_bands for _ in range(k)]
+        counts = [0] * k
+        for lbl, p in zip(labels, pixels):
+            counts[lbl] += 1
+            for j, v in enumerate(p):
+                new_centres[lbl][j] += v
+        centres = [[v / c for v in row] for row, c in zip(new_centres, counts) if c > 0]
+        k = len(centres)
+
+    for idx, lbl in enumerate(labels):
+        r, c = divmod(idx, cols)
+        out[r][c] = lbl
+    return out
+
+
+def change_detection(before: list[list[float]], after: list[list[float]], *,
+                     threshold: float = 0.1) -> dict:
+    """Detect changes between two single-band images.
+
+    Args:
+        before: 2-D list of values representing the "before" image.
+        after: 2-D list of values representing the "after" image.
+        threshold: Absolute difference threshold above which a cell is
+            flagged as changed.
+
+    Returns:
+        Dict with ``change_mask`` (2-D bool list), ``n_changed``,
+        ``n_total``, and ``change_fraction``.
+    """
+    rows, cols = len(before), len(before[0]) if before else 0
+    change_mask = [[False] * cols for _ in range(rows)]
+    n_changed = 0
+    for r in range(rows):
+        for c in range(cols):
+            diff = abs(float(after[r][c]) - float(before[r][c]))
+            if diff > threshold:
+                change_mask[r][c] = True
+                n_changed += 1
+    total = rows * cols
+    return {
+        "change_mask": change_mask,
+        "n_changed": n_changed,
+        "n_total": total,
+        "change_fraction": n_changed / max(total, 1),
+    }
+
+
+def object_detection_yolo(image_path: str, *,
+                           model_path: str | None = None,
+                           confidence_threshold: float = 0.5) -> list[dict]:
+    """Run YOLO object detection on an image file (stub / delegation).
+
+    Attempts to use ``ultralytics`` (YOLOv8) if installed; otherwise returns
+    a stub result.
+
+    Args:
+        image_path: Path to the input image file.
+        model_path: Path to a YOLO model weights file (``.pt``).
+            Defaults to ``"yolov8n.pt"`` (nano).
+        confidence_threshold: Minimum confidence score for detections.
+
+    Returns:
+        A list of detection dicts with ``class``, ``confidence``,
+        ``bbox`` (``[x1, y1, x2, y2]`` in pixels), and ``area`` keys.
+    """
+    try:
+        from ultralytics import YOLO  # type: ignore[import]
+        model = YOLO(model_path or "yolov8n.pt")
+        results = model(image_path, conf=confidence_threshold)
+        detections = []
+        for r in results:
+            for box in r.boxes:
+                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+                detections.append({
+                    "class": r.names[int(box.cls)],
+                    "confidence": float(box.conf),
+                    "bbox": [x1, y1, x2, y2],
+                    "area": (x2 - x1) * (y2 - y1),
+                })
+        return detections
+    except ImportError:
+        return [{"class": "stub", "confidence": 0.0, "bbox": [0, 0, 0, 0], "area": 0,
+                 "note": "ultralytics not installed — install with: pip install ultralytics"}]

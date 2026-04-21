@@ -635,4 +635,136 @@ __all__ = [
     "run_job_batch",
     "service_resilience_profile",
     "share_item",
+    # G16 additions
+    "enterprise_geodatabase_connect",
+    "versioned_edit",
+    "replica_sync",
+    "portal_publish",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G16 additions — enterprise GIS integration stubs
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def enterprise_geodatabase_connect(host: str, database: str, *,
+                                   username: str = "",
+                                   password: str = "",
+                                   version: str = "sde.DEFAULT") -> dict:
+    """Create a connection profile for an enterprise geodatabase.
+
+    This is a *stub* implementation that returns a connection descriptor dict.
+    Actual database I/O requires ``arcpy`` or an appropriate ODBC/PostGIS
+    driver.
+
+    Args:
+        host: Hostname or connection string for the database server.
+        database: Database or service name.
+        username: Database username.
+        password: Database password (not stored in plaintext in the returned
+            dict — only a flag is set).
+        version: Default geodatabase version to connect to.
+
+    Returns:
+        A connection descriptor dict (no actual connection is opened).
+    """
+    return {
+        "host": host,
+        "database": database,
+        "username": username,
+        "password_set": bool(password),
+        "version": version,
+        "connected": False,
+        "note": "stub — install arcpy or psycopg2 for live connections",
+    }
+
+
+def versioned_edit(connection: dict, table: str, edits: list[dict], *,
+                   version: str | None = None,
+                   auto_reconcile: bool = False) -> dict:
+    """Apply versioned edits to an enterprise geodatabase table (stub).
+
+    Args:
+        connection: Connection descriptor from :func:`enterprise_geodatabase_connect`.
+        table: Fully-qualified table name.
+        edits: List of edit dicts with ``"operation"`` (``"insert"``,
+            ``"update"``, ``"delete"``), ``"oid"`` (for update/delete),
+            and ``"attributes"`` keys.
+        version: Target version name.  Defaults to the connection version.
+        auto_reconcile: Automatically reconcile to the DEFAULT version after
+            editing.
+
+    Returns:
+        Dict with ``n_inserted``, ``n_updated``, ``n_deleted``, and
+        ``version`` keys.
+    """
+    n_i = sum(1 for e in edits if e.get("operation") == "insert")
+    n_u = sum(1 for e in edits if e.get("operation") == "update")
+    n_d = sum(1 for e in edits if e.get("operation") == "delete")
+    return {
+        "table": table,
+        "version": version or connection.get("version", "sde.DEFAULT"),
+        "n_inserted": n_i,
+        "n_updated": n_u,
+        "n_deleted": n_d,
+        "reconciled": auto_reconcile,
+        "note": "stub — no live database connection",
+    }
+
+
+def replica_sync(connection: dict, replica_name: str, *,
+                 direction: str = "bidirectional",
+                 conflict_policy: str = "in_favour_of_referenced") -> dict:
+    """Synchronise a geodatabase replica (stub).
+
+    Args:
+        connection: Connection descriptor.
+        replica_name: Name of the replica to synchronise.
+        direction: Sync direction: ``"bidirectional"``, ``"in"``, or ``"out"``.
+        conflict_policy: Conflict resolution policy.
+
+    Returns:
+        Dict describing the sync operation result.
+    """
+    return {
+        "replica_name": replica_name,
+        "direction": direction,
+        "conflict_policy": conflict_policy,
+        "status": "stub",
+        "note": "stub — install ArcGIS Server connector for live sync",
+    }
+
+
+def portal_publish(item_path: str, item_type: str, *,
+                   portal_url: str = "https://www.arcgis.com",
+                   username: str = "",
+                   tags: list[str] | None = None,
+                   folder: str = "") -> dict:
+    """Publish an item to ArcGIS Online / Portal for ArcGIS (stub).
+
+    Args:
+        item_path: Local path to the item file to publish.
+        item_type: Portal item type, e.g. ``"Feature Service"``,
+            ``"Web Map"``, ``"File Geodatabase"``.
+        portal_url: Target portal URL.
+        username: Portal username.
+        tags: List of metadata tags.
+        folder: Destination folder name in the user's content.
+
+    Returns:
+        Dict with ``item_id``, ``url``, and ``status`` keys.
+    """
+    import hashlib
+    fake_id = hashlib.md5(f"{item_path}{item_type}".encode()).hexdigest()[:16]  # noqa: S324
+    return {
+        "item_id": fake_id,
+        "item_type": item_type,
+        "portal_url": portal_url,
+        "folder": folder,
+        "tags": tags or [],
+        "status": "stub",
+        "note": "stub — install arcgis Python API for live publishing",
+    }

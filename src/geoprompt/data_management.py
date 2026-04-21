@@ -1772,4 +1772,205 @@ __all__ = [
     "write_csv_with_xy",
     "write_excel_styled",
     "write_metadata",
+    # G8 additions
+    "add_field",
+    "delete_field",
+    "topology_validate",
+    "find_identical_features",
+    "near_table_multi",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G8 additions — data management
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def add_field(frame: _Any, field_name: str, field_type: str = "float",
+              default: _Any = None) -> _Any:
+    """Add a new field (column) to a :class:`~geoprompt.GeoPromptFrame`.
+
+    Args:
+        frame: The input frame.
+        field_name: Name of the new column.
+        field_type: One of ``"float"``, ``"int"``, ``"str"``, ``"bool"``.
+        default: Default value for all rows.  If ``None``, defaults to
+            ``0.0`` (float), ``0`` (int), ``""`` (str), or ``False`` (bool).
+
+    Returns:
+        A new frame with the added field.
+    """
+    type_defaults = {"float": 0.0, "int": 0, "str": "", "bool": False}
+    fill = default if default is not None else type_defaults.get(field_type, None)
+    rows = list(frame)
+    for r in rows:
+        r[field_name] = fill
+    return type(frame).from_records(rows)
+
+
+def delete_field(frame: _Any, *field_names: str) -> _Any:
+    """Remove one or more fields from a :class:`~geoprompt.GeoPromptFrame`.
+
+    Args:
+        frame: The input frame.
+        *field_names: Names of columns to remove.
+
+    Returns:
+        A new frame without the specified fields.
+    """
+    to_remove = set(field_names)
+    rows = [{k: v for k, v in r.items() if k not in to_remove} for r in frame]
+    return type(frame).from_records(rows)
+
+
+def topology_validate(frame: _Any, *, rule: str = "no_self_intersections") -> list[dict]:
+    """Validate geometries in a frame against a topology rule.
+
+    Supported *rule* values:
+
+    - ``"no_self_intersections"`` — flags self-intersecting polygons/rings.
+    - ``"no_duplicates"`` — flags duplicate geometry coordinates.
+    - ``"must_not_overlap"`` — flags pairs of features whose geometries overlap.
+
+    Args:
+        frame: The input :class:`~geoprompt.GeoPromptFrame`.
+        rule: The topology rule to apply.
+
+    Returns:
+        A list of error dicts with ``feature_index``, ``rule``, and ``message`` keys.
+    """
+    errors: list[dict] = []
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    rows = list(frame)
+
+    if rule == "no_self_intersections":
+        try:
+            import shapely.validation as sv  # type: ignore[import]
+            import shapely.geometry as sg  # type: ignore[import]
+            import json
+            for i, r in enumerate(rows):
+                geom = r.get(geom_col)
+                if geom is None:
+                    continue
+                try:
+                    shp = sg.shape(geom)
+                    if not shp.is_valid:
+                        errors.append({"feature_index": i, "rule": rule, "message": sv.explain_validity(shp)})
+                except Exception as e:
+                    errors.append({"feature_index": i, "rule": rule, "message": str(e)})
+        except ImportError:
+            # Fallback: no shapely available — skip validation
+            pass
+
+    elif rule == "no_duplicates":
+        seen: set[str] = set()
+        for i, r in enumerate(rows):
+            geom = r.get(geom_col)
+            key = str(geom)
+            if key in seen:
+                errors.append({"feature_index": i, "rule": rule, "message": "duplicate geometry"})
+            seen.add(key)
+
+    elif rule == "must_not_overlap":
+        try:
+            import shapely.geometry as sg  # type: ignore[import]
+            shapes = []
+            for r in rows:
+                geom = r.get(geom_col)
+                try:
+                    shapes.append(sg.shape(geom) if geom else None)
+                except Exception:
+                    shapes.append(None)
+            for i in range(len(shapes)):
+                for j in range(i + 1, len(shapes)):
+                    if shapes[i] is not None and shapes[j] is not None:
+                        if shapes[i].overlaps(shapes[j]):
+                            errors.append({"feature_index": i, "rule": rule, "message": f"overlaps feature {j}"})
+        except ImportError:
+            pass
+
+    return errors
+
+
+def find_identical_features(frame: _Any, fields: list[str] | None = None) -> list[dict]:
+    """Find rows with identical attribute values (or identical geometries).
+
+    Args:
+        frame: The input :class:`~geoprompt.GeoPromptFrame`.
+        fields: Column names to compare.  If ``None``, compares all
+            non-geometry columns plus the geometry column.
+
+    Returns:
+        A list of dicts with ``group_id`` and ``feature_indices`` listing
+        groups of identical features.
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    rows = list(frame)
+    if fields is None:
+        fields = [k for k in rows[0].keys()] if rows else []
+
+    groups: dict[tuple, list[int]] = {}
+    for i, r in enumerate(rows):
+        key = tuple(str(r.get(f)) for f in fields)
+        groups.setdefault(key, []).append(i)
+
+    results = []
+    for gid, (key, indices) in enumerate(groups.items()):
+        if len(indices) > 1:
+            results.append({"group_id": gid, "feature_indices": indices, "key": dict(zip(fields, key))})
+    return results
+
+
+def near_table_multi(frame: _Any, search_frame: _Any, *,
+                     max_distance: float = float("inf"),
+                     n_nearest: int = 3) -> list[dict]:
+    """Generate a near table relating each feature to its *n* nearest neighbours.
+
+    Args:
+        frame: Query frame (features to find neighbours for).
+        search_frame: The frame to search in.
+        max_distance: Maximum search distance (same units as coordinates).
+        n_nearest: Number of nearest neighbours per feature.
+
+    Returns:
+        A list of dicts with ``in_fid``, ``near_fid``, and ``near_dist`` keys.
+    """
+    import math
+
+    def _centroid(geom: dict) -> tuple[float, float]:
+        t = geom.get("type", "")
+        c = geom.get("coordinates", (0.0, 0.0))
+        if t == "Point":
+            return (float(c[0]), float(c[1]))
+        # Fallback: mean of first ring
+        def _flat(coords: _Any) -> list[tuple[float, float]]:
+            if not coords:
+                return []
+            if isinstance(coords[0], (int, float)):
+                return [(float(coords[0]), float(coords[1]))]
+            return [p for sub in coords for p in _flat(sub)]
+        pts = _flat(c)
+        if pts:
+            return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+        return (0.0, 0.0)
+
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    src_rows = list(frame)
+    tgt_rows = list(search_frame)
+
+    tgt_centroids = [_centroid(r.get(geom_col) or {}) for r in tgt_rows]
+
+    results = []
+    for i, r in enumerate(src_rows):
+        pt = _centroid(r.get(geom_col) or {})
+        dists = []
+        for j, tc in enumerate(tgt_centroids):
+            d = math.sqrt((pt[0] - tc[0]) ** 2 + (pt[1] - tc[1]) ** 2)
+            if d <= max_distance:
+                dists.append((d, j))
+        dists.sort()
+        for dist, j in dists[:n_nearest]:
+            results.append({"in_fid": i, "near_fid": j, "near_dist": dist})
+    return results

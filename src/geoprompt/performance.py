@@ -22,7 +22,7 @@ from typing import Any, Callable, Iterable, Sequence
 logger = logging.getLogger("geoprompt")
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class ConnectionPoolInfo:
     """Metadata for a lightweight connection-pool plan."""
 
@@ -31,7 +31,7 @@ class ConnectionPoolInfo:
     healthy: bool = True
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class QuotaPolicy:
     """Quota details for a single user or tenant."""
 
@@ -45,7 +45,7 @@ class QuotaPolicy:
         return max(self.limit - self.used, 0)
 
 
-@dataclass(slots=True)
+@dataclass
 class CancellationToken:
     """Simple cancellation token for long-running operations."""
 
@@ -1131,4 +1131,160 @@ __all__ = [
     "number_format_locale_handling",
     "telemetry_opt_in_out_ux",
     "user_survey_integration",
+    # G21 additions
+    "lazy_spatial_index",
+    "parallel_map_apply",
+    "tile_cache_manager",
+    "streaming_geojson",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G21 additions — performance utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any, Callable as _Callable
+
+
+class lazy_spatial_index:
+    """Lazy-building spatial index using a 2-D grid hash.
+
+    The index is not built until the first query.  Supports point-in-bbox
+    queries.
+
+    Args:
+        features: Iterable of ``(id, (minx, miny, maxx, maxy))`` tuples.
+        cell_size: Grid cell size for the bucket hash.
+    """
+
+    def __init__(self, features: list[tuple[_Any, tuple[float, float, float, float]]],
+                 cell_size: float = 1.0) -> None:
+        self._features = list(features)
+        self._cell_size = cell_size
+        self._index: dict[tuple[int, int], list[_Any]] | None = None
+
+    def _build(self) -> None:
+        import math
+        cs = self._cell_size
+        self._index = {}
+        for fid, (x1, y1, x2, y2) in self._features:
+            for cx in range(int(math.floor(x1 / cs)), int(math.floor(x2 / cs)) + 1):
+                for cy in range(int(math.floor(y1 / cs)), int(math.floor(y2 / cs)) + 1):
+                    self._index.setdefault((cx, cy), []).append(fid)
+
+    def query(self, minx: float, miny: float, maxx: float, maxy: float) -> list[_Any]:
+        """Return IDs of features that may intersect the given bbox."""
+        import math
+        if self._index is None:
+            self._build()
+        assert self._index is not None
+        cs = self._cell_size
+        seen: set[_Any] = set()
+        result = []
+        for cx in range(int(math.floor(minx / cs)), int(math.floor(maxx / cs)) + 1):
+            for cy in range(int(math.floor(miny / cs)), int(math.floor(maxy / cs)) + 1):
+                for fid in self._index.get((cx, cy), []):
+                    if fid not in seen:
+                        seen.add(fid)
+                        result.append(fid)
+        return result
+
+
+def parallel_map_apply(frame: _Any, fn: _Callable, *,
+                       n_workers: int = 4,
+                       chunk_size: int | None = None) -> list:
+    """Apply *fn* to each row of *frame* using a thread pool.
+
+    Falls back to a sequential map if ``concurrent.futures`` is unavailable.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` or any iterable of rows.
+        fn: A callable that accepts a row dict and returns a value.
+        n_workers: Number of worker threads.
+        chunk_size: Rows per chunk (not used by thread pool but reserved for
+            future multiprocessing support).
+
+    Returns:
+        A list of return values in the same order as the input rows.
+    """
+    rows = list(frame)
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=n_workers) as pool:
+            return list(pool.map(fn, rows))
+    except Exception:
+        return [fn(r) for r in rows]
+
+
+class tile_cache_manager:
+    """Simple in-memory LRU tile cache for rendered map tiles.
+
+    Args:
+        max_tiles: Maximum number of tiles to cache.
+    """
+
+    def __init__(self, max_tiles: int = 256) -> None:
+        from collections import OrderedDict
+        self._cache: OrderedDict[str, bytes] = OrderedDict()
+        self._max = max_tiles
+
+    def _key(self, z: int, x: int, y: int, layer: str = "") -> str:
+        return f"{layer}/{z}/{x}/{y}"
+
+    def get(self, z: int, x: int, y: int, layer: str = "") -> bytes | None:
+        """Retrieve a cached tile; returns ``None`` on cache miss."""
+        key = self._key(z, x, y, layer)
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def put(self, z: int, x: int, y: int, data: bytes, layer: str = "") -> None:
+        """Store a tile in the cache, evicting the oldest if at capacity."""
+        key = self._key(z, x, y, layer)
+        self._cache[key] = data
+        self._cache.move_to_end(key)
+        if len(self._cache) > self._max:
+            self._cache.popitem(last=False)
+
+    def invalidate(self, layer: str = "") -> int:
+        """Remove all tiles for *layer*; pass ``""`` to clear all tiles."""
+        if not layer:
+            n = len(self._cache)
+            self._cache.clear()
+            return n
+        to_del = [k for k in self._cache if k.startswith(f"{layer}/")]
+        for k in to_del:
+            del self._cache[k]
+        return len(to_del)
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+
+def streaming_geojson(frame: _Any, *, chunk_size: int = 1000) -> "_Any":
+    """Yield GeoJSON Feature strings from a large frame in chunks.
+
+    Suitable for streaming large datasets to HTTP clients or files without
+    loading the entire FeatureCollection into memory at once.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` or iterable of row dicts.
+        chunk_size: Number of features per emitted chunk string.
+
+    Yields:
+        Newline-delimited GeoJSON Feature strings (GeoJSONL format).
+    """
+    import json
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    buf = []
+    for r in frame:
+        geom = r.get(geom_col)
+        props = {k: v for k, v in r.items() if k != geom_col}
+        feat = json.dumps({"type": "Feature", "geometry": geom, "properties": props}, separators=(",", ":"))
+        buf.append(feat)
+        if len(buf) >= chunk_size:
+            yield "\n".join(buf) + "\n"
+            buf = []
+    if buf:
+        yield "\n".join(buf) + "\n"

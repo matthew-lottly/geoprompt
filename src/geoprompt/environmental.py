@@ -736,3 +736,181 @@ def telecom_coverage_radius(
         else:
             high = mid
     return (low + high) / 2
+
+
+# ---------------------------------------------------------------------------
+# G15 additions — environmental analysis
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def bio_habitat_connectivity(habitat_patches: list[dict], *,
+                              max_gap: float = 500.0,
+                              cost_grid: list[list[float]] | None = None) -> dict:
+    """Analyse connectivity between habitat patches for biodiversity assessment.
+
+    Identifies which patches are connected (within *max_gap* of each other)
+    and returns a network graph of patch linkages.
+
+    Args:
+        habitat_patches: List of habitat patch dicts with ``"id"``,
+            ``"area_ha"``, and ``"geometry"`` (GeoJSON polygon) keys.
+        max_gap: Maximum gap distance between patches to consider them
+            connected (in the same coordinate units as the geometry).
+        cost_grid: Optional 2-D cost surface for least-cost path weighting.
+
+    Returns:
+        Dict with ``patches``, ``links`` (list of connected patch-pair dicts
+        with ``from_id``, ``to_id``, ``gap_distance``), and
+        ``isolated_patches`` (patches with no connections).
+    """
+    import math
+
+    def _patch_centroid(patch: dict) -> tuple[float, float]:
+        geom = patch.get("geometry") or {}
+        coords = geom.get("coordinates", [[[0.0, 0.0]]])
+        pts: list[tuple[float, float]] = []
+        def _flat(c: _Any) -> None:
+            if isinstance(c, (list, tuple)) and len(c) >= 2 and isinstance(c[0], (int, float)):
+                pts.append((float(c[0]), float(c[1])))
+            elif isinstance(c, (list, tuple)):
+                for sub in c:
+                    _flat(sub)
+        _flat(coords)
+        if pts:
+            return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+        return (0.0, 0.0)
+
+    patch_ids = [p.get("id", i) for i, p in enumerate(habitat_patches)]
+    centroids = [_patch_centroid(p) for p in habitat_patches]
+
+    links = []
+    connected = set()
+    for i in range(len(habitat_patches)):
+        for j in range(i + 1, len(habitat_patches)):
+            d = math.sqrt((centroids[i][0] - centroids[j][0]) ** 2 + (centroids[i][1] - centroids[j][1]) ** 2)
+            if d <= max_gap:
+                links.append({"from_id": patch_ids[i], "to_id": patch_ids[j], "gap_distance": d})
+                connected.add(patch_ids[i])
+                connected.add(patch_ids[j])
+
+    isolated = [pid for pid in patch_ids if pid not in connected]
+    return {"patches": patch_ids, "links": links, "isolated_patches": isolated}
+
+
+def flood_risk_assessment(dem: _Any, *,
+                          water_level: float = 0.0,
+                          return_period_years: int = 100) -> dict:
+    """Assess flood risk for a DEM at a given water level.
+
+    Identifies cells below *water_level* as flooded and computes basic
+    flood statistics.
+
+    Args:
+        dem: Raster dict with ``bands`` and ``resolution`` keys, or a nested
+            list of elevation values.
+        water_level: Flood water surface elevation.
+        return_period_years: Return period in years (stored in output only).
+
+    Returns:
+        Dict with ``flooded_cell_count``, ``flooded_fraction``,
+        ``mean_flood_depth``, ``max_flood_depth``, and ``return_period``.
+    """
+    grid = dem if isinstance(dem, list) else dem.get("bands", [[]])[0]
+    flooded = []
+    total = 0
+    for row in grid:
+        for z in row:
+            total += 1
+            depth = water_level - float(z)
+            if depth > 0:
+                flooded.append(depth)
+    n_flooded = len(flooded)
+    return {
+        "flooded_cell_count": n_flooded,
+        "flooded_fraction": n_flooded / max(total, 1),
+        "mean_flood_depth": sum(flooded) / max(n_flooded, 1),
+        "max_flood_depth": max(flooded, default=0.0),
+        "return_period": return_period_years,
+    }
+
+
+def carbon_footprint(frame: _Any, *,
+                     activity_column: str = "activity",
+                     quantity_column: str = "quantity",
+                     emission_factors: dict[str, float] | None = None) -> dict:
+    """Estimate the carbon footprint of activities recorded in a spatial dataset.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with *activity_column* and
+            *quantity_column* attributes.
+        activity_column: Column identifying the activity type.
+        quantity_column: Column with the activity quantity (e.g. km, kWh).
+        emission_factors: Dict mapping activity name to kg CO₂e per unit.
+            Default factors are provided for common activities.
+
+    Returns:
+        Dict with ``total_kg_co2e``, ``by_activity``, and ``n_records``.
+    """
+    defaults: dict[str, float] = {
+        "car_km": 0.21, "bus_km": 0.089, "rail_km": 0.041,
+        "flight_km": 0.255, "electricity_kwh": 0.233, "gas_kwh": 0.203,
+        "beef_kg": 27.0, "chicken_kg": 6.9, "default": 1.0,
+    }
+    factors = {**defaults, **(emission_factors or {})}
+    by_activity: dict[str, float] = {}
+    rows = list(frame)
+    for r in rows:
+        act = str(r.get(activity_column, "default"))
+        qty = float(r.get(quantity_column, 0))
+        factor = factors.get(act, factors["default"])
+        by_activity[act] = by_activity.get(act, 0.0) + qty * factor
+    return {"total_kg_co2e": sum(by_activity.values()), "by_activity": by_activity, "n_records": len(rows)}
+
+
+def ecological_sensitivity(frame: _Any, *,
+                            criteria: list[str] | None = None,
+                            weights: list[float] | None = None) -> _Any:
+    """Compute a composite ecological sensitivity score for each feature.
+
+    A weighted sum of normalised criterion columns is computed and stored
+    in a new ``sensitivity_score`` column.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with numeric criteria columns.
+        criteria: Column names to include in the sensitivity model.
+        weights: Relative weights for each criterion (same order as *criteria*).
+            Weights are normalised internally to sum to 1.
+
+    Returns:
+        A new frame with ``sensitivity_score`` added.
+    """
+    rows = list(frame)
+    if not rows:
+        return frame
+
+    if criteria is None:
+        geom_col = getattr(frame, "geometry_column", "geometry")
+        criteria = [k for k, v in rows[0].items() if k != geom_col and isinstance(v, (int, float))]
+
+    if not criteria:
+        return frame
+
+    w = list(weights or [1.0] * len(criteria))
+    total_w = sum(w) or 1.0
+    norm_w = [wi / total_w for wi in w]
+
+    # Normalise each criterion to [0, 1]
+    col_min = {c: min(float(r.get(c, 0)) for r in rows) for c in criteria}
+    col_max = {c: max(float(r.get(c, 0)) for r in rows) for c in criteria}
+
+    out_rows = []
+    for r in rows:
+        score = 0.0
+        for c, wi in zip(criteria, norm_w):
+            lo, hi = col_min[c], col_max[c]
+            rng = hi - lo or 1.0
+            score += wi * (float(r.get(c, 0)) - lo) / rng
+        out_rows.append({**r, "sensitivity_score": round(score, 6)})
+    return type(frame).from_records(out_rows)

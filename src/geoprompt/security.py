@@ -485,3 +485,140 @@ class PriorityJobQueue:
 
     def clear(self) -> None:
         self._jobs.clear()
+
+
+# ---------------------------------------------------------------------------
+# G23 additions — security utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+import re as _re
+
+
+def validate_geometry_safe(geometry: dict) -> dict:
+    """Validate a GeoJSON geometry dict for common injection / corruption risks.
+
+    Checks that the geometry has a recognised ``type``, that all coordinate
+    values are finite numbers, and that the coordinate nesting depth matches
+    the declared type.
+
+    Args:
+        geometry: A GeoJSON-style geometry dict.
+
+    Returns:
+        Dict with ``valid`` (bool), ``errors`` (list of strings), and
+        ``geometry_type`` keys.
+    """
+    import math
+    errors: list[str] = []
+    if not isinstance(geometry, dict):
+        return {"valid": False, "errors": ["geometry is not a dict"], "geometry_type": None}
+
+    geom_type = geometry.get("type")
+    valid_types = {"Point", "MultiPoint", "LineString", "MultiLineString", "Polygon", "MultiPolygon", "GeometryCollection"}
+    if geom_type not in valid_types:
+        errors.append(f"unknown geometry type: {geom_type!r}")
+        return {"valid": False, "errors": errors, "geometry_type": geom_type}
+
+    def _check_coords(c: _Any, depth: int = 0) -> None:
+        if isinstance(c, (int, float)):
+            if not math.isfinite(c):
+                errors.append(f"non-finite coordinate value: {c}")
+        elif isinstance(c, (list, tuple)):
+            for item in c:
+                _check_coords(item, depth + 1)
+        else:
+            errors.append(f"unexpected coordinate type: {type(c).__name__}")
+
+    if geom_type != "GeometryCollection":
+        _check_coords(geometry.get("coordinates", []))
+    else:
+        for g in geometry.get("geometries", []):
+            sub = validate_geometry_safe(g)
+            errors.extend(sub["errors"])
+
+    return {"valid": len(errors) == 0, "errors": errors, "geometry_type": geom_type}
+
+
+def sanitize_attribute_input(value: _Any, *,
+                              max_length: int = 1000,
+                              allow_html: bool = False) -> str:
+    """Sanitise an attribute value for safe storage or display.
+
+    Strips control characters, optionally strips HTML tags, and truncates
+    to *max_length*.
+
+    Args:
+        value: The input value to sanitise.
+        max_length: Maximum allowed string length.
+        allow_html: If ``False``, HTML tags are stripped.
+
+    Returns:
+        A sanitised string.
+    """
+    s = str(value)
+    # Strip null bytes and other control characters (except tab/newline)
+    s = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", s)
+    if not allow_html:
+        # Strip HTML tags
+        s = _re.sub(r"<[^>]+>", "", s)
+        # Escape remaining < > & characters
+        s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return s[:max_length]
+
+
+def audit_log_event(event_type: str, details: dict, *,
+                    log_store: list | None = None) -> dict:
+    """Record a security-relevant audit log event.
+
+    Args:
+        event_type: A short event category string, e.g. ``"data_access"``,
+            ``"schema_change"``, ``"auth_failure"``.
+        details: Dict of event-specific metadata.
+        log_store: Optional mutable list to append the event to.  If
+            ``None``, the event is returned without being stored.
+
+    Returns:
+        The event record dict with ``event_type``, ``timestamp``, and
+        ``details`` keys.
+    """
+    import datetime
+    event: dict = {
+        "event_type": event_type,
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "details": details,
+    }
+    if log_store is not None:
+        log_store.append(event)
+    return event
+
+
+def rate_limit_check(key: str, *,
+                     limit: int = 100,
+                     window_seconds: int = 60,
+                     counter_store: dict | None = None) -> dict:
+    """Check whether a request key has exceeded its rate limit.
+
+    Uses an in-memory counter dict keyed by ``(key, window_bucket)``.
+
+    Args:
+        key: Rate-limit key (e.g. IP address or API key).
+        limit: Maximum requests allowed in the window.
+        window_seconds: Length of the rolling window in seconds.
+        counter_store: Optional dict to use as the counter store (for testing
+            or cross-call persistence).  If ``None``, a new empty dict is used
+            and the check always returns ``allowed=True``.
+
+    Returns:
+        Dict with ``allowed`` (bool), ``count``, ``limit``, and
+        ``remaining`` keys.
+    """
+    import time
+    if counter_store is None:
+        return {"allowed": True, "count": 1, "limit": limit, "remaining": limit - 1}
+    bucket = int(time.time() / window_seconds)
+    store_key = f"{key}:{bucket}"
+    count = counter_store.get(store_key, 0) + 1
+    counter_store[store_key] = count
+    allowed = count <= limit
+    return {"allowed": allowed, "count": count, "limit": limit, "remaining": max(0, limit - count)}

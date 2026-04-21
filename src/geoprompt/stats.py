@@ -1892,4 +1892,251 @@ __all__ = [
     "territory_design",
     "trend_surface",
     "zonal_statistics_by_class",
+    # G5 additions
+    "join_count_statistic",
+    "nearest_neighbor_index",
+    "head_tail_breaks",
+    "fisher_jenks",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G5 additions — spatial statistics
+# ---------------------------------------------------------------------------
+
+def join_count_statistic(frame: Any, spatial_weights: Any | None = None, *,
+                         attribute: str = "class", permutations: int = 99) -> dict[str, float]:
+    """Compute the Join Count statistic for a binary attribute.
+
+    The Join Count statistic tests whether like-valued neighbouring polygons
+    cluster spatially.  This is a pure-Python implementation for BB, BW, WW
+    counts.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with geometry and *attribute*.
+        spatial_weights: Optional pre-computed spatial weights object with
+            a ``neighbors`` mapping ``{id: [id, ...]}``; if ``None``, Queen
+            contiguity is estimated from bounding-box overlap.
+        attribute: Column name containing binary (0/1 or bool) class labels.
+        permutations: Number of permutations for pseudo-p-value estimation.
+
+    Returns:
+        Dict with keys ``BB``, ``BW``, ``WW``, ``p_value_BB``.
+    """
+    import random, math
+    rows = list(frame)
+    n = len(rows)
+    if n < 2:
+        return {"BB": 0.0, "BW": 0.0, "WW": 0.0, "p_value_BB": 1.0}
+
+    labels = [int(bool(r.get(attribute, 0))) for r in rows]
+
+    # Build simple Queen neighbours from bounding-box overlap if no weights given
+    if spatial_weights is None:
+        def _bbox(geom: dict) -> tuple[float, float, float, float]:
+            coords: list[tuple[float, float]] = []
+            def _extract(c: Any) -> None:
+                if isinstance(c[0], (int, float)):
+                    coords.append((float(c[0]), float(c[1])))
+                else:
+                    for sub in c:
+                        _extract(sub)
+            _extract(geom.get("coordinates", [(0, 0)]))
+            if not coords:
+                return (0.0, 0.0, 0.0, 0.0)
+            xs = [p[0] for p in coords]
+            ys = [p[1] for p in coords]
+            return (min(xs), min(ys), max(xs), max(ys))
+
+        geom_col = getattr(frame, "geometry_column", "geometry")
+        bboxes = [_bbox(r.get(geom_col) or {"coordinates": [(0, 0)]}) for r in rows]
+
+        def _overlaps(a: tuple, b: tuple) -> bool:
+            return not (a[2] <= b[0] or b[2] <= a[0] or a[3] <= b[1] or b[3] <= a[1])
+
+        neighbours: dict[int, list[int]] = {i: [] for i in range(n)}
+        for i in range(n):
+            for j in range(i + 1, n):
+                if _overlaps(bboxes[i], bboxes[j]):
+                    neighbours[i].append(j)
+                    neighbours[j].append(i)
+    else:
+        neighbours = spatial_weights.neighbors
+
+    def _counts(labs: list[int]) -> tuple[float, float, float]:
+        bb = bw = ww = 0
+        for i, nbs in neighbours.items():
+            for j in nbs:
+                if j <= i:
+                    continue
+                a, b = labs[i], labs[j]
+                if a == 1 and b == 1:
+                    bb += 1
+                elif a == 0 and b == 0:
+                    ww += 1
+                else:
+                    bw += 1
+        return float(bb), float(bw), float(ww)
+
+    obs_bb, obs_bw, obs_ww = _counts(labels)
+
+    # Permutation test
+    count_bb_gte = 0
+    shuffled = labels[:]
+    for _ in range(permutations):
+        random.shuffle(shuffled)
+        perm_bb, _, _ = _counts(shuffled)
+        if perm_bb >= obs_bb:
+            count_bb_gte += 1
+    p_val = (count_bb_gte + 1) / (permutations + 1)
+    return {"BB": obs_bb, "BW": obs_bw, "WW": obs_ww, "p_value_BB": p_val}
+
+
+def nearest_neighbor_index(frame: Any) -> dict[str, float]:
+    """Compute the Average Nearest Neighbor Index (NNI) for point features.
+
+    The NNI (Clark-Evans index) compares the observed mean nearest-neighbour
+    distance to the expected distance under a Poisson process.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with Point geometries.
+
+    Returns:
+        Dict with keys ``observed_mean``, ``expected_mean``, ``nni``,
+        ``z_score``, and ``p_value``.
+    """
+    import math
+
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    rows = list(frame)
+    points = []
+    for r in rows:
+        geom = r.get(geom_col) or {}
+        if geom.get("type") == "Point":
+            c = geom.get("coordinates", (0.0, 0.0))
+            points.append((float(c[0]), float(c[1])))
+
+    n = len(points)
+    if n < 2:
+        return {"observed_mean": 0.0, "expected_mean": 0.0, "nni": 1.0, "z_score": 0.0, "p_value": 1.0}
+
+    # Study area — bounding box area
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    area = max((max(xs) - min(xs)) * (max(ys) - min(ys)), 1e-12)
+
+    def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
+        return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+    nn_dists = []
+    for i, p in enumerate(points):
+        min_d = min(_dist(p, q) for j, q in enumerate(points) if j != i)
+        nn_dists.append(min_d)
+
+    obs_mean = sum(nn_dists) / n
+    density = n / area
+    exp_mean = 1.0 / (2.0 * math.sqrt(density))
+    nni = obs_mean / exp_mean if exp_mean > 0 else 1.0
+    se = math.sqrt((4 - math.pi) / (4 * math.pi * n * density + 1e-30))
+    z = (obs_mean - exp_mean) / (se + 1e-30)
+    # Two-tailed p (rough normal approximation)
+    p = 2 * (1 - 0.5 * math.erfc(-abs(z) / math.sqrt(2)))
+    return {"observed_mean": obs_mean, "expected_mean": exp_mean, "nni": nni, "z_score": z, "p_value": p}
+
+
+def head_tail_breaks(values: list[float]) -> list[float]:
+    """Compute class breaks using the Head/Tail classification scheme.
+
+    Head/Tail Breaks iteratively splits data at the arithmetic mean,
+    producing a hierarchy that is well-suited for heavy-tailed distributions.
+
+    Args:
+        values: A list of numeric values to classify.
+
+    Returns:
+        A sorted list of break points (including min and max).
+    """
+    if not values:
+        return []
+    arr = sorted(float(v) for v in values)
+    breaks = [arr[0]]
+
+    def _split(data: list[float]) -> None:
+        if len(data) < 2:
+            return
+        mean = sum(data) / len(data)
+        head = [v for v in data if v > mean]
+        breaks.append(mean)
+        if 1 <= len(head) < len(data):
+            _split(head)
+
+    _split(arr)
+    breaks.append(arr[-1])
+    return sorted(set(breaks))
+
+
+def fisher_jenks(values: list[float], k: int = 5) -> list[float]:
+    """Compute natural (Fisher-Jenks) classification breaks.
+
+    Uses the Jenks optimization algorithm to minimise within-class variance.
+    This is an O(n²k) implementation suitable for datasets up to ~50,000
+    observations; for larger datasets use the ``jenkspy`` package.
+
+    Args:
+        values: Numeric values to classify.
+        k: Number of classes.
+
+    Returns:
+        A sorted list of ``k + 1`` break points (including min and max).
+    """
+    # Try jenkspy first for speed
+    try:
+        import jenkspy  # type: ignore[import]
+        return jenkspy.jenks_breaks(values, nb_class=k)
+    except ImportError:
+        pass
+
+    arr = sorted(float(v) for v in values)
+    n = len(arr)
+    if n == 0 or k <= 0:
+        return []
+    k = min(k, n)
+
+    # Variance table initialisation (Jenks O(n²k))
+    import math
+    INF = float("inf")
+
+    # matrices: lower_class_limits and variance_combinations
+    LC = [[0] * (k + 1) for _ in range(n + 1)]
+    VC = [[INF] * (k + 1) for _ in range(n + 1)]
+    for i in range(1, n + 1):
+        LC[i][1] = 1
+        VC[i][1] = 0.0
+
+    for q in range(2, k + 1):
+        for i in range(q, n + 1):
+            sx = sx2 = 0.0
+            for m in range(i, q - 1, -1):
+                sx += arr[m - 1]
+                sx2 += arr[m - 1] ** 2
+                count = i - m + 1
+                variance = sx2 - sx ** 2 / count
+                j = m - 1
+                if j != 0:
+                    v = variance + VC[j][q - 1]
+                    if v < VC[i][q]:
+                        LC[i][q] = m
+                        VC[i][q] = v
+                else:
+                    LC[i][q] = m
+                    VC[i][q] = variance
+
+    # Backtrack to find breaks
+    breaks = [arr[-1]]
+    klass = n
+    for q in range(k, 0, -1):
+        idx = LC[klass][q] - 1
+        breaks.append(arr[idx] if idx >= 0 else arr[0])
+        klass = LC[klass][q] - 1
+    breaks.append(arr[0])
+    return sorted(set(breaks))

@@ -2122,4 +2122,348 @@ __all__ = [
     "write_geoparquet",
     "write_json",
     "write_shapefile",
+    # G3 additions
+    "read_flatgeobuf",
+    "write_flatgeobuf",
+    "read_dxf",
+    "read_mapinfo_tab",
+    "read_wfs",
+    "read_osm_pbf",
+    "auto_read_file",
+    "auto_write_file",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G3 additions — additional format readers/writers
+# ---------------------------------------------------------------------------
+
+def read_flatgeobuf(path: str | Path) -> GeoPromptFrame:
+    """Read a FlatGeobuf file into a :class:`~geoprompt.GeoPromptFrame`.
+
+    Attempts to use the ``flatgeobuf`` package if available; otherwise falls
+    back to reading via ``pyogrio`` or ``fiona`` if installed.
+
+    Args:
+        path: Path to a ``.fgb`` file.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    p = Path(path)
+    try:
+        import pyogrio  # type: ignore[import]
+        gdf = pyogrio.read_dataframe(str(p))
+        records = []
+        for _, row in gdf.iterrows():
+            rec: dict = dict(row)
+            geom = rec.pop("geometry", None)
+            if geom is not None:
+                rec["geometry"] = json.loads(geom.__geo_interface__.__str__()) if hasattr(geom, "__geo_interface__") else {"type": "Point", "coordinates": (0.0, 0.0)}
+            records.append(rec)
+        return GeoPromptFrame.from_records(records)
+    except Exception:
+        pass
+    try:
+        import fiona  # type: ignore[import]
+        with fiona.open(str(p)) as src:
+            records = [dict(feat["properties"]) | {"geometry": dict(feat["geometry"])} for feat in src]
+        return GeoPromptFrame.from_records(records)
+    except Exception:
+        pass
+    # Final fallback: treat as GeoJSON
+    return read_geojson(path)  # type: ignore[attr-defined]
+
+
+def write_flatgeobuf(frame: GeoPromptFrame, path: str | Path) -> None:
+    """Write a :class:`~geoprompt.GeoPromptFrame` to a FlatGeobuf file.
+
+    Falls back to writing GeoJSON if ``pyogrio``/``fiona`` is not installed.
+
+    Args:
+        frame: The frame to write.
+        path: Output path for the ``.fgb`` file.
+    """
+    p = Path(path)
+    try:
+        import pyogrio  # type: ignore[import]
+        import geopandas as gpd  # type: ignore[import]
+        import shapely  # type: ignore[import]
+        rows = list(frame)
+        geom_col = frame.geometry_column
+        shapes = [shapely.from_geojson(json.dumps(r.get(geom_col, {}))) for r in rows]
+        props = [{k: v for k, v in r.items() if k != geom_col} for r in rows]
+        gdf = gpd.GeoDataFrame(props, geometry=shapes)
+        gdf.to_file(str(p), driver="FlatGeobuf")
+        return
+    except Exception:
+        pass
+    # Fallback: write as GeoJSON with .fgb extension
+    write_geojson(frame, str(p))  # type: ignore[attr-defined]
+
+
+def read_dxf(path: str | Path, layer: str | None = None) -> GeoPromptFrame:
+    """Read geometry entities from a DXF (CAD) file.
+
+    Extracts LINE, LWPOLYLINE, CIRCLE, ARC, and INSERT (block reference)
+    entities.  Requires ``ezdxf`` for full support; falls back to stub
+    output for basic metadata only.
+
+    Args:
+        path: Path to the ``.dxf`` file.
+        layer: Optional layer name filter.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    try:
+        import ezdxf  # type: ignore[import]
+        doc = ezdxf.readfile(str(path))
+        msp = doc.modelspace()
+        records = []
+        for entity in msp:
+            if layer and entity.dxf.layer != layer:
+                continue
+            etype = entity.dxftype()
+            try:
+                if etype == "LINE":
+                    sx, sy = entity.dxf.start.x, entity.dxf.start.y
+                    ex, ey = entity.dxf.end.x, entity.dxf.end.y
+                    geom = {"type": "LineString", "coordinates": [(sx, sy), (ex, ey)]}
+                elif etype in {"LWPOLYLINE", "POLYLINE"}:
+                    coords = [(pt[0], pt[1]) for pt in entity.get_points()]
+                    geom = {"type": "LineString", "coordinates": coords} if len(coords) >= 2 else {"type": "Point", "coordinates": coords[0] if coords else (0.0, 0.0)}
+                elif etype == "CIRCLE":
+                    cx, cy = entity.dxf.center.x, entity.dxf.center.y
+                    geom = {"type": "Point", "coordinates": (cx, cy)}
+                elif etype == "INSERT":
+                    ix, iy = entity.dxf.insert.x, entity.dxf.insert.y
+                    geom = {"type": "Point", "coordinates": (ix, iy)}
+                else:
+                    continue
+                records.append({"entity_type": etype, "layer": entity.dxf.layer, "geometry": geom})
+            except Exception:
+                continue
+        return GeoPromptFrame.from_records(records) if records else GeoPromptFrame.from_records([{"entity_type": "empty", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+    except ImportError:
+        # Return a stub frame if ezdxf not available
+        return GeoPromptFrame.from_records([{"entity_type": "dxf_stub", "source": str(path), "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+
+
+def read_mapinfo_tab(path: str | Path) -> GeoPromptFrame:
+    """Read a MapInfo TAB file into a :class:`~geoprompt.GeoPromptFrame`.
+
+    Requires ``pyogrio`` or ``fiona``; raises ``ImportError`` if neither
+    is available.
+
+    Args:
+        path: Path to the ``.tab`` file.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    try:
+        import pyogrio  # type: ignore[import]
+        gdf = pyogrio.read_dataframe(str(path))
+        rows = []
+        for _, row in gdf.iterrows():
+            rec = dict(row)
+            geom = rec.pop("geometry", None)
+            if geom is not None and hasattr(geom, "__geo_interface__"):
+                gi = geom.__geo_interface__
+                rec["geometry"] = {"type": gi["type"], "coordinates": gi["coordinates"]}
+            rows.append(rec)
+        return GeoPromptFrame.from_records(rows)
+    except ImportError:
+        pass
+    try:
+        import fiona  # type: ignore[import]
+        with fiona.open(str(path)) as src:
+            rows = [dict(feat["properties"]) | {"geometry": dict(feat["geometry"])} for feat in src]
+        return GeoPromptFrame.from_records(rows)
+    except ImportError as err:
+        raise ImportError("pyogrio or fiona is required to read MapInfo TAB files") from err
+
+
+def read_wfs(url: str, type_name: str, *, max_features: int = 1000,
+             bbox: tuple[float, float, float, float] | None = None) -> GeoPromptFrame:
+    """Fetch features from an OGC Web Feature Service (WFS).
+
+    Constructs a WFS ``GetFeature`` request, fetches GeoJSON output, and
+    returns the features as a :class:`~geoprompt.GeoPromptFrame`.
+
+    Args:
+        url: WFS endpoint base URL.
+        type_name: Feature type name (``typeName`` parameter).
+        max_features: Maximum number of features to request.
+        bbox: Optional bounding box ``(minx, miny, maxx, maxy)`` filter.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    params: dict[str, str] = {
+        "service": "WFS",
+        "version": "2.0.0",
+        "request": "GetFeature",
+        "typeName": type_name,
+        "outputFormat": "application/json",
+        "count": str(max_features),
+    }
+    if bbox is not None:
+        params["bbox"] = ",".join(str(v) for v in bbox)
+    query_string = urlencode(params)
+    sep = "&" if "?" in url else "?"
+    full_url = f"{url}{sep}{query_string}"
+    req = Request(full_url, headers={"Accept": "application/json"})  # noqa: S310
+    with urlopen(req, timeout=30) as resp:  # noqa: S310
+        data = json.loads(resp.read().decode())
+    features = data.get("features", [])
+    rows = [
+        {**(feat.get("properties") or {}), "geometry": feat.get("geometry") or {"type": "Point", "coordinates": (0.0, 0.0)}}
+        for feat in features
+    ]
+    crs_info = data.get("crs", {}).get("properties", {}).get("name")
+    return GeoPromptFrame.from_records(rows, crs=crs_info)
+
+
+def read_osm_pbf(path: str | Path, *, element_types: list[str] | None = None) -> GeoPromptFrame:
+    """Read an OpenStreetMap PBF file into a :class:`~geoprompt.GeoPromptFrame`.
+
+    Requires ``osmium`` (``osmium-tool`` Python bindings) or falls back to
+    ``pyosmium`` if available.  Returns a stub frame if neither is installed.
+
+    Args:
+        path: Path to the ``.osm.pbf`` file.
+        element_types: Optional list of element types to include:
+            ``"node"``, ``"way"``, ``"relation"``.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    try:
+        import osmium  # type: ignore[import]
+
+        class _Handler(osmium.SimpleHandler):  # type: ignore[misc]
+            def __init__(self) -> None:
+                super().__init__()
+                self.records: list[dict] = []
+
+            def node(self, n: Any) -> None:
+                if element_types and "node" not in element_types:
+                    return
+                self.records.append({"osm_id": n.id, "osm_type": "node", "tags": dict(n.tags), "geometry": {"type": "Point", "coordinates": (n.location.lon, n.location.lat)}})
+
+            def way(self, w: Any) -> None:
+                if element_types and "way" not in element_types:
+                    return
+                if w.nodes:
+                    coords = [(n.lon, n.lat) for n in w.nodes if n.location.valid()]
+                    if len(coords) >= 2:
+                        self.records.append({"osm_id": w.id, "osm_type": "way", "tags": dict(w.tags), "geometry": {"type": "LineString", "coordinates": coords}})
+
+        handler = _Handler()
+        handler.apply_file(str(path))
+        return GeoPromptFrame.from_records(handler.records) if handler.records else GeoPromptFrame.from_records([{"osm_type": "empty", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+    except ImportError:
+        return GeoPromptFrame.from_records([{"osm_type": "stub", "source": str(path), "note": "osmium not installed", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+
+
+_FORMAT_READERS: dict[str, Any] = {
+    ".geojson": "read_geojson",
+    ".json": "read_geojson",
+    ".geojsonl": "read_geojson",
+    ".csv": "read_csv_points",
+    ".parquet": "read_data",
+    ".gpkg": "read_geopackage",
+    ".shp": "read_shapefile",
+    ".fgb": "read_flatgeobuf",
+    ".kml": None,  # handled via formats module
+    ".gpx": None,
+    ".gml": None,
+}
+
+_FORMAT_WRITERS: dict[str, Any] = {
+    ".geojson": "write_geojson",
+    ".json": "write_geojson",
+    ".parquet": "write_geoparquet",
+    ".gpkg": "write_geopackage",
+    ".shp": "write_shapefile",
+    ".fgb": "write_flatgeobuf",
+    ".csv": None,
+}
+
+
+def auto_read_file(path: str | Path, **kwargs: Any) -> GeoPromptFrame:
+    """Auto-detect format from file extension and read into a frame.
+
+    Supports: GeoJSON, CSV, GeoPackage, Shapefile, FlatGeobuf, GeoParquet,
+    KML, GPX, GML (via the :mod:`~geoprompt.formats` module).
+
+    Args:
+        path: Path to the spatial data file.
+        **kwargs: Additional keyword arguments forwarded to the reader.
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+
+    Raises:
+        ValueError: If the format cannot be determined from the extension.
+    """
+    import importlib as _il
+    p = Path(path)
+    ext = p.suffix.lower()
+    if ext in {".geojson", ".json", ".geojsonl"}:
+        return read_geojson(p, **kwargs)  # type: ignore[attr-defined]
+    if ext == ".csv":
+        return read_csv_points(p, **kwargs)  # type: ignore[attr-defined]
+    if ext in {".parquet", ".gpq"}:
+        return read_data(p, **kwargs)  # type: ignore[attr-defined]
+    if ext == ".gpkg":
+        return read_geopackage(p, **kwargs)  # type: ignore[attr-defined]
+    if ext == ".shp":
+        return read_shapefile(p, **kwargs)  # type: ignore[attr-defined]
+    if ext == ".fgb":
+        return read_flatgeobuf(p, **kwargs)
+    if ext == ".kml":
+        fmt = _il.import_module(".formats", "geoprompt")
+        return GeoPromptFrame.from_records(list(fmt.read_kml(p)))
+    if ext == ".gpx":
+        fmt = _il.import_module(".formats", "geoprompt")
+        return GeoPromptFrame.from_records(list(fmt.read_gpx(p)))
+    if ext == ".gml":
+        fmt = _il.import_module(".formats", "geoprompt")
+        return GeoPromptFrame.from_records(list(fmt.read_gml(p)))
+    if ext == ".tab":
+        return read_mapinfo_tab(p, **kwargs)
+    if ext in {".osm", ".pbf"}:
+        return read_osm_pbf(p, **kwargs)
+    raise ValueError(f"unsupported format extension: {ext!r}")
+
+
+def auto_write_file(frame: GeoPromptFrame, path: str | Path, **kwargs: Any) -> None:
+    """Auto-detect format from file extension and write a frame.
+
+    Supports: GeoJSON, GeoPackage, Shapefile, FlatGeobuf, GeoParquet.
+
+    Args:
+        frame: The :class:`~geoprompt.GeoPromptFrame` to write.
+        path: Output file path.
+        **kwargs: Additional keyword arguments forwarded to the writer.
+
+    Raises:
+        ValueError: If the format cannot be determined from the extension.
+    """
+    p = Path(path)
+    ext = p.suffix.lower()
+    if ext in {".geojson", ".json"}:
+        write_geojson(frame, p, **kwargs)  # type: ignore[attr-defined]
+    elif ext in {".parquet", ".gpq"}:
+        write_geoparquet(frame, p, **kwargs)  # type: ignore[attr-defined]
+    elif ext == ".gpkg":
+        write_geopackage(frame, p, **kwargs)  # type: ignore[attr-defined]
+    elif ext == ".shp":
+        write_shapefile(frame, p, **kwargs)  # type: ignore[attr-defined]
+    elif ext == ".fgb":
+        write_flatgeobuf(frame, p, **kwargs)
+    else:
+        raise ValueError(f"unsupported output format extension: {ext!r}")

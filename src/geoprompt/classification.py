@@ -414,3 +414,14 @@ def executive_summary(
         if k not in {"total_features", "geometry_types", "field_count", "bbox", "crs"}:
             lines.append(f"{k.replace('_', ' ').title()}: {v}.")
     return " ".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# G24 additions — classification aliases
+# ---------------------------------------------------------------------------
+
+# Alias: classify_jenks is the Jenks/Natural Breaks classifier
+classify_jenks = classify_natural_breaks  # type: ignore[name-defined]
+
+# Alias: classify_std_dev matches common short-form naming
+classify_std_dev = classify_standard_deviation  # type: ignore[name-defined]

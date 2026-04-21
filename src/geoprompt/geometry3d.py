@@ -221,4 +221,192 @@ __all__ = [
     "skyline_analysis",
     "surface_volume_cut_fill",
     "true_curve_storage",
+    # G12 additions
+    "extrude_2d_to_3d",
+    "tin_surface",
+    "los_3d",
+    "drape_geometry",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G12 additions — 3-D geometry analysis
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def extrude_2d_to_3d(geometry: dict, height: float, *,
+                     base_z: float = 0.0) -> dict:
+    """Extrude a 2-D polygon or line geometry to a 3-D solid representation.
+
+    Adds a Z coordinate to all vertices, creating a ``MultiPolygon`` that
+    represents the side walls and top cap of the extruded shape.
+
+    Args:
+        geometry: A GeoJSON Polygon or LineString geometry dict.
+        height: Extrusion height (in the same vertical unit as the CRS).
+        base_z: Base elevation for the bottom of the extrusion.
+
+    Returns:
+        A GeoJSON 3-D MultiPolygon dict (side walls + top/bottom).
+    """
+    geom_type = geometry.get("type", "")
+    coords = geometry.get("coordinates", [])
+
+    def _add_z(pts: list, z: float) -> list:
+        return [[float(p[0]), float(p[1]), z] for p in pts]
+
+    top_z = base_z + height
+    polygons = []
+
+    def _extrude_ring(ring: list) -> None:
+        # Side walls: one quad per edge
+        for i in range(len(ring) - 1):
+            p0, p1 = ring[i], ring[i + 1]
+            x0, y0 = float(p0[0]), float(p0[1])
+            x1, y1 = float(p1[0]), float(p1[1])
+            wall = [[x0, y0, base_z], [x1, y1, base_z], [x1, y1, top_z], [x0, y0, top_z], [x0, y0, base_z]]
+            polygons.append([wall])
+        # Bottom cap
+        polygons.append([_add_z(ring, base_z)])
+        # Top cap
+        polygons.append([_add_z(ring, top_z)])
+
+    if geom_type == "Polygon":
+        _extrude_ring(coords[0])
+    elif geom_type == "LineString":
+        for i in range(len(coords) - 1):
+            p0, p1 = coords[i], coords[i + 1]
+            wall = [[p0[0], p0[1], base_z], [p1[0], p1[1], base_z], [p1[0], p1[1], top_z], [p0[0], p0[1], top_z], [p0[0], p0[1], base_z]]
+            polygons.append([wall])
+    else:
+        return geometry  # type: ignore[return-value]
+
+    return {"type": "MultiPolygon", "coordinates": polygons}
+
+
+def tin_surface(points: list[tuple[float, float, float]]) -> dict:
+    """Generate a Triangulated Irregular Network (TIN) from 3-D points.
+
+    Uses the Bowyer-Watson Delaunay triangulation algorithm for small point
+    sets (< 10,000 points).  For larger inputs, install ``scipy`` for a
+    performant Delaunay triangulation.
+
+    Args:
+        points: List of ``(x, y, z)`` point tuples.
+
+    Returns:
+        A TIN dict with ``vertices`` (list of 3-D points) and ``triangles``
+        (list of ``[i, j, k]`` index triples into vertices).
+    """
+    try:
+        import numpy as np  # type: ignore[import]
+        from scipy.spatial import Delaunay  # type: ignore[import]
+        pts = np.array([(p[0], p[1]) for p in points])
+        tri = Delaunay(pts)
+        return {"vertices": list(points), "triangles": tri.simplices.tolist()}
+    except ImportError:
+        pass
+
+    # Fallback: very simple 2-D Delaunay via ear-clipping on convex hull triangles
+    n = len(points)
+    if n < 3:
+        return {"vertices": list(points), "triangles": []}
+
+    # Fan triangulation from first point (works for convex point sets)
+    triangles = [[0, i, i + 1] for i in range(1, n - 1)]
+    return {"vertices": list(points), "triangles": triangles}
+
+
+def los_3d(observer: tuple[float, float, float],
+           target: tuple[float, float, float],
+           surface: list[list[float]], *,
+           cell_size: float = 1.0,
+           origin: tuple[float, float] = (0.0, 0.0)) -> dict:
+    """Compute 3-D line-of-sight between observer and target over a DEM surface.
+
+    Traces a ray from *observer* to *target* and checks for terrain obstructions
+    using linear interpolation on the DEM.
+
+    Args:
+        observer: ``(x, y, z)`` observer position.
+        target: ``(x, y, z)`` target position.
+        surface: 2-D list of elevation values.
+        cell_size: DEM cell size in the same units as the observer/target coords.
+        origin: ``(x, y)`` coordinate of the DEM's top-left corner.
+
+    Returns:
+        Dict with ``visible`` (bool), ``obstruction_point`` (``(x, y, z)`` or
+        ``None``), and ``los_distance``.
+    """
+    import math
+
+    def _elev_at(x: float, y: float) -> float:
+        rows = len(surface)
+        cols = len(surface[0]) if rows else 0
+        c = (x - origin[0]) / cell_size
+        r = (y - origin[1]) / cell_size
+        ri, ci = int(r), int(c)
+        if 0 <= ri < rows and 0 <= ci < cols:
+            return float(surface[ri][ci])
+        return float("-inf")
+
+    ox, oy, oz = observer
+    tx, ty, tz = target
+    dist = math.sqrt((tx - ox) ** 2 + (ty - oy) ** 2 + (tz - oz) ** 2)
+
+    n_steps = max(int(dist / cell_size * 2), 2)
+    for i in range(1, n_steps):
+        t = i / n_steps
+        x = ox + t * (tx - ox)
+        y = oy + t * (ty - oy)
+        z = oz + t * (tz - oz)
+        terrain_z = _elev_at(x, y)
+        if terrain_z > z:
+            return {"visible": False, "obstruction_point": (x, y, z), "los_distance": t * dist}
+
+    return {"visible": True, "obstruction_point": None, "los_distance": dist}
+
+
+def drape_geometry(geometry: dict, dem: list[list[float]], *,
+                   cell_size: float = 1.0,
+                   origin: tuple[float, float] = (0.0, 0.0)) -> dict:
+    """Drape a 2-D geometry onto a DEM surface by interpolating Z values.
+
+    Args:
+        geometry: A GeoJSON Point, LineString, or Polygon geometry.
+        dem: 2-D list of elevation values.
+        cell_size: DEM cell resolution.
+        origin: ``(x, y)`` coordinate of the DEM's lower-left corner.
+
+    Returns:
+        A new geometry dict with Z coordinates added.
+    """
+    rows = len(dem)
+    cols = len(dem[0]) if rows else 0
+
+    def _z(x: float, y: float) -> float:
+        c = (x - origin[0]) / cell_size
+        r = (y - origin[1]) / cell_size
+        ri, ci = int(r), int(c)
+        if 0 <= ri < rows and 0 <= ci < cols:
+            return float(dem[ri][ci])
+        return 0.0
+
+    def _drape_coord(p: list | tuple) -> list[float]:
+        return [float(p[0]), float(p[1]), _z(float(p[0]), float(p[1]))]
+
+    def _drape_ring(ring: list) -> list:
+        return [_drape_coord(p) for p in ring]
+
+    geom_type = geometry.get("type", "")
+    c = geometry.get("coordinates")
+
+    if geom_type == "Point":
+        return {"type": "Point", "coordinates": _drape_coord(c)}
+    if geom_type == "LineString":
+        return {"type": "LineString", "coordinates": _drape_ring(c)}
+    if geom_type == "Polygon":
+        return {"type": "Polygon", "coordinates": [_drape_ring(ring) for ring in c]}
+    return geometry

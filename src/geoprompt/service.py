@@ -8,7 +8,6 @@ Usage::
 The service exposes a handful of endpoints for running common workflows
 via HTTP. Teams can extend this template for their own deployments.
 """
-from __future__ import annotations
 
 import importlib
 import json
@@ -17,7 +16,7 @@ import os
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 logger = logging.getLogger("geoprompt.service")
 
@@ -37,7 +36,7 @@ def _load_fastapi() -> Any:
 class ServiceJobManager:
     """Persistent in-process job tracker for service workflows and polling."""
 
-    def __init__(self, storage_path: str | Path | None = None) -> None:
+    def __init__(self, storage_path: Optional[Union[str, Path]] = None) -> None:
         self.storage_path = Path(storage_path) if storage_path else None
         self._jobs: dict[str, dict[str, Any]] = {}
         self._handlers: dict[str, Any] = {}
@@ -91,7 +90,7 @@ class ServiceJobManager:
         payload: dict[str, Any],
         *,
         user: str = "unknown",
-        roles: list[str] | None = None,
+        roles: Optional[list[str]] = None,
         execute: bool = True,
     ) -> dict[str, Any]:
         job_id = str(uuid.uuid4())
@@ -145,7 +144,7 @@ class ServiceJobManager:
             raise KeyError(job_id)
         return dict(self._jobs[job_id])
 
-    def list(self, *, status: str | None = None) -> list[dict[str, Any]]:
+    def list(self, *, status: Optional[str] = None) -> list[dict[str, Any]]:
         jobs = [dict(job) for job in self._jobs.values()]
         if status is not None:
             jobs = [job for job in jobs if str(job.get("status")) == status]
@@ -171,7 +170,7 @@ def service_benchmark_report(
     *,
     iterations: int = 5,
     user: str = "benchmark",
-    roles: list[str] | None = None,
+    roles: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Measure local service job throughput and failure rate for release rehearsal."""
     if iterations <= 0:
@@ -248,7 +247,7 @@ def build_app() -> Any:
     class ScenarioRequest(BaseModel):
         baseline: dict[str, float]
         candidate: dict[str, float]
-        higher_is_better: list[str] | None = None
+        higher_is_better: Optional[list[str]] = None
 
     class ScenarioResponse(BaseModel):
         comparison: dict[str, Any]
@@ -266,7 +265,7 @@ def build_app() -> Any:
         job_type: str
         payload: dict[str, Any]
         user: str = "unknown"
-        roles: list[str] | None = None
+        roles: Optional[list[str]] = None
         execute: bool = True
 
     class JobResponse(BaseModel):
@@ -277,7 +276,7 @@ def build_app() -> Any:
         roles: list[str]
         attempts: int
         result: Any = None
-        error: str | None = None
+        error: Optional[str] = None
 
     # --- Routes ---
 
@@ -320,7 +319,7 @@ def build_app() -> Any:
         return JobResponse(**job)
 
     @app.get("/jobs", response_model=list[JobResponse])
-    def list_jobs(status: str | None = None) -> list[JobResponse]:
+    def list_jobs(status: Optional[str] = None) -> list[JobResponse]:
         return [JobResponse(**job) for job in job_manager.list(status=status)]
 
     @app.get("/jobs/{job_id}", response_model=JobResponse)
@@ -358,6 +357,6 @@ def build_app() -> Any:
 try:
     app = build_app()
 except RuntimeError:
-    app = None  # FastAPI not installed — module can still be imported
+    app = None  # FastAPI not installed â€” module can still be imported
 
 __all__ = ["ServiceJobManager", "build_app", "service_benchmark_report"]

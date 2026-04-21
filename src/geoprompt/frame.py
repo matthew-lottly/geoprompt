@@ -3602,6 +3602,755 @@ class GeoPromptFrame:
             rows.append({self.geometry_column: part})
         return GeoPromptFrame._from_internal_rows(rows, geometry_column=self.geometry_column, crs=self.crs)
 
+    # ------------------------------------------------------------------
+    # G2 additions — DataFrame fundamentals and spatial-specific methods
+    # ------------------------------------------------------------------
+
+    def corr(self, method: str = "pearson") -> dict[str, dict[str, float]]:
+        """Return pairwise correlation of numeric columns.
+
+        Returns a dict-of-dicts mapping ``{col: {col: correlation}}``.
+        Only numeric (int/float) columns are included.
+        """
+        import math as _math
+
+        numeric_cols = [c for c in self.columns if c != self.geometry_column
+                        and all(isinstance(row.get(c), (int, float)) for row in self._rows if row.get(c) is not None)]
+        result: dict[str, dict[str, float]] = {}
+        for col_a in numeric_cols:
+            result[col_a] = {}
+            vals_a = [float(row[col_a]) for row in self._rows if row.get(col_a) is not None]
+            mean_a = sum(vals_a) / len(vals_a) if vals_a else 0.0
+            std_a = _math.sqrt(sum((v - mean_a) ** 2 for v in vals_a) / len(vals_a)) if len(vals_a) > 1 else 0.0
+            for col_b in numeric_cols:
+                if std_a == 0.0:
+                    result[col_a][col_b] = float("nan")
+                    continue
+                pairs = [(float(r[col_a]), float(r[col_b])) for r in self._rows
+                         if r.get(col_a) is not None and r.get(col_b) is not None]
+                if not pairs:
+                    result[col_a][col_b] = float("nan")
+                    continue
+                mean_b = sum(p[1] for p in pairs) / len(pairs)
+                std_b = _math.sqrt(sum((p[1] - mean_b) ** 2 for p in pairs) / len(pairs)) if len(pairs) > 1 else 0.0
+                if std_b == 0.0:
+                    result[col_a][col_b] = float("nan")
+                    continue
+                cov = sum((p[0] - mean_a) * (p[1] - mean_b) for p in pairs) / len(pairs)
+                result[col_a][col_b] = cov / (std_a * std_b)
+        return result
+
+    def cov(self) -> dict[str, dict[str, float]]:
+        """Return pairwise covariance of numeric columns."""
+        import math as _math
+
+        numeric_cols = [c for c in self.columns if c != self.geometry_column
+                        and all(isinstance(row.get(c), (int, float)) for row in self._rows if row.get(c) is not None)]
+        result: dict[str, dict[str, float]] = {}
+        for col_a in numeric_cols:
+            result[col_a] = {}
+            vals_a = [float(row[col_a]) for row in self._rows if row.get(col_a) is not None]
+            mean_a = sum(vals_a) / len(vals_a) if vals_a else 0.0
+            for col_b in numeric_cols:
+                pairs = [(float(r[col_a]), float(r[col_b])) for r in self._rows
+                         if r.get(col_a) is not None and r.get(col_b) is not None]
+                if len(pairs) < 2:
+                    result[col_a][col_b] = float("nan")
+                    continue
+                mean_b = sum(p[1] for p in pairs) / len(pairs)
+                cov = sum((p[0] - mean_a) * (p[1] - mean_b) for p in pairs) / (len(pairs) - 1)
+                result[col_a][col_b] = cov
+        return result
+
+    def cumsum(self, column: str) -> list[float | None]:
+        """Return cumulative sum of *column* values."""
+        running = 0.0
+        result: list[float | None] = []
+        for row in self._rows:
+            v = row.get(column)
+            if v is None:
+                result.append(None)
+            else:
+                running += float(v)
+                result.append(running)
+        return result
+
+    def cumprod(self, column: str) -> list[float | None]:
+        """Return cumulative product of *column* values."""
+        running = 1.0
+        result: list[float | None] = []
+        for row in self._rows:
+            v = row.get(column)
+            if v is None:
+                result.append(None)
+            else:
+                running *= float(v)
+                result.append(running)
+        return result
+
+    def cummax(self, column: str) -> list[float | None]:
+        """Return cumulative maximum of *column* values."""
+        running: float | None = None
+        result: list[float | None] = []
+        for row in self._rows:
+            v = row.get(column)
+            if v is None:
+                result.append(running)
+            else:
+                fv = float(v)
+                running = fv if running is None else max(running, fv)
+                result.append(running)
+        return result
+
+    def cummin(self, column: str) -> list[float | None]:
+        """Return cumulative minimum of *column* values."""
+        running: float | None = None
+        result: list[float | None] = []
+        for row in self._rows:
+            v = row.get(column)
+            if v is None:
+                result.append(running)
+            else:
+                fv = float(v)
+                running = fv if running is None else min(running, fv)
+                result.append(running)
+        return result
+
+    def diff(self, column: str, periods: int = 1) -> list[float | None]:
+        """Return first discrete difference of *column* by *periods*."""
+        vals = [row.get(column) for row in self._rows]
+        result: list[float | None] = []
+        for i, v in enumerate(vals):
+            if i < periods or v is None or vals[i - periods] is None:
+                result.append(None)
+            else:
+                result.append(float(v) - float(vals[i - periods]))  # type: ignore[arg-type]
+        return result
+
+    def pct_change(self, column: str, periods: int = 1) -> list[float | None]:
+        """Return percentage change of *column* between rows."""
+        vals = [row.get(column) for row in self._rows]
+        result: list[float | None] = []
+        for i, v in enumerate(vals):
+            prev = vals[i - periods] if i >= periods else None
+            if v is None or prev is None or float(prev) == 0.0:
+                result.append(None)
+            else:
+                result.append((float(v) - float(prev)) / abs(float(prev)))  # type: ignore[arg-type]
+        return result
+
+    def rolling(self, column: str, window: int, func: str = "mean") -> list[float | None]:
+        """Apply a rolling window aggregation to *column*.
+
+        *func* may be ``"mean"``, ``"sum"``, ``"min"``, ``"max"``, or ``"std"``.
+        """
+        import math as _math
+        vals = [row.get(column) for row in self._rows]
+        result: list[float | None] = []
+        for i in range(len(vals)):
+            if i < window - 1:
+                result.append(None)
+                continue
+            window_vals = [float(v) for v in vals[i - window + 1:i + 1] if v is not None]
+            if not window_vals:
+                result.append(None)
+                continue
+            if func == "mean":
+                result.append(sum(window_vals) / len(window_vals))
+            elif func == "sum":
+                result.append(sum(window_vals))
+            elif func == "min":
+                result.append(min(window_vals))
+            elif func == "max":
+                result.append(max(window_vals))
+            elif func == "std":
+                mean = sum(window_vals) / len(window_vals)
+                result.append(_math.sqrt(sum((v - mean) ** 2 for v in window_vals) / len(window_vals)))
+            else:
+                result.append(None)
+        return result
+
+    def expanding(self, column: str, func: str = "mean") -> list[float | None]:
+        """Apply an expanding window aggregation to *column*.
+
+        *func* may be ``"mean"``, ``"sum"``, ``"min"``, ``"max"``, or ``"std"``.
+        """
+        import math as _math
+        vals = [row.get(column) for row in self._rows]
+        result: list[float | None] = []
+        seen: list[float] = []
+        for v in vals:
+            if v is not None:
+                seen.append(float(v))
+            if not seen:
+                result.append(None)
+                continue
+            if func == "mean":
+                result.append(sum(seen) / len(seen))
+            elif func == "sum":
+                result.append(sum(seen))
+            elif func == "min":
+                result.append(min(seen))
+            elif func == "max":
+                result.append(max(seen))
+            elif func == "std":
+                if len(seen) < 2:
+                    result.append(0.0)
+                else:
+                    mean = sum(seen) / len(seen)
+                    result.append(_math.sqrt(sum((x - mean) ** 2 for x in seen) / len(seen)))
+            else:
+                result.append(None)
+        return result
+
+    def isin(self, column: str, values: Sequence[Any]) -> list[bool]:
+        """Return a boolean list: True where *column* value is in *values*."""
+        self._require_column(column)
+        value_set = set(values)
+        return [row.get(column) in value_set for row in self._rows]
+
+    def between(self, column: str, left: Any, right: Any, inclusive: str = "both") -> list[bool | None]:
+        """Return a boolean list: True where *column* value is between *left* and *right*."""
+        self._require_column(column)
+        result: list[bool | None] = []
+        for row in self._rows:
+            v = row.get(column)
+            if v is None:
+                result.append(None)
+                continue
+            try:
+                fv = float(v)
+                if inclusive == "both":
+                    result.append(float(left) <= fv <= float(right))
+                elif inclusive == "left":
+                    result.append(float(left) <= fv < float(right))
+                elif inclusive == "right":
+                    result.append(float(left) < fv <= float(right))
+                else:
+                    result.append(float(left) < fv < float(right))
+            except (TypeError, ValueError):
+                result.append(None)
+        return result
+
+    def transform(self, column: str, func: Any, *, new_column: str | None = None) -> "GeoPromptFrame":
+        """Apply *func* element-wise to *column*, returning the same-length frame.
+
+        Unlike :meth:`map_column`, this method always returns a full frame with
+        the transformed values replacing (or extending) the column.
+        """
+        return self.map_column(column, func, new_column=new_column)
+
+    def eval(self, expression: str) -> list[Any]:
+        """Evaluate a string *expression* against the frame columns.
+
+        Supports simple arithmetic and comparison expressions referencing
+        column names as Python identifiers.  Each row is evaluated separately.
+
+        Example::
+
+            frame.eval("score * 2 + offset")
+        """
+        import ast as _ast
+
+        results: list[Any] = []
+        for row in self._rows:
+            # Build a safe namespace from row values
+            namespace: dict[str, Any] = {k: v for k, v in row.items() if isinstance(k, str)}
+            try:
+                # Compile with ast.literal_eval for safety on constants only, or eval with restricted builtins
+                tree = _ast.parse(expression, mode="eval")
+                code = compile(tree, "<expr>", "eval")
+                results.append(eval(code, {"__builtins__": {}}, namespace))  # noqa: S307
+            except Exception:
+                results.append(None)
+        return results
+
+    def iterrows(self):
+        """Iterate over rows as ``(index, row_dict)`` tuples."""
+        for i, row in enumerate(self._rows):
+            yield i, dict(row)
+
+    def itertuples(self, index: bool = True, name: str | None = "Row"):
+        """Iterate over rows as named tuples (or plain tuples when *name* is None)."""
+        from collections import namedtuple
+
+        cols = self.columns
+        if name:
+            try:
+                nt = namedtuple(name, (["Index"] + cols) if index else cols)  # type: ignore[misc]
+            except ValueError:
+                nt = None
+        else:
+            nt = None
+
+        for i, row in enumerate(self._rows):
+            vals = [row.get(c) for c in cols]
+            if index:
+                vals = [i] + vals
+            if nt is not None:
+                try:
+                    yield nt(*vals)
+                    continue
+                except Exception:
+                    pass
+            yield tuple(vals)
+
+    def to_dict(self, orient: str = "records") -> Any:
+        """Convert the frame to a dict representation.
+
+        *orient* mirrors the pandas convention:
+
+        - ``"records"`` — list of row dicts.
+        - ``"list"`` — dict of column → list of values.
+        - ``"dict"`` — dict of column → dict of index → value.
+        - ``"index"`` — dict of index → row dict.
+        """
+        if orient == "records":
+            return [dict(row) for row in self._rows]
+        cols = self.columns
+        if orient == "list":
+            return {c: [row.get(c) for row in self._rows] for c in cols}
+        if orient == "dict":
+            return {c: {i: row.get(c) for i, row in enumerate(self._rows)} for c in cols}
+        if orient == "index":
+            return {i: dict(row) for i, row in enumerate(self._rows)}
+        raise ValueError(f"unsupported orient: {orient!r}")
+
+    def to_csv(self, path: str | None = None, *, sep: str = ",",
+               include_geometry: bool = True, **kwargs: Any) -> str | None:
+        """Serialize the frame to CSV format.
+
+        When *path* is given the output is written to that file; otherwise the
+        CSV string is returned.  Geometry columns are serialised as WKT.
+        """
+        import csv
+        import io as _io
+
+        cols = [c for c in self.columns if include_geometry or c != self.geometry_column]
+        buf = _io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=cols, delimiter=sep,
+                                extrasaction="ignore", lineterminator="\n")
+        writer.writeheader()
+        for row in self._rows:
+            serialized: Record = {}
+            for c in cols:
+                v = row.get(c)
+                if c == self.geometry_column and isinstance(v, dict):
+                    try:
+                        from .geometry import geometry_wkt_write
+                        v = geometry_wkt_write(v)
+                    except Exception:
+                        v = str(v)
+                serialized[c] = "" if v is None else v
+            writer.writerow(serialized)
+        result = buf.getvalue()
+        if path:
+            Path(path).write_text(result, encoding="utf-8")
+            return None
+        return result
+
+    def to_excel(self, path: str, sheet_name: str = "Sheet1", **kwargs: Any) -> None:
+        """Write the frame to an Excel file via *openpyxl*.
+
+        Requires ``openpyxl`` to be installed.  Geometry is written as WKT.
+        """
+        import importlib as _il
+        openpyxl = _il.import_module("openpyxl")
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = sheet_name
+        cols = self.columns
+        ws.append(cols)
+        for row in self._rows:
+            row_vals = []
+            for c in cols:
+                v = row.get(c)
+                if c == self.geometry_column and isinstance(v, dict):
+                    try:
+                        from .geometry import geometry_wkt_write
+                        v = geometry_wkt_write(v)
+                    except Exception:
+                        v = str(v)
+                row_vals.append("" if v is None else v)
+            ws.append(row_vals)
+        wb.save(path)
+
+    def to_latex(self, columns: list[str] | None = None, **kwargs: Any) -> str:
+        """Return a LaTeX tabular representation of the frame."""
+        cols = columns or [c for c in self.columns if c != self.geometry_column]
+        header = " & ".join(f"\\textbf{{{c}}}" for c in cols) + " \\\\"
+        lines = ["\\begin{tabular}{" + "l" * len(cols) + "}", "\\hline", header, "\\hline"]
+        for row in self._rows:
+            line = " & ".join(str(row.get(c, "")).replace("_", "\\_") for c in cols) + " \\\\"
+            lines.append(line)
+        lines += ["\\hline", "\\end{tabular}"]
+        return "\n".join(lines)
+
+    def to_html(self, columns: list[str] | None = None, **kwargs: Any) -> str:
+        """Return an HTML table representation of the frame."""
+        import html as _html
+        cols = columns or [c for c in self.columns if c != self.geometry_column]
+        rows_html = ["<table border='1'>",
+                     "<thead><tr>" + "".join(f"<th>{_html.escape(c)}</th>" for c in cols) + "</tr></thead>",
+                     "<tbody>"]
+        for row in self._rows:
+            cells = "".join(f"<td>{_html.escape(str(row.get(c, '')))}</td>" for c in cols)
+            rows_html.append(f"<tr>{cells}</tr>")
+        rows_html += ["</tbody></table>"]
+        return "\n".join(rows_html)
+
+    def to_clipboard(self, sep: str = "\t", **kwargs: Any) -> None:
+        """Copy the frame to the system clipboard as TSV."""
+        import subprocess
+        text = self.to_csv(sep=sep, include_geometry=False) or ""
+        try:
+            subprocess.run(["clip"], input=text.encode("utf-8"), check=True)  # noqa: S603,S607
+        except Exception:
+            try:
+                import pyperclip  # type: ignore[import]
+                pyperclip.copy(text)
+            except Exception:
+                pass  # silently skip if clipboard not available
+
+    def to_sql(self, table_name: str, connection: Any, if_exists: str = "fail",
+               index: bool = False, **kwargs: Any) -> None:
+        """Write the frame to a SQL database table.
+
+        Geometry is serialised as WKT text.  Requires a DB-API 2.0 compatible
+        *connection* object (e.g. ``sqlite3``, ``psycopg2``).
+        """
+        cols = self.columns
+        col_defs = ", ".join(f'"{c}" TEXT' for c in cols)
+        cursor = connection.cursor()
+        if if_exists == "replace":
+            cursor.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+        if if_exists in {"replace", "fail"}:
+            cursor.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ({col_defs})')
+        placeholders = ", ".join("?" for _ in cols)
+        for row in self._rows:
+            vals = []
+            for c in cols:
+                v = row.get(c)
+                if c == self.geometry_column and isinstance(v, dict):
+                    try:
+                        from .geometry import geometry_wkt_write
+                        v = geometry_wkt_write(v)
+                    except Exception:
+                        v = str(v)
+                vals.append(None if v is None else str(v))
+            cursor.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders})', vals)  # noqa: S608
+        connection.commit()
+
+    def memory_usage(self, deep: bool = False) -> dict[str, int]:
+        """Return an estimated memory usage in bytes for each column."""
+        import sys
+        result: dict[str, int] = {}
+        for col in self.columns:
+            total = 0
+            for row in self._rows:
+                v = row.get(col)
+                total += sys.getsizeof(v)
+            result[col] = total
+        return result
+
+    def info(self) -> str:
+        """Return a summary string of frame dtypes, non-null counts, and memory."""
+        import sys
+        lines = [
+            f"GeoPromptFrame: {len(self._rows)} rows × {len(self.columns)} columns",
+            f"Geometry column: {self.geometry_column!r}",
+            f"CRS: {self.crs or 'unknown'}",
+            "",
+            f"{'Column':<30} {'Non-Null':>10} {'Dtype':<15} {'Memory':>10}",
+            "-" * 70,
+        ]
+        for col in self.columns:
+            values = [row.get(col) for row in self._rows]
+            non_null = sum(1 for v in values if v is not None)
+            sample = next((v for v in values if v is not None), None)
+            dtype = type(sample).__name__ if sample is not None else "object"
+            mem = sum(sys.getsizeof(v) for v in values)
+            lines.append(f"{col:<30} {non_null:>10} {dtype:<15} {mem:>10}")
+        return "\n".join(lines)
+
+    def nunique(self, column: str | None = None) -> int | dict[str, int]:
+        """Return the number of unique non-null values per column.
+
+        If *column* is given, returns a single count; otherwise returns a dict.
+        """
+        if column is not None:
+            self._require_column(column)
+            return len({row.get(column) for row in self._rows if row.get(column) is not None})
+        return {c: len({row.get(c) for row in self._rows if row.get(c) is not None}) for c in self.columns}
+
+    def idxmin(self, column: str) -> int | None:
+        """Return the integer index of the minimum value in *column*."""
+        self._require_column(column)
+        best_i: int | None = None
+        best_v: float | None = None
+        for i, row in enumerate(self._rows):
+            v = row.get(column)
+            if v is None:
+                continue
+            fv = float(v)
+            if best_v is None or fv < best_v:
+                best_v = fv
+                best_i = i
+        return best_i
+
+    def idxmax(self, column: str) -> int | None:
+        """Return the integer index of the maximum value in *column*."""
+        self._require_column(column)
+        best_i: int | None = None
+        best_v: float | None = None
+        for i, row in enumerate(self._rows):
+            v = row.get(column)
+            if v is None:
+                continue
+            fv = float(v)
+            if best_v is None or fv > best_v:
+                best_v = fv
+                best_i = i
+        return best_i
+
+    def mode(self, column: str) -> list[Any]:
+        """Return the most frequent non-null values in *column*."""
+        self._require_column(column)
+        from collections import Counter
+        counts = Counter(row.get(column) for row in self._rows if row.get(column) is not None)
+        if not counts:
+            return []
+        max_count = max(counts.values())
+        return [v for v, c in counts.items() if c == max_count]
+
+    def sem(self, column: str) -> float:
+        """Return the standard error of the mean for *column*."""
+        import math as _math
+        vals = [float(row[column]) for row in self._rows if row.get(column) is not None]
+        if len(vals) < 2:
+            return float("nan")
+        mean = sum(vals) / len(vals)
+        std = _math.sqrt(sum((v - mean) ** 2 for v in vals) / (len(vals) - 1))
+        return std / _math.sqrt(len(vals))
+
+    def skew(self, column: str) -> float:
+        """Return the skewness of *column* values."""
+        import math as _math
+        vals = [float(row[column]) for row in self._rows if row.get(column) is not None]
+        n = len(vals)
+        if n < 3:
+            return float("nan")
+        mean = sum(vals) / n
+        std = _math.sqrt(sum((v - mean) ** 2 for v in vals) / n)
+        if std == 0:
+            return float("nan")
+        return (sum((v - mean) ** 3 for v in vals) / n) / (std ** 3)
+
+    def kurtosis(self, column: str) -> float:
+        """Return the excess kurtosis of *column* values."""
+        import math as _math
+        vals = [float(row[column]) for row in self._rows if row.get(column) is not None]
+        n = len(vals)
+        if n < 4:
+            return float("nan")
+        mean = sum(vals) / n
+        std = _math.sqrt(sum((v - mean) ** 2 for v in vals) / n)
+        if std == 0:
+            return float("nan")
+        return (sum((v - mean) ** 4 for v in vals) / n) / (std ** 4) - 3.0
+
+    def rank(self, column: str, ascending: bool = True, method: str = "average") -> list[float | None]:
+        """Return rank of values in *column*.
+
+        *method* controls tie-breaking: ``"average"``, ``"min"``, ``"max"``,
+        ``"first"``, or ``"dense"``.
+        """
+        vals = [(i, row.get(column)) for i, row in enumerate(self._rows)]
+        non_null = [(i, v) for i, v in vals if v is not None]
+        sorted_vals = sorted(non_null, key=lambda x: float(x[1]), reverse=not ascending)  # type: ignore[arg-type]
+
+        rank_map: dict[int, float] = {}
+        i = 0
+        while i < len(sorted_vals):
+            j = i
+            val = sorted_vals[i][1]
+            while j < len(sorted_vals) and sorted_vals[j][1] == val:
+                j += 1
+            group = sorted_vals[i:j]
+            group_rank_start = i + 1
+            group_rank_end = j
+            for k, (idx, _) in enumerate(group):
+                if method == "average":
+                    rank_map[idx] = (group_rank_start + group_rank_end) / 2
+                elif method == "min":
+                    rank_map[idx] = float(group_rank_start)
+                elif method == "max":
+                    rank_map[idx] = float(group_rank_end)
+                elif method == "first":
+                    rank_map[idx] = float(group_rank_start + k)
+                elif method == "dense":
+                    rank_map[idx] = float(i + 1)
+            i = j
+        return [rank_map.get(i) for i in range(len(self._rows))]
+
+    def combine_first(self, other: "GeoPromptFrame") -> "GeoPromptFrame":
+        """Update null values from *other*, combining two frames row-by-row.
+
+        Rows are matched by position.  *other* must have the same number of rows.
+        """
+        if len(other) != len(self):
+            raise ValueError("frames must have the same number of rows to combine_first")
+        rows: list[Record] = []
+        for self_row, other_row in zip(self._rows, other._rows):
+            merged: Record = dict(other_row)
+            merged.update({k: v for k, v in self_row.items() if v is not None})
+            rows.append(merged)
+        return self._clone_with_rows(rows)
+
+    def compare(self, other: "GeoPromptFrame", columns: list[str] | None = None) -> list[dict[str, Any]]:
+        """Return a list of diffs between this frame and *other*.
+
+        Each entry in the result describes a cell that differs, with keys
+        ``row``, ``column``, ``self``, and ``other``.
+        """
+        if len(other) != len(self):
+            raise ValueError("frames must have the same number of rows to compare")
+        cols = columns or [c for c in self.columns if c != self.geometry_column]
+        diffs: list[dict[str, Any]] = []
+        for i, (self_row, other_row) in enumerate(zip(self._rows, other._rows)):
+            for col in cols:
+                sv = self_row.get(col)
+                ov = other_row.get(col)
+                if sv != ov:
+                    diffs.append({"row": i, "column": col, "self": sv, "other": ov})
+        return diffs
+
+    def update(self, other: "GeoPromptFrame", overwrite: bool = True) -> "GeoPromptFrame":
+        """Update values in this frame from *other* at matching positions.
+
+        When *overwrite* is True (default) all values from *other* overwrite
+        this frame's values.  When False, only null values are replaced.
+        """
+        if len(other) != len(self):
+            raise ValueError("frames must have the same number of rows to update")
+        rows: list[Record] = []
+        for self_row, other_row in zip(self._rows, other._rows):
+            merged = dict(self_row)
+            for k, v in other_row.items():
+                if overwrite or merged.get(k) is None:
+                    merged[k] = v
+            rows.append(merged)
+        return self._clone_with_rows(rows)
+
+    # --- Spatial-specific additions ---
+
+    @property
+    def total_bounds(self) -> tuple[float, float, float, float]:
+        """Return ``(minx, miny, maxx, maxy)`` for the entire frame."""
+        if not self._rows:
+            return (0.0, 0.0, 0.0, 0.0)
+        xmins, ymins, xmaxs, ymaxs = [], [], [], []
+        for row in self._rows:
+            b = geometry_bounds(row[self.geometry_column])
+            xmins.append(b["xmin"])
+            ymins.append(b["ymin"])
+            xmaxs.append(b["xmax"])
+            ymaxs.append(b["ymax"])
+        return (min(xmins), min(ymins), max(xmaxs), max(ymaxs))
+
+    @property
+    def geom_type(self) -> list[str]:
+        """Return a list of geometry type strings for each row."""
+        return [geometry_type(row[self.geometry_column]) for row in self._rows]
+
+    @property
+    def is_valid(self) -> list[bool]:
+        """Return a list of booleans indicating geometry validity per row."""
+        return [validate_geometry(row[self.geometry_column]).get("valid", False) for row in self._rows]
+
+    @property
+    def is_empty(self) -> list[bool]:
+        """Return a list of booleans indicating whether each geometry is empty."""
+        from .geometry import geometry_is_empty
+        return [geometry_is_empty(row[self.geometry_column]) for row in self._rows]
+
+    @property
+    def active_geometry_name(self) -> str:
+        """Return the name of the active geometry column."""
+        return self.geometry_column
+
+    def rename_geometry(self, new_name: str) -> "GeoPromptFrame":
+        """Return a new frame with the geometry column renamed to *new_name*."""
+        rows = [{new_name if k == self.geometry_column else k: v
+                 for k, v in row.items()} for row in self._rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=new_name, crs=self.crs)
+
+    @property
+    def __geo_interface__(self) -> dict[str, Any]:
+        """Return a GeoJSON FeatureCollection dict for this frame."""
+        features = [
+            {
+                "type": "Feature",
+                "geometry": dict(row[self.geometry_column]),
+                "properties": {k: v for k, v in row.items() if k != self.geometry_column},
+            }
+            for row in self._rows
+        ]
+        return {"type": "FeatureCollection", "features": features}
+
+    def iterfeatures(self):
+        """Yield each row as a GeoJSON-like Feature dict."""
+        for row in self._rows:
+            yield {
+                "type": "Feature",
+                "geometry": dict(row[self.geometry_column]),
+                "properties": {k: v for k, v in row.items() if k != self.geometry_column},
+            }
+
+    def estimate_utm_crs(self) -> str:
+        """Return the EPSG code of the best UTM zone for this frame's extent.
+
+        Derived from the centroid longitude of :attr:`total_bounds`.
+        """
+        minx, miny, maxx, maxy = self.total_bounds
+        lon = (minx + maxx) / 2
+        lat = (miny + maxy) / 2
+        zone = int((lon + 180) / 6) + 1
+        if lat >= 0:
+            return f"EPSG:{32600 + zone}"
+        return f"EPSG:{32700 + zone}"
+
+    def explore(self, column: str | None = None, **kwargs: Any) -> Any:
+        """Return an interactive folium map for this frame.
+
+        Requires ``folium`` to be installed.  The map is centred on
+        :attr:`total_bounds` and renders each feature as a GeoJSON layer.
+        *column* is used for choropleth-style fill if provided.
+        """
+        import importlib as _il
+        folium = _il.import_module("folium")
+        minx, miny, maxx, maxy = self.total_bounds
+        center = [(miny + maxy) / 2, (minx + maxx) / 2]
+        m = folium.Map(location=center, zoom_start=kwargs.pop("zoom_start", 10))
+        geojson_data = self.__geo_interface__
+        if column and column in self.columns:
+            values = [row.get(column) for row in self._rows]
+            numeric = [float(v) for v in values if v is not None and isinstance(v, (int, float))]
+            if numeric:
+                vmin, vmax = min(numeric), max(numeric)
+                def _style(feature: Any) -> dict[str, Any]:
+                    val = feature.get("properties", {}).get(column)
+                    if val is None or vmax == vmin:
+                        return {"fillColor": "#3388ff", "fillOpacity": 0.5, "weight": 1}
+                    norm = (float(val) - vmin) / (vmax - vmin)
+                    r = int(255 * norm)
+                    b = int(255 * (1 - norm))
+                    return {"fillColor": f"#{r:02x}00{b:02x}", "fillOpacity": 0.6, "weight": 1}
+                folium.GeoJson(geojson_data, style_function=_style).add_to(m)
+                return m
+        folium.GeoJson(geojson_data).add_to(m)
+        return m
+
 
 class GroupedGeoPromptFrame:
     """Grouped spatial frame rows with aggregation support preserving geometry."""

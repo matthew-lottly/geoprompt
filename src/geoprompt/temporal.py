@@ -572,4 +572,123 @@ __all__ = [
     "temporal_join",
     "temporal_window",
     "voxel_grid",
+    # G13b additions
+    "temporal_buffer",
+    "temporal_filter",
+    "time_series_trend",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G13b additions — temporal analysis utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def temporal_buffer(frame: _Any, duration: float, *,
+                    time_column: str = "timestamp",
+                    unit: str = "days") -> _Any:
+    """Expand each feature's temporal extent by *duration* on each side.
+
+    Adds ``time_start`` and ``time_end`` columns derived from *time_column*
+    ± *duration*.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with a *time_column*.
+        duration: Buffer duration in *unit*.
+        time_column: Column containing ISO 8601 timestamps.
+        unit: Time unit: ``"seconds"``, ``"minutes"``, ``"hours"``,
+              ``"days"``, ``"weeks"``.
+
+    Returns:
+        A new frame with ``time_start`` and ``time_end`` columns added.
+    """
+    import datetime
+    unit_map = {"seconds": 1, "minutes": 60, "hours": 3600, "days": 86400, "weeks": 604800}
+    seconds = duration * unit_map.get(unit, 86400)
+    delta = datetime.timedelta(seconds=seconds)
+
+    rows = list(frame)
+    out = []
+    for r in rows:
+        ts_str = str(r.get(time_column, ""))
+        try:
+            ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d")
+            except Exception:
+                ts = datetime.datetime.min
+        nr = dict(r)
+        nr["time_start"] = (ts - delta).isoformat()
+        nr["time_end"] = (ts + delta).isoformat()
+        out.append(nr)
+    return type(frame).from_records(out)
+
+
+def temporal_filter(frame: _Any, start: str, end: str, *,
+                    time_column: str = "timestamp") -> _Any:
+    """Filter a frame to features whose timestamp falls within [*start*, *end*].
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with a *time_column*.
+        start: ISO 8601 start datetime string (inclusive).
+        end: ISO 8601 end datetime string (inclusive).
+        time_column: Column containing timestamps.
+
+    Returns:
+        A new frame with only the features in the time range.
+    """
+    rows = list(frame)
+    selected = [r for r in rows if start <= str(r.get(time_column, "")) <= end]
+    return type(frame).from_records(selected)
+
+
+def time_series_trend(values: list[float], timestamps: list[str] | None = None) -> dict:
+    """Compute a simple linear trend for a time series.
+
+    Uses ordinary least squares (OLS) regression of *values* against an
+    integer time index (or ordinal timestamps if provided).
+
+    Args:
+        values: Ordered list of numeric observations.
+        timestamps: Optional ISO 8601 timestamp strings (same length as
+            *values*).  Used to compute equal-spaced time indices.
+
+    Returns:
+        Dict with ``slope``, ``intercept``, ``r_squared``, ``trend``
+        (``"increasing"``, ``"decreasing"``, or ``"flat"``), and
+        ``predicted`` (list of fitted values).
+    """
+    import datetime
+    n = len(values)
+    if n < 2:
+        return {"slope": 0.0, "intercept": values[0] if values else 0.0, "r_squared": 0.0, "trend": "flat", "predicted": values[:]}
+
+    if timestamps:
+        def _to_ord(ts: str) -> float:
+            try:
+                return float(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
+            except Exception:
+                return 0.0
+        xs = [_to_ord(t) for t in timestamps]
+        # Normalise to [0, 1]
+        x_min, x_max = min(xs), max(xs)
+        rng = x_max - x_min or 1.0
+        xs = [(x - x_min) / rng for x in xs]
+    else:
+        xs = list(range(n))
+
+    x_mean = sum(xs) / n
+    y_mean = sum(values) / n
+    sxy = sum((xs[i] - x_mean) * (float(values[i]) - y_mean) for i in range(n))
+    sxx = sum((x - x_mean) ** 2 for x in xs)
+    slope = sxy / sxx if sxx != 0 else 0.0
+    intercept = y_mean - slope * x_mean
+    predicted = [slope * x + intercept for x in xs]
+    ss_res = sum((float(values[i]) - predicted[i]) ** 2 for i in range(n))
+    ss_tot = sum((float(v) - y_mean) ** 2 for v in values)
+    r2 = 1.0 - ss_res / ss_tot if ss_tot != 0 else 0.0
+    trend = "flat" if abs(slope) < 1e-9 else ("increasing" if slope > 0 else "decreasing")
+    return {"slope": slope, "intercept": intercept, "r_squared": r2, "trend": trend, "predicted": predicted}

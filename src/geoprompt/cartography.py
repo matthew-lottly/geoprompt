@@ -861,4 +861,138 @@ __all__ = [
     "save_style_template",
     "story_map_html",
     "unique_value_renderer",
+    # G10 additions
+    "map_layout",
+    "export_pdf",
+    "folium_layer_control",
+    "folium_time_slider",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G10 additions — cartography / map output
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def map_layout(title: str = "", *, width_mm: float = 297.0, height_mm: float = 210.0,
+               north_arrow: bool = True, scale_bar: bool = True,
+               legend: bool = True) -> dict:
+    """Define a map layout specification (A4 landscape by default).
+
+    Returns a dict that describes the layout parameters.  Pass this to
+    :func:`export_pdf` to produce a paginated PDF output.
+
+    Args:
+        title: Map title text.
+        width_mm: Page width in millimetres.
+        height_mm: Page height in millimetres.
+        north_arrow: Include a north arrow element.
+        scale_bar: Include a scale bar element.
+        legend: Include a legend element.
+
+    Returns:
+        A layout specification dict.
+    """
+    return {
+        "title": title,
+        "page": {"width_mm": width_mm, "height_mm": height_mm},
+        "elements": {
+            "north_arrow": north_arrow,
+            "scale_bar": scale_bar,
+            "legend": legend,
+        },
+    }
+
+
+def export_pdf(html_content: str, output_path: str, *,
+               layout: dict | None = None) -> str:
+    """Export an HTML map page to PDF.
+
+    Uses ``weasyprint`` if available; falls back to writing the HTML to a
+    ``<output_path>.html`` file with a note explaining that ``weasyprint``
+    is required for PDF output.
+
+    Args:
+        html_content: HTML string to render as PDF.
+        output_path: Destination path for the PDF (``*.pdf``).
+        layout: Optional layout dict from :func:`map_layout`.
+
+    Returns:
+        The *output_path* used (may have ``.html`` extension on fallback).
+    """
+    from pathlib import Path
+    out = Path(output_path)
+    try:
+        import weasyprint  # type: ignore[import]
+        if layout and layout.get("title"):
+            title_tag = f"<title>{layout['title']}</title>"
+            if "<head>" in html_content:
+                html_content = html_content.replace("<head>", f"<head>{title_tag}", 1)
+        weasyprint.HTML(string=html_content).write_pdf(str(out))
+        return str(out)
+    except ImportError:
+        html_path = out.with_suffix(".html")
+        html_path.write_text(html_content, encoding="utf-8")
+        return str(html_path)
+
+
+def folium_layer_control(map_obj: _Any, *, collapsed: bool = False) -> _Any:
+    """Add a layer control widget to a Folium map.
+
+    Args:
+        map_obj: A ``folium.Map`` instance.
+        collapsed: Whether the control starts collapsed.
+
+    Returns:
+        The *map_obj* with the ``LayerControl`` added.
+    """
+    try:
+        import folium  # type: ignore[import]
+        folium.LayerControl(collapsed=collapsed).add_to(map_obj)
+    except ImportError:
+        pass
+    return map_obj
+
+
+def folium_time_slider(map_obj: _Any, frame: _Any, *,
+                       time_column: str = "timestamp",
+                       date_format: str = "%Y-%m-%d") -> _Any:
+    """Add a time slider to a Folium map for temporal visualisation.
+
+    Requires ``folium`` ≥ 0.14 and ``folium.plugins.TimestampedGeoJson``.
+
+    Args:
+        map_obj: A ``folium.Map`` instance.
+        frame: A :class:`~geoprompt.GeoPromptFrame` with a *time_column*.
+        time_column: Column name containing ISO timestamp strings.
+        date_format: Expected date format for parsing timestamps.
+
+    Returns:
+        The *map_obj* with the time slider plugin added.
+    """
+    import json
+    try:
+        from folium.plugins import TimestampedGeoJson  # type: ignore[import]
+    except ImportError:
+        return map_obj
+
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    features = []
+    for r in frame:
+        geom = r.get(geom_col)
+        ts = r.get(time_column, "")
+        if geom:
+            features.append({
+                "type": "Feature",
+                "geometry": geom,
+                "properties": {"times": [str(ts)], **{k: v for k, v in r.items() if k not in {geom_col, time_column}}},
+            })
+
+    TimestampedGeoJson(
+        data={"type": "FeatureCollection", "features": features},
+        period="P1D",
+        add_last_point=True,
+    ).add_to(map_obj)
+    return map_obj

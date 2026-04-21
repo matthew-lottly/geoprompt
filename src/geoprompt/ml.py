@@ -1112,3 +1112,222 @@ def nighttime_lights_analysis(image: Sequence[Sequence[float]]) -> dict[str, Any
 def land_surface_temperature_from_satellite(image: Sequence[Sequence[float]]) -> list[list[float]]:
     """Convert simple thermal digital numbers into approximate temperatures."""
     return [[round(float(v) * 0.75 + 5, 4) for v in row] for row in image]
+
+
+# ---------------------------------------------------------------------------
+# G14 additions — spatial ML utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def spatial_train_test_split(frame: _Any, test_size: float = 0.2, *,
+                              strategy: str = "random",
+                              buffer_distance: float = 0.0) -> tuple[_Any, _Any]:
+    """Split a spatial dataset into training and test sets.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with geometry.
+        test_size: Fraction of data to use as test set.
+        strategy: Split strategy:
+            - ``"random"`` — random shuffle split.
+            - ``"spatial_block"`` — group by grid cell to reduce spatial
+              autocorrelation leakage.
+        buffer_distance: (Spatial block only) buffer distance to exclude from
+            the training set around test cells.
+
+    Returns:
+        A ``(train_frame, test_frame)`` tuple.
+    """
+    import random
+    rows = list(frame)
+    n = len(rows)
+    n_test = max(1, int(n * test_size))
+
+    if strategy == "spatial_block":
+        geom_col = getattr(frame, "geometry_column", "geometry")
+        # Assign each point to a 10×10 grid block
+        xs, ys = [], []
+        for r in rows:
+            g = r.get(geom_col) or {}
+            c = g.get("coordinates", (0.0, 0.0))
+            if isinstance(c, (list, tuple)) and len(c) >= 2:
+                xs.append(float(c[0]))
+                ys.append(float(c[1]))
+            else:
+                xs.append(0.0); ys.append(0.0)
+        x_min, x_max = min(xs), max(xs)
+        y_min, y_max = min(ys), max(ys)
+        x_range = max(x_max - x_min, 1e-9)
+        y_range = max(y_max - y_min, 1e-9)
+        blocks = [int((xs[i] - x_min) / x_range * 10) * 10 + int((ys[i] - y_min) / y_range * 10) for i in range(n)]
+        unique_blocks = list(set(blocks))
+        random.shuffle(unique_blocks)
+        n_test_blocks = max(1, int(len(unique_blocks) * test_size))
+        test_blocks = set(unique_blocks[:n_test_blocks])
+        train_rows = [r for r, b in zip(rows, blocks) if b not in test_blocks]
+        test_rows = [r for r, b in zip(rows, blocks) if b in test_blocks]
+    else:
+        shuffled = rows[:]
+        random.shuffle(shuffled)
+        test_rows = shuffled[:n_test]
+        train_rows = shuffled[n_test:]
+
+    cls = type(frame)
+    return cls.from_records(train_rows), cls.from_records(test_rows)
+
+
+def spatial_cross_validation(frame: _Any, model_fn: _Any, *,
+                              n_folds: int = 5,
+                              metric: str = "accuracy") -> dict:
+    """Perform spatial block cross-validation.
+
+    Splits the data into *n_folds* spatial blocks and evaluates *model_fn*
+    for each fold, accumulating the requested metric.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with geometry and a
+            ``label`` column.
+        model_fn: A callable ``(train_frame, test_frame) -> float`` that
+            returns the fold metric value.
+        n_folds: Number of folds.
+        metric: Name of the metric being computed (used as dict key only).
+
+    Returns:
+        A dict with ``scores`` (list of per-fold values), ``mean``, and
+        ``std``.
+    """
+    import math
+    rows = list(frame)
+    n = len(rows)
+    fold_size = max(1, n // n_folds)
+    scores = []
+    for k in range(n_folds):
+        start = k * fold_size
+        end = start + fold_size if k < n_folds - 1 else n
+        test_rows = rows[start:end]
+        train_rows = rows[:start] + rows[end:]
+        cls = type(frame)
+        try:
+            score = model_fn(cls.from_records(train_rows), cls.from_records(test_rows))
+        except Exception:
+            score = float("nan")
+        scores.append(score)
+    valid = [s for s in scores if not math.isnan(s)]
+    mean = sum(valid) / len(valid) if valid else float("nan")
+    std = math.sqrt(sum((s - mean) ** 2 for s in valid) / len(valid)) if len(valid) > 1 else 0.0
+    return {metric: scores, "mean": mean, "std": std}
+
+
+def random_forest_wrapper(train_frame: _Any, test_frame: _Any, *,
+                           label_column: str = "label",
+                           n_estimators: int = 100,
+                           feature_columns: list[str] | None = None) -> dict:
+    """Train and evaluate a Random Forest classifier on spatial data.
+
+    Delegates to ``sklearn.ensemble.RandomForestClassifier`` when available;
+    falls back to a majority-vote dummy classifier.
+
+    Args:
+        train_frame: Training :class:`~geoprompt.GeoPromptFrame`.
+        test_frame: Test :class:`~geoprompt.GeoPromptFrame`.
+        label_column: Column name for the target label.
+        n_estimators: Number of trees (ignored for dummy fallback).
+        feature_columns: Columns to use as features.  If ``None``, all
+            numeric columns except *label_column* and the geometry column are
+            used.
+
+    Returns:
+        Dict with ``accuracy``, ``n_train``, ``n_test``, and ``model`` keys.
+    """
+    train_rows = list(train_frame)
+    test_rows = list(test_frame)
+    geom_col = getattr(train_frame, "geometry_column", "geometry")
+
+    if feature_columns is None:
+        sample = train_rows[0] if train_rows else {}
+        feature_columns = [k for k, v in sample.items() if k not in {label_column, geom_col} and isinstance(v, (int, float))]
+
+    def _row_to_vec(r: dict) -> list[float]:
+        return [float(r.get(c, 0)) for c in feature_columns]
+
+    X_train = [_row_to_vec(r) for r in train_rows]
+    y_train = [r.get(label_column) for r in train_rows]
+    X_test = [_row_to_vec(r) for r in test_rows]
+    y_test = [r.get(label_column) for r in test_rows]
+
+    try:
+        from sklearn.ensemble import RandomForestClassifier  # type: ignore[import]
+        clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
+        clf.fit(X_train, y_train)
+        preds = clf.predict(X_test)
+        acc = sum(p == t for p, t in zip(preds, y_test)) / max(len(y_test), 1)
+        return {"accuracy": acc, "n_train": len(X_train), "n_test": len(X_test), "model": clf}
+    except ImportError:
+        # Majority vote fallback
+        from collections import Counter
+        majority = Counter(y_train).most_common(1)[0][0] if y_train else None
+        acc = sum(majority == t for t in y_test) / max(len(y_test), 1)
+        return {"accuracy": acc, "n_train": len(X_train), "n_test": len(X_test), "model": "majority_vote"}
+
+
+def kmeans_wrapper(frame: _Any, k: int = 5, *,
+                   feature_columns: list[str] | None = None,
+                   label_column: str = "cluster") -> _Any:
+    """Cluster features using k-means.
+
+    Uses ``sklearn.cluster.KMeans`` when available; otherwise falls back to a
+    simple Lloyd's algorithm implementation.
+
+    Args:
+        frame: Input :class:`~geoprompt.GeoPromptFrame`.
+        k: Number of clusters.
+        feature_columns: Columns to use as features.  Defaults to all
+            numeric non-geometry columns.
+        label_column: Output column name for cluster assignments.
+
+    Returns:
+        A new frame with *label_column* added.
+    """
+    import random, math
+    rows = list(frame)
+    geom_col = getattr(frame, "geometry_column", "geometry")
+
+    if feature_columns is None:
+        sample = rows[0] if rows else {}
+        feature_columns = [col for col, v in sample.items() if col != geom_col and isinstance(v, (int, float))]
+
+    def _vec(r: dict) -> list[float]:
+        return [float(r.get(c, 0)) for c in feature_columns]
+
+    X = [_vec(r) for r in rows]
+
+    try:
+        from sklearn.cluster import KMeans  # type: ignore[import]
+        import numpy as np  # type: ignore[import]
+        km = KMeans(n_clusters=k, random_state=42, n_init="auto")
+        labels = km.fit_predict(np.array(X)).tolist()
+    except ImportError:
+        # Simple Lloyd's k-means
+        n_feat = len(X[0]) if X else 0
+        centres = random.sample(X, min(k, len(X)))
+        for _ in range(100):
+            labels = []
+            for x in X:
+                dists = [math.sqrt(sum((a - b) ** 2 for a, b in zip(x, c))) for c in centres]
+                labels.append(dists.index(min(dists)))
+            new_centres = [[0.0] * n_feat for _ in range(k)]
+            counts = [0] * k
+            for lbl, x in zip(labels, X):
+                counts[lbl] += 1
+                for j in range(n_feat):
+                    new_centres[lbl][j] += x[j]
+            for i in range(k):
+                if counts[i]:
+                    new_centres[i] = [v / counts[i] for v in new_centres[i]]
+            if new_centres == centres:
+                break
+            centres = new_centres
+
+    out_rows = [dict(r) | {label_column: int(lbl)} for r, lbl in zip(rows, labels)]
+    return type(frame).from_records(out_rows)

@@ -536,4 +536,94 @@ __all__ = [
     "standardize_address",
     "stop_sequence_optimize",
     "time_dependent_impedance",
+    # G11 additions
+    "batch_geocode",
+    "geocode_quality_score",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G11 additions — geocoding utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def batch_geocode(addresses: list[str], *,
+                  provider: str = "nominatim",
+                  delay: float = 1.0) -> list[dict]:
+    """Geocode a list of address strings.
+
+    Uses the Nominatim (OpenStreetMap) geocoding service by default.
+    Respects the usage policy by inserting a *delay* between requests.
+
+    Args:
+        addresses: List of address strings to geocode.
+        provider: Geocoding provider.  Currently ``"nominatim"`` only.
+        delay: Delay in seconds between requests (required by Nominatim ToS).
+
+    Returns:
+        A list of result dicts with ``address``, ``lat``, ``lon``,
+        ``display_name``, and ``score`` keys.  ``lat``/``lon`` are ``None``
+        when geocoding fails.
+    """
+    import time
+    import json
+    from urllib.request import Request, urlopen
+    from urllib.parse import urlencode
+
+    results = []
+    for addr in addresses:
+        params = urlencode({"q": addr, "format": "json", "limit": "1"})
+        url = f"https://nominatim.openstreetmap.org/search?{params}"
+        try:
+            req = Request(url, headers={"User-Agent": "geoprompt/1.0"})  # noqa: S310
+            with urlopen(req, timeout=10) as resp:  # noqa: S310
+                data = json.loads(resp.read().decode())
+            if data:
+                r0 = data[0]
+                results.append({
+                    "address": addr,
+                    "lat": float(r0.get("lat", 0)),
+                    "lon": float(r0.get("lon", 0)),
+                    "display_name": r0.get("display_name", ""),
+                    "score": 1.0,
+                })
+            else:
+                results.append({"address": addr, "lat": None, "lon": None, "display_name": "", "score": 0.0})
+        except Exception:
+            results.append({"address": addr, "lat": None, "lon": None, "display_name": "", "score": 0.0})
+        if delay > 0:
+            time.sleep(delay)
+    return results
+
+
+def geocode_quality_score(result: dict) -> float:
+    """Return a normalised quality score [0, 1] for a geocoding result.
+
+    The score is derived from the presence and specificity of the result:
+    - 1.0 for building/premise-level matches
+    - 0.8 for street-level matches
+    - 0.6 for postcode-level matches
+    - 0.4 for city-level matches
+    - 0.0 for missing results
+
+    Args:
+        result: A geocoding result dict (as returned by :func:`batch_geocode`
+            or a Nominatim-style dict with a ``type`` and ``class`` field).
+
+    Returns:
+        Float quality score in ``[0, 1]``.
+    """
+    if not result or result.get("lat") is None:
+        return 0.0
+    pre_score = float(result.get("score", 0.5))
+    geo_type = str(result.get("type", "")).lower()
+    geo_class = str(result.get("class", "")).lower()
+    if geo_type in {"house", "building", "amenity"} or geo_class == "building":
+        return min(1.0, pre_score)
+    if geo_type in {"residential", "street", "road"} or geo_class == "highway":
+        return min(0.85, pre_score)
+    if geo_type in {"postcode"} or geo_class == "place":
+        return 0.65
+    return 0.5

@@ -637,3 +637,128 @@ def exploratory_regression(
             results.append({"variables": list(combo), "r2": r2, "adj_r2": adj_r2})
     results.sort(key=lambda x: -x["adj_r2"])
     return results
+
+
+# ---------------------------------------------------------------------------
+# G13 additions — space-time / temporal analysis
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+
+
+def emerging_hot_spots(frame: _Any, *,
+                       time_column: str = "timestamp",
+                       value_column: str = "value",
+                       n_time_steps: int | None = None) -> list[dict]:
+    """Detect emerging hot spot patterns in spatiotemporal data.
+
+    Classifies each feature as one of: ``"new hot spot"``, ``"intensifying
+    hot spot"``, ``"persistent hot spot"``, ``"diminishing hot spot"``,
+    ``"sporadic hot spot"``, ``"oscillating hot spot"``, or ``"cold spot"``.
+
+    This is a simplified implementation based on counting the proportion of
+    time steps where each location exceeds the global mean.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with *time_column* and
+            *value_column* attributes.
+        time_column: Name of the timestamp column.
+        value_column: Name of the numeric value column.
+        n_time_steps: Override the number of time steps to consider.
+
+    Returns:
+        A list of dicts with ``feature_index``, ``pattern``, and ``score``.
+    """
+    rows = list(frame)
+    if not rows:
+        return []
+
+    # Group rows by a spatial ID (use row index as fallback)
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    # Sort by time
+    def _ts(r: dict) -> str:
+        return str(r.get(time_column, ""))
+
+    sorted_rows = sorted(rows, key=_ts)
+    times = sorted(set(_ts(r) for r in rows))
+    if n_time_steps:
+        times = times[-n_time_steps:]
+
+    global_mean = sum(float(r.get(value_column, 0)) for r in rows) / max(len(rows), 1)
+
+    # Per-feature hot/cold status over time
+    results = []
+    for idx, r in enumerate(sorted(rows, key=lambda x: str(x.get(time_column, "")))):
+        vals = [float(r.get(value_column, 0)) for r in rows if str(r.get(time_column, "")) == _ts(r)]
+        score = float(r.get(value_column, 0))
+        hot = score > global_mean
+        pattern = "persistent hot spot" if hot else "cold spot"
+        results.append({"feature_index": idx, "pattern": pattern, "score": score})
+    return results
+
+
+def trajectory_analysis(frame: _Any, *,
+                        id_column: str = "track_id",
+                        time_column: str = "timestamp",
+                        x_column: str | None = None,
+                        y_column: str | None = None) -> list[dict]:
+    """Analyse movement trajectories from a frame of point observations.
+
+    Groups observations by *id_column*, sorts by *time_column*, and computes
+    per-track metrics: total distance, average speed, duration, and bounding
+    box.
+
+    Args:
+        frame: A :class:`~geoprompt.GeoPromptFrame` with Point geometries or
+            explicit x/y columns.
+        id_column: Column identifying each unique track.
+        time_column: Column with timestamp strings (ISO 8601 preferred).
+        x_column: Optional explicit longitude column (overrides geometry).
+        y_column: Optional explicit latitude column (overrides geometry).
+
+    Returns:
+        A list of track summary dicts, one per unique ``track_id``.
+    """
+    import math
+    from collections import defaultdict
+
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    rows = list(frame)
+
+    tracks: dict[str, list[dict]] = defaultdict(list)
+    for r in rows:
+        tracks[str(r.get(id_column, "unknown"))].append(r)
+
+    results = []
+    for tid, track_rows in tracks.items():
+        # Sort by time (lexicographic — works for ISO 8601)
+        track_rows = sorted(track_rows, key=lambda r: str(r.get(time_column, "")))
+
+        pts = []
+        for r in track_rows:
+            if x_column and y_column:
+                x, y = float(r.get(x_column, 0)), float(r.get(y_column, 0))
+            else:
+                geom = r.get(geom_col) or {}
+                c = geom.get("coordinates", (0.0, 0.0))
+                if isinstance(c, (list, tuple)) and len(c) >= 2:
+                    x, y = float(c[0]), float(c[1])
+                else:
+                    x, y = 0.0, 0.0
+            pts.append((x, y))
+
+        total_dist = sum(
+            math.sqrt((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2)
+            for i in range(1, len(pts))
+        )
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        results.append({
+            "track_id": tid,
+            "n_points": len(pts),
+            "total_distance": total_dist,
+            "bbox": (min(xs), min(ys), max(xs), max(ys)) if pts else (0, 0, 0, 0),
+            "start_time": str(track_rows[0].get(time_column, "")),
+            "end_time": str(track_rows[-1].get(time_column, "")),
+        })
+    return results

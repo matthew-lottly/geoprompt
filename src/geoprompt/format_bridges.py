@@ -490,4 +490,224 @@ __all__ = [
     "write_mapinfo_tab",
     "write_netcdf",
     "write_vector_tiles",
+    # G22 additions
+    "to_arcgis_json",
+    "from_arcgis_json",
+    "to_mapbox_gl",
+    "from_wkt_batch",
+    "to_wkt_batch",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G22 additions — format bridge utilities
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+import json as _json
+
+
+def to_arcgis_json(frame: _Any) -> dict:
+    """Convert a :class:`~geoprompt.GeoPromptFrame` to ArcGIS JSON format.
+
+    Produces an ArcGIS REST ``FeatureSet`` JSON structure compatible with the
+    ArcGIS REST API.
+
+    Args:
+        frame: The input frame.
+
+    Returns:
+        An ArcGIS FeatureSet dict.
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    rows = list(frame)
+    if not rows:
+        return {"features": [], "spatialReference": {"wkid": 4326}}
+
+    # Build field definitions from the first row
+    sample = {k: v for k, v in rows[0].items() if k != geom_col}
+    fields = []
+    for k, v in sample.items():
+        if isinstance(v, int):
+            esri_type = "esriFieldTypeInteger"
+        elif isinstance(v, float):
+            esri_type = "esriFieldTypeDouble"
+        else:
+            esri_type = "esriFieldTypeString"
+        fields.append({"name": k, "type": esri_type, "alias": k})
+
+    def _geojson_to_esri(geom: dict | None) -> dict | None:
+        if not geom:
+            return None
+        t = geom.get("type", "")
+        c = geom.get("coordinates")
+        if t == "Point":
+            return {"x": c[0], "y": c[1]}
+        if t == "Polyline" or t == "LineString":
+            return {"paths": [c] if c and not isinstance(c[0][0], list) else c}
+        if t == "Polygon":
+            return {"rings": c}
+        if t == "MultiPoint":
+            return {"points": c}
+        return None
+
+    features = []
+    for r in rows:
+        attrs = {k: v for k, v in r.items() if k != geom_col}
+        esri_geom = _geojson_to_esri(r.get(geom_col))
+        features.append({"attributes": attrs, "geometry": esri_geom})
+
+    return {"fields": fields, "features": features, "spatialReference": {"wkid": 4326}}
+
+
+def from_arcgis_json(feature_set: dict) -> _Any:
+    """Convert an ArcGIS REST FeatureSet JSON to a :class:`~geoprompt.GeoPromptFrame`.
+
+    Args:
+        feature_set: ArcGIS FeatureSet dict (as returned by :func:`to_arcgis_json`
+            or the ArcGIS REST API).
+
+    Returns:
+        A new :class:`~geoprompt.GeoPromptFrame`.
+    """
+    from .frame import GeoPromptFrame
+
+    def _esri_to_geojson(esri_geom: dict | None) -> dict | None:
+        if not esri_geom:
+            return None
+        if "x" in esri_geom and "y" in esri_geom:
+            return {"type": "Point", "coordinates": (esri_geom["x"], esri_geom["y"])}
+        if "paths" in esri_geom:
+            paths = esri_geom["paths"]
+            if len(paths) == 1:
+                return {"type": "LineString", "coordinates": paths[0]}
+            return {"type": "MultiLineString", "coordinates": paths}
+        if "rings" in esri_geom:
+            rings = esri_geom["rings"]
+            return {"type": "Polygon", "coordinates": rings}
+        if "points" in esri_geom:
+            return {"type": "MultiPoint", "coordinates": esri_geom["points"]}
+        return None
+
+    rows = []
+    for feat in feature_set.get("features", []):
+        attrs = dict(feat.get("attributes") or {})
+        geom = _esri_to_geojson(feat.get("geometry"))
+        if geom:
+            attrs["geometry"] = geom
+        rows.append(attrs)
+    return GeoPromptFrame.from_records(rows)
+
+
+def to_mapbox_gl(frame: _Any, layer_id: str = "layer-0", *,
+                 layer_type: str = "fill",
+                 paint: dict | None = None) -> dict:
+    """Convert a :class:`~geoprompt.GeoPromptFrame` to a Mapbox GL style layer spec.
+
+    Args:
+        frame: The input frame.
+        layer_id: Mapbox GL layer ID.
+        layer_type: Mapbox GL layer type: ``"fill"``, ``"line"``, ``"circle"``,
+            ``"symbol"``.
+        paint: Optional paint properties dict.
+
+    Returns:
+        A Mapbox GL layer spec dict (with embedded ``source`` GeoJSON).
+    """
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    features = []
+    for r in frame:
+        geom = r.get(geom_col)
+        props = {k: v for k, v in r.items() if k != geom_col}
+        features.append({"type": "Feature", "geometry": geom, "properties": props})
+
+    source_data = {"type": "FeatureCollection", "features": features}
+    default_paint = {
+        "fill": {"fill-color": "#088", "fill-opacity": 0.5},
+        "line": {"line-color": "#088", "line-width": 2},
+        "circle": {"circle-radius": 6, "circle-color": "#088"},
+        "symbol": {},
+    }
+    return {
+        "id": layer_id,
+        "type": layer_type,
+        "source": {"type": "geojson", "data": source_data},
+        "paint": paint or default_paint.get(layer_type, {}),
+    }
+
+
+def from_wkt_batch(wkt_strings: list[str]) -> list[dict | None]:
+    """Parse a list of WKT strings into GeoJSON geometry dicts.
+
+    Args:
+        wkt_strings: List of Well-Known Text geometry strings.
+
+    Returns:
+        A list of GeoJSON geometry dicts (or ``None`` for parse failures).
+    """
+    try:
+        import shapely.wkt as _sw  # type: ignore[import]
+        results = []
+        for wkt in wkt_strings:
+            try:
+                geom = _sw.loads(wkt)
+                results.append(geom.__geo_interface__)
+            except Exception:
+                results.append(None)
+        return results
+    except ImportError:
+        # Minimal fallback for POINT only
+        import re
+        results = []
+        for wkt in wkt_strings:
+            m = re.match(r"POINT\s*\(\s*([\d.\-]+)\s+([\d.\-]+)\s*\)", wkt.strip(), re.IGNORECASE)
+            if m:
+                results.append({"type": "Point", "coordinates": (float(m.group(1)), float(m.group(2)))})
+            else:
+                results.append(None)
+        return results
+
+
+def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
+    """Convert a list of GeoJSON geometry dicts to WKT strings.
+
+    Args:
+        geometries: List of GeoJSON geometry dicts (or ``None``).
+
+    Returns:
+        A list of WKT strings (``"GEOMETRYCOLLECTION EMPTY"`` for ``None``).
+    """
+    try:
+        import shapely.geometry as _sg  # type: ignore[import]
+        results = []
+        for geom in geometries:
+            if geom is None:
+                results.append("GEOMETRYCOLLECTION EMPTY")
+                continue
+            try:
+                results.append(_sg.shape(geom).wkt)
+            except Exception:
+                results.append("GEOMETRYCOLLECTION EMPTY")
+        return results
+    except ImportError:
+        # Minimal fallback for Point/LineString/Polygon
+        results = []
+        for geom in geometries:
+            if geom is None:
+                results.append("GEOMETRYCOLLECTION EMPTY"); continue
+            t = geom.get("type", "")
+            c = geom.get("coordinates")
+            try:
+                if t == "Point":
+                    results.append(f"POINT ({c[0]} {c[1]})")
+                elif t == "LineString":
+                    pts = ", ".join(f"{p[0]} {p[1]}" for p in c)
+                    results.append(f"LINESTRING ({pts})")
+                elif t == "Polygon":
+                    ring = ", ".join(f"{p[0]} {p[1]}" for p in c[0])
+                    results.append(f"POLYGON (({ring}))")
+                else:
+                    results.append("GEOMETRYCOLLECTION EMPTY")
+            except Exception:
+                results.append("GEOMETRYCOLLECTION EMPTY")
+        return results

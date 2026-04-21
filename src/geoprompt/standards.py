@@ -628,4 +628,203 @@ __all__ = [
     "zarr_store_read_write",
     "discrete_global_grid_system",
     "ball_tree_spatial_index",
+    # G20 additions
+    "iso_19115_metadata",
+    "fgdc_metadata",
+    "inspire_metadata",
+    "geosparql_serialize",
 ]
+
+
+# ---------------------------------------------------------------------------
+# G20 additions — metadata and interoperability standards
+# ---------------------------------------------------------------------------
+
+from typing import Any as _Any
+import json as _json
+
+
+def iso_19115_metadata(title: str, abstract: str, *,
+                       keywords: list[str] | None = None,
+                       bbox: tuple[float, float, float, float] | None = None,
+                       author: str = "",
+                       date: str = "",
+                       language: str = "en") -> dict:
+    """Generate an ISO 19115-compliant metadata record as a Python dict.
+
+    The returned dict uses ISO 19115 element names (in camelCase) and can
+    be serialised to XML or JSON.
+
+    Args:
+        title: Dataset title.
+        abstract: Dataset abstract / description.
+        keywords: List of keyword strings.
+        bbox: Bounding box ``(west, south, east, north)`` in decimal degrees.
+        author: Responsible party / author name.
+        date: ISO 8601 date string (e.g. ``"2024-01-01"``).
+        language: Language code (ISO 639-1).
+
+    Returns:
+        ISO 19115 metadata dict.
+    """
+    record: dict = {
+        "fileIdentifier": None,
+        "language": language,
+        "hierarchyLevel": "dataset",
+        "contact": {"individualName": author},
+        "dateStamp": date,
+        "identificationInfo": {
+            "citation": {"title": title, "date": date},
+            "abstract": abstract,
+            "descriptiveKeywords": {"keyword": keywords or []},
+        },
+    }
+    if bbox:
+        record["identificationInfo"]["extent"] = {
+            "geographicBoundingBox": {
+                "westBoundLongitude": bbox[0],
+                "southBoundLatitude": bbox[1],
+                "eastBoundLongitude": bbox[2],
+                "northBoundLatitude": bbox[3],
+            }
+        }
+    return record
+
+
+def fgdc_metadata(title: str, abstract: str, *,
+                  originator: str = "",
+                  publish_date: str = "",
+                  bbox: tuple[float, float, float, float] | None = None) -> dict:
+    """Generate an FGDC CSDGM-compliant metadata record.
+
+    Args:
+        title: Dataset title.
+        abstract: Dataset abstract / purpose.
+        originator: Data originator / author.
+        publish_date: Publication date (YYYYMMDD or ISO 8601).
+        bbox: Bounding box ``(west, south, east, north)``.
+
+    Returns:
+        FGDC CSDGM metadata dict.
+    """
+    record: dict = {
+        "idinfo": {
+            "citation": {
+                "citeinfo": {
+                    "origin": originator,
+                    "pubdate": publish_date,
+                    "title": title,
+                }
+            },
+            "descript": {
+                "abstract": abstract,
+                "purpose": "",
+            },
+        },
+        "metainfo": {
+            "metd": publish_date,
+            "metstdn": "FGDC Content Standard for Digital Geospatial Metadata",
+            "metstdv": "FGDC-STD-001-1998",
+        },
+    }
+    if bbox:
+        record["idinfo"]["spdom"] = {
+            "bounding": {
+                "westbc": bbox[0], "eastbc": bbox[2],
+                "northbc": bbox[3], "southbc": bbox[1],
+            }
+        }
+    return record
+
+
+def inspire_metadata(title: str, abstract: str, *,
+                     resource_type: str = "dataset",
+                     keywords: list[str] | None = None,
+                     bbox: tuple[float, float, float, float] | None = None,
+                     crs: str = "EPSG:4326",
+                     date: str = "") -> dict:
+    """Generate an INSPIRE-compliant metadata record (INSPIRE Directive, EU).
+
+    Args:
+        title: Resource title.
+        abstract: Resource abstract.
+        resource_type: Type: ``"dataset"``, ``"series"``, or ``"service"``.
+        keywords: INSPIRE theme keywords.
+        bbox: Geographic bounding box ``(west, south, east, north)``.
+        crs: Coordinate reference system identifier.
+        date: Publication/creation date (ISO 8601).
+
+    Returns:
+        INSPIRE metadata dict.
+    """
+    record: dict = {
+        "inspire_profile": "INSPIRE Metadata Regulation",
+        "resourceTitle": title,
+        "resourceAbstract": abstract,
+        "resourceType": resource_type,
+        "keyword": keywords or [],
+        "referenceSystem": crs,
+        "temporalReference": {"publicationDate": date},
+        "conformity": {"specification": "INSPIRE Data Specifications", "degree": "notEvaluated"},
+        "conditions": "no conditions apply",
+        "limitations": "no limitations",
+        "responsibleOrganisation": {"name": "", "email": "", "role": "pointOfContact"},
+        "metadataDate": date,
+        "metadataLanguage": "en",
+    }
+    if bbox:
+        record["geographicBoundingBox"] = {"west": bbox[0], "south": bbox[1], "east": bbox[2], "north": bbox[3]}
+    return record
+
+
+def geosparql_serialize(frame: _Any, *,
+                        base_uri: str = "http://example.org/feature/",
+                        crs: str = "http://www.opengis.net/def/crs/OGC/1.3/CRS84") -> str:
+    """Serialise a :class:`~geoprompt.GeoPromptFrame` to GeoSPARQL Turtle.
+
+    Emits basic ``geo:Feature`` / ``geo:hasGeometry`` / ``geo:asWKT`` triples.
+
+    Args:
+        frame: The input frame.
+        base_uri: Base URI for feature individuals.
+        crs: CRS URI for the WKT literal.
+
+    Returns:
+        A Turtle-format RDF string.
+    """
+    from urllib.parse import quote as _quote
+
+    def _geom_to_wkt(geom: dict | None) -> str:
+        if not geom:
+            return "POINT EMPTY"
+        t = geom.get("type", "")
+        c = geom.get("coordinates")
+        if t == "Point" and c:
+            return f"POINT ({c[0]} {c[1]})"
+        if t == "LineString" and c:
+            pts = " ".join(f"{p[0]} {p[1]}" for p in c)
+            return f"LINESTRING ({pts})"
+        if t == "Polygon" and c:
+            ring = " ".join(f"{p[0]} {p[1]}" for p in c[0])
+            return f"POLYGON (({ring}))"
+        return "GEOMETRYCOLLECTION EMPTY"
+
+    lines = [
+        "@prefix geo: <http://www.opengis.net/ont/geosparql#> .",
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "",
+    ]
+    geom_col = getattr(frame, "geometry_column", "geometry")
+    for i, r in enumerate(frame):
+        fid = _quote(str(r.get("id", i)), safe="")
+        feat_uri = f"<{base_uri}{fid}>"
+        geom_uri = f"<{base_uri}{fid}/geom>"
+        wkt = _geom_to_wkt(r.get(geom_col))
+        lines += [
+            f"{feat_uri} a geo:Feature ;",
+            f"    geo:hasGeometry {geom_uri} .",
+            f"{geom_uri} a geo:Geometry ;",
+            f'    geo:asWKT "<{crs}> {wkt}"^^geo:wktLiteral .',
+            "",
+        ]
+    return "\n".join(lines)

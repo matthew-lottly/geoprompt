@@ -14,10 +14,16 @@ from typing import Any, Iterable
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover
-    tomllib = None  # type: ignore[assignment]
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ModuleNotFoundError:
+        tomllib = None  # type: ignore[assignment]
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True)
 class QualityAuditResult:
     """Structured result for a single audit pass."""
 
