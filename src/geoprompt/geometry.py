@@ -2326,6 +2326,21 @@ def de9im_relate(geom_a: Geometry, geom_b: Geometry) -> str:
     return "".join(matrix)
 
 
+def relate(geometry: Geometry, other: Geometry) -> str:
+    """Return the DE-9IM relation string for two geometries."""
+    return de9im_relate(geometry, other)
+
+
+def covers(geometry: Geometry, other: Geometry) -> bool:
+    """Return ``True`` when *geometry* covers *other*."""
+    return geometry_covers(geometry, other)
+
+
+def covered_by(geometry: Geometry, other: Geometry) -> bool:
+    """Return ``True`` when *geometry* is covered by *other*."""
+    return geometry_covered_by(geometry, other)
+
+
 def _geom_dim(geom: Geometry) -> int:
     """Return the topological dimension of a geometry (0=point,1=line,2=polygon)."""
     kind = geom.get("type", "")
@@ -4165,6 +4180,7 @@ __all__ = [
     "generate_points_along_line",
     "snap_geometries_to_grid",
     "de9im_relate",
+    "relate",
     "geometry_wkt_read",
     "geometry_wkt_write",
     "geometry_wkb_read",
@@ -4249,6 +4265,8 @@ __all__ = [
     "stroke_curve",
     # G1 additions
     "contains_properly",
+    "covers",
+    "covered_by",
     "dwithin",
     "relate_pattern",
     "normalize_geometry_canonical",
@@ -4333,12 +4351,12 @@ def dwithin(geometry: Geometry, other: Geometry, distance: float) -> bool:
     g = normalize_geometry(geometry)
     o = normalize_geometry(other)
     # Fast bounding-box pre-check
-    gb = geometry_bounds(g)
-    ob = geometry_bounds(o)
+    gb_min_x, gb_min_y, gb_max_x, gb_max_y = geometry_bounds(g)
+    ob_min_x, ob_min_y, ob_max_x, ob_max_y = geometry_bounds(o)
     # If bounding boxes are more than *distance* apart in any axis, skip
-    if (gb["xmin"] - ob["xmax"]) > distance or (ob["xmin"] - gb["xmax"]) > distance:
+    if (gb_min_x - ob_max_x) > distance or (ob_min_x - gb_max_x) > distance:
         return False
-    if (gb["ymin"] - ob["ymax"]) > distance or (ob["ymin"] - gb["ymax"]) > distance:
+    if (gb_min_y - ob_max_y) > distance or (ob_min_y - gb_max_y) > distance:
         return False
     return geometry_distance(g, o) <= distance
 

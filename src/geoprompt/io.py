@@ -1969,6 +1969,13 @@ def read_cloud_json(
     if is_local_path:
         path = Path(parsed.path if parsed.scheme == "file" else target)
         payload = _json.loads(path.read_text(encoding="utf-8"))
+    elif parsed.scheme in {"s3", "gs", "az", "abfs"}:
+        try:
+            import fsspec  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover - optional dependency path
+            raise RuntimeError("Install fsspec plus the relevant cloud backend to read remote object-store paths") from exc
+        with fsspec.open(target, "r", encoding="utf-8") as handle:
+            payload = _json.load(handle)
     else:
         req = Request(target)
         if headers:
@@ -1985,6 +1992,126 @@ def read_cloud_json(
     if isinstance(payload, dict) and "features" in payload:
         return _records_from_service_payload(payload, geometry_column)
     return payload
+
+
+def list_remote_dataset_entries(path: str | Path, *, headers: dict[str, str] | None = None) -> list[dict[str, Any]]:
+    """List entries from a local folder, object-store prefix, or STAC-like JSON resource."""
+    target = str(path)
+    parsed = urlparse(target)
+    is_local_path = parsed.scheme in {"", "file"} or (len(parsed.scheme) == 1 and parsed.scheme.isalpha())
+    if is_local_path:
+        local = Path(parsed.path if parsed.scheme == "file" else target)
+        if local.is_dir():
+            return [
+                {"name": child.name, "path": str(child), "is_dir": child.is_dir()}
+                for child in sorted(local.iterdir(), key=lambda entry: entry.name)
+            ]
+        payload = read_cloud_json(local)
+    elif parsed.scheme in {"s3", "gs", "az", "abfs"}:
+        try:
+            import fsspec  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("Install fsspec plus the relevant backend to list remote object-store paths") from exc
+        fs, resolved_path = fsspec.core.url_to_fs(target)
+        entries = fs.ls(resolved_path, detail=True)
+        return [
+            {
+                "name": Path(entry["name"]).name,
+                "path": entry["name"],
+                "is_dir": entry.get("type") == "directory",
+                "size": entry.get("size"),
+            }
+            for entry in entries
+        ]
+    else:
+        payload = read_cloud_json(target, headers=headers)
+
+    if isinstance(payload, dict):
+        if "links" in payload:
+            return [dict(link) for link in payload.get("links", [])]
+        if "assets" in payload:
+            return [{"name": key, **value} for key, value in payload.get("assets", {}).items()]
+    if isinstance(payload, list):
+        return [{"index": index, "value": value} for index, value in enumerate(payload)]
+    return []
+
+
+def inspect_remote_dataset_metadata(path: str | Path, *, headers: dict[str, str] | None = None) -> dict[str, Any]:
+    """Inspect metadata for a local file, HTTP resource, or object-store path."""
+    target = str(path)
+    parsed = urlparse(target)
+    is_local_path = parsed.scheme in {"", "file"} or (len(parsed.scheme) == 1 and parsed.scheme.isalpha())
+    if is_local_path:
+        local = Path(parsed.path if parsed.scheme == "file" else target)
+        stat = local.stat()
+        return {
+            "path": str(local),
+            "scheme": "file",
+            "exists": local.exists(),
+            "is_dir": local.is_dir(),
+            "size": stat.st_size,
+            "modified": stat.st_mtime,
+        }
+    if parsed.scheme in {"s3", "gs", "az", "abfs"}:
+        try:
+            import fsspec  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover
+            raise RuntimeError("Install fsspec plus the relevant backend to inspect object-store metadata") from exc
+        fs, resolved_path = fsspec.core.url_to_fs(target)
+        info = fs.info(resolved_path)
+        return {
+            "path": target,
+            "scheme": parsed.scheme,
+            "exists": True,
+            "is_dir": info.get("type") == "directory",
+            "size": info.get("size"),
+            "etag": info.get("etag"),
+            "modified": info.get("mtime") or info.get("LastModified"),
+        }
+
+    request = Request(target, headers=headers or {}, method="HEAD")
+    with urlopen(request, timeout=30) as response:  # noqa: S310
+        header_map = dict(response.headers.items())
+    return {
+        "path": target,
+        "scheme": parsed.scheme,
+        "exists": True,
+        "content_type": header_map.get("Content-Type"),
+        "size": int(header_map["Content-Length"]) if header_map.get("Content-Length") else None,
+        "etag": header_map.get("ETag"),
+        "modified": header_map.get("Last-Modified"),
+    }
+
+
+def read_stac_catalog(path: str | Path, *, recursive: bool = True,
+                      headers: dict[str, str] | None = None) -> dict[str, Any]:
+    """Read a STAC catalog/collection/item and optionally traverse child and item links."""
+    root = read_cloud_json(path, headers=headers)
+    if not isinstance(root, dict):
+        raise TypeError("STAC payload must be a JSON object")
+
+    result = dict(root)
+    links = [dict(link) for link in result.get("links", []) if isinstance(link, dict)]
+    if not recursive:
+        result["resolved_links"] = []
+        return result
+
+    base = str(path)
+    resolved_children: list[dict[str, Any]] = []
+    for link in links:
+        rel = link.get("rel")
+        href = link.get("href")
+        if rel not in {"child", "item"} or not href:
+            continue
+        child_target = href if urlparse(str(href)).scheme else str((Path(base).parent / str(href)).resolve())
+        try:
+            child_payload = read_cloud_json(child_target, headers=headers)
+        except Exception:
+            continue
+        if isinstance(child_payload, dict):
+            resolved_children.append({"rel": rel, "href": href, "payload": child_payload})
+    result["resolved_links"] = resolved_children
+    return result
 
 
 def write_cloud_json(
@@ -2095,6 +2222,8 @@ __all__ = [
     "iter_data",
     "iter_data_with_preset",
     "iter_csv_points",
+    "inspect_remote_dataset_metadata",
+    "list_remote_dataset_entries",
     "read_cloud_json",
     "read_csv_points",
     "read_data",
@@ -2106,6 +2235,7 @@ __all__ = [
     "read_geopackage",
     "read_geoparquet_metadata",
     "read_points",
+    "read_stac_catalog",
     "read_service_url",
     "read_shapefile",
     "read_table",

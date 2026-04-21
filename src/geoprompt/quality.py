@@ -17,9 +17,6 @@ except ModuleNotFoundError:  # pragma: no cover
     try:
         import tomli as tomllib  # type: ignore[no-redef]
     except ModuleNotFoundError:
-        try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
 
 

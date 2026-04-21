@@ -551,16 +551,26 @@ from typing import Any as _Any
 
 def batch_geocode(addresses: list[str], *,
                   provider: str = "nominatim",
-                  delay: float = 1.0) -> list[dict]:
+                  providers: Sequence[str] | None = None,
+                  delay: float = 1.0,
+                  retries: int = 0,
+                  api_key: str | None = None,
+                  cache: dict[str, dict[str, Any]] | None = None) -> list[dict]:
     """Geocode a list of address strings.
 
-    Uses the Nominatim (OpenStreetMap) geocoding service by default.
-    Respects the usage policy by inserting a *delay* between requests.
+    Uses the configured provider, or an ordered provider fallback chain when
+    *providers* is supplied. Respects the usage policy by inserting a *delay*
+    between requests and reuses cached values when available.
 
     Args:
         addresses: List of address strings to geocode.
-        provider: Geocoding provider.  Currently ``"nominatim"`` only.
+        provider: Primary geocoding provider when *providers* is not supplied.
+        providers: Optional ordered provider fallback chain.
         delay: Delay in seconds between requests (required by Nominatim ToS).
+        retries: Number of retries per provider before failing over.
+        api_key: Optional provider credential passed through to
+            :func:`forward_geocode`.
+        cache: Optional mutable cache mapping address strings to prior results.
 
     Returns:
         A list of result dicts with ``address``, ``lat``, ``lon``,
@@ -568,31 +578,33 @@ def batch_geocode(addresses: list[str], *,
         when geocoding fails.
     """
     import time
-    import json
-    from urllib.request import Request, urlopen
-    from urllib.parse import urlencode
 
+    provider_chain = list(providers or [provider])
+    cache_store = cache if cache is not None else {}
     results = []
     for addr in addresses:
-        params = urlencode({"q": addr, "format": "json", "limit": "1"})
-        url = f"https://nominatim.openstreetmap.org/search?{params}"
-        try:
-            req = Request(url, headers={"User-Agent": "geoprompt/1.0"})  # noqa: S310
-            with urlopen(req, timeout=10) as resp:  # noqa: S310
-                data = json.loads(resp.read().decode())
-            if data:
-                r0 = data[0]
-                results.append({
-                    "address": addr,
-                    "lat": float(r0.get("lat", 0)),
-                    "lon": float(r0.get("lon", 0)),
-                    "display_name": r0.get("display_name", ""),
-                    "score": 1.0,
-                })
-            else:
-                results.append({"address": addr, "lat": None, "lon": None, "display_name": "", "score": 0.0})
-        except Exception:
-            results.append({"address": addr, "lat": None, "lon": None, "display_name": "", "score": 0.0})
+        if addr in cache_store:
+            results.append(dict(cache_store[addr]))
+            continue
+
+        resolved: dict[str, Any] = {"address": addr, "lat": None, "lon": None, "display_name": "", "score": 0.0}
+        for provider_name in provider_chain:
+            for _attempt in range(retries + 1):
+                try:
+                    hits = forward_geocode(addr, provider=provider_name, api_key=api_key, limit=1)
+                    if hits:
+                        hit = dict(hits[0])
+                        hit.setdefault("address", addr)
+                        hit.setdefault("provider", provider_name)
+                        hit.setdefault("score", geocode_quality_score(hit))
+                        resolved = hit
+                        break
+                except Exception:
+                    continue
+            if resolved.get("lat") is not None:
+                break
+        cache_store[addr] = dict(resolved)
+        results.append(resolved)
         if delay > 0:
             time.sleep(delay)
     return results

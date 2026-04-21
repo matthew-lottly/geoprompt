@@ -45,8 +45,10 @@ Choose GeoPrompt when the goal is not just geometry manipulation, but a full ana
 ## Install Profiles
 
 - Core install: `pip install geoprompt`
-- Core workflows do not require GeoPandas; it is only used in optional interop, compare, and extended file-format extras.
+- Core workflows do not require GeoPandas or matplotlib; plotting, mapping, and richer interop stay in optional extras.
 - Developer tooling: `pip install geoprompt[dev]`
+- Developer alias: `pip install geoprompt[developer]`
+- Analyst workflow stack: `pip install geoprompt[analyst]`
 - Notebook workflows: `pip install geoprompt[notebook]`
 - Network-heavy workloads: `pip install geoprompt[network]`
 - Visualization stack: `pip install geoprompt[viz]`
@@ -56,6 +58,7 @@ Choose GeoPrompt when the goal is not just geometry manipulation, but a full ana
 - Overlay and geometry operations: `pip install geoprompt[overlay]`
 - Comparison and benchmark extras: `pip install geoprompt[compare]`
 - Full feature stack: `pip install geoprompt[all]`
+- Full feature alias: `pip install geoprompt[full]`
 
 ## Container Quick Start
 

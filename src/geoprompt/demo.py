@@ -4,8 +4,6 @@ import argparse
 import logging
 from pathlib import Path
 
-import matplotlib.pyplot as plt
-
 from .geometry import geometry_centroid, geometry_type, geometry_vertices
 from .io import read_features, write_geojson, write_json
 
@@ -19,6 +17,11 @@ logger = logging.getLogger("geoprompt")
 
 
 def export_pressure_plot(records: list[dict[str, object]], output_path: Path) -> Path:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:  # pragma: no cover - optional dependency path
+        raise RuntimeError("matplotlib is required for demo chart export; install geoprompt[viz] or geoprompt[analyst]") from exc
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure, axis = plt.subplots(figsize=(10, 6))
     figure.patch.set_facecolor("#f4f2eb")

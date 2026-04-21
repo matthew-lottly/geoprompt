@@ -158,6 +158,31 @@ class GeoPromptGeometryAccessor:
         return [geometry_type(row[self._frame.geometry_column]) for row in self._frame]
 
 
+class GeoPromptCoordinateIndexer:
+    """Coordinate-based row selection similar to ``GeoPandas.cx``."""
+
+    def __init__(self, frame: "GeoPromptFrame") -> None:
+        self._frame = frame
+
+    def __getitem__(self, item: Any) -> "GeoPromptFrame":
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise TypeError("cx indexer expects [xmin:xmax, ymin:ymax]")
+        x_slice, y_slice = item
+        if not isinstance(x_slice, slice) or not isinstance(y_slice, slice):
+            raise TypeError("cx indexer requires slice objects for x and y ranges")
+        if x_slice.start is None or x_slice.stop is None or y_slice.start is None or y_slice.stop is None:
+            raise ValueError("cx slices require explicit xmin:xmax and ymin:ymax bounds")
+
+        xmin, xmax = float(x_slice.start), float(x_slice.stop)
+        ymin, ymax = float(y_slice.start), float(y_slice.stop)
+        rows = [
+            dict(row)
+            for row in self._frame._rows
+            if geometry_intersects_bounds(row[self._frame.geometry_column], xmin, ymin, xmax, ymax)
+        ]
+        return self._frame._clone_with_rows(rows)
+
+
 class GeoPromptStringAccessor:
     """String helper accessor for common analyst cleanup workflows."""
 
@@ -416,6 +441,7 @@ class GeoPromptFrame:
         self._rows = [dict(row) for row in rows]
         for row in self._rows:
             row[self.geometry_column] = normalize_geometry(row[self.geometry_column])
+        self.cx = GeoPromptCoordinateIndexer(self)
 
     @classmethod
     def from_records(cls, records: Iterable[Record], geometry: str = "geometry", crs: str | None = None) -> "GeoPromptFrame":
@@ -447,6 +473,7 @@ class GeoPromptFrame:
         frame._index_column = None
         frame._spatial_index = None
         frame._rows = [dict(row) for row in rows]
+        frame.cx = GeoPromptCoordinateIndexer(frame)
         return frame
 
     def _clone_with_rows(
@@ -4252,11 +4279,21 @@ class GeoPromptFrame:
         xmins, ymins, xmaxs, ymaxs = [], [], [], []
         for row in self._rows:
             b = geometry_bounds(row[self.geometry_column])
-            xmins.append(b["xmin"])
-            ymins.append(b["ymin"])
-            xmaxs.append(b["xmax"])
-            ymaxs.append(b["ymax"])
+            xmins.append(b[0])
+            ymins.append(b[1])
+            xmaxs.append(b[2])
+            ymaxs.append(b[3])
         return (min(xmins), min(ymins), max(xmaxs), max(ymaxs))
+
+    @property
+    def area(self) -> list[float]:
+        """Return row-wise geometry areas directly on the frame."""
+        return [geometry_area(row[self.geometry_column]) for row in self._rows]
+
+    @property
+    def length(self) -> list[float]:
+        """Return row-wise geometry lengths directly on the frame."""
+        return [geometry_length(row[self.geometry_column]) for row in self._rows]
 
     @property
     def geom_type(self) -> list[str]:
@@ -4266,7 +4303,7 @@ class GeoPromptFrame:
     @property
     def is_valid(self) -> list[bool]:
         """Return a list of booleans indicating geometry validity per row."""
-        return [validate_geometry(row[self.geometry_column]).get("valid", False) for row in self._rows]
+        return [bool(validate_geometry(row[self.geometry_column]).get("is_valid", False)) for row in self._rows]
 
     @property
     def is_empty(self) -> list[bool]:
@@ -4350,6 +4387,30 @@ class GeoPromptFrame:
                 return m
         folium.GeoJson(geojson_data).add_to(m)
         return m
+
+    def plot(self, column: str | None = None, ax: Any = None, color: str = "#3388ff", **kwargs: Any) -> Any:
+        """Render a lightweight matplotlib plot for the frame geometries."""
+        matplotlib_pyplot = importlib.import_module("matplotlib.pyplot")
+        axes = ax if ax is not None else matplotlib_pyplot.subplots()[1]
+        for row in self._rows:
+            geometry = row[self.geometry_column]
+            kind = geometry_type(geometry)
+            coords = geometry.get("coordinates")
+            if kind == "Point":
+                axes.scatter([coords[0]], [coords[1]], color=color, **kwargs)
+            elif kind == "LineString":
+                xs = [coord[0] for coord in coords]
+                ys = [coord[1] for coord in coords]
+                axes.plot(xs, ys, color=color, **kwargs)
+            elif kind == "Polygon":
+                ring = coords[0] if coords and isinstance(coords[0][0], (tuple, list)) else coords
+                xs = [coord[0] for coord in ring]
+                ys = [coord[1] for coord in ring]
+                axes.fill(xs, ys, facecolor=color, alpha=0.35)
+                axes.plot(xs, ys, color=color)
+        if column and column in self.columns:
+            axes.set_title(str(column))
+        return axes
 
 
 class GroupedGeoPromptFrame:
