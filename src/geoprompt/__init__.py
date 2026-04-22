@@ -203,7 +203,7 @@ from .geocoding import (
     reverse_geocode, route_directions_narrative, route_milepost,
     standardize_address, stop_sequence_optimize, time_dependent_impedance,
 )
-from .geometry import (geometry_area, geometry_boundary, geometry_bounds,
+from .geometry import (affine_transform, geometry_area, geometry_boundary, geometry_bounds,
                       geometry_centroid, geometry_centerline, geometry_concave_hull,
                       contains_properly,
                       geometry_contains, geometry_convex_hull,
@@ -407,13 +407,15 @@ from .raster import (inspect_raster, land_cover_summary, polygonize_raster,
 from .imagery import *  # noqa: F401,F403
 from .imagery import __all__ as _IMAGERY_ALL
 from .raster import (
-                     raster_class_breaks, raster_clip, raster_cog_info,
+                     block_statistics, cost_allocation, focal_statistics,
+                     majority_filter, raster_class_breaks, raster_clip, raster_cog_info,
                      raster_cost_distance, raster_flow_accumulation,
                      raster_flow_direction, raster_hillshade,
                      raster_histogram, raster_lazy_algebra,
                      raster_least_cost_path, raster_mask, raster_mosaic,
                      raster_multidimensional_stack, raster_nodata_statistics,
                      raster_reproject, raster_report_card, raster_resample,
+                     snap_pour_points, stream_link,
                      raster_segment, raster_slope_aspect,
                      raster_stream_extraction, raster_terrain_ruggedness,
                      raster_tile, raster_viewshed, raster_watershed,
@@ -451,6 +453,7 @@ from .temporal import (EventTracker, animation_frames,
                        sort_by_time, surface_profile, surface_sample_grid,
                        temporal_join, temporal_window, voxel_grid)
 from .topology import (feature_validation_pipeline, repair_suggestions,
+                       resolve_topology_conflicts,
                        snap_points, topology_diff_report, validate_topology_rules)
 from .workspace import (GeoPromptWorkspace, JobSpec, LineageTracker,
                         build_workspace_manifest, export_provenance_bundle,
@@ -546,8 +549,10 @@ from .spatial_analysis import (
 from .spatial_models import *  # noqa: F401,F403
 from .spatial_models import __all__ as _SPATIAL_MODELS_ALL
 from .network import (
-    NetworkRouter, build_network_graph, edge_impedance_cost,
-    multi_criteria_shortest_path, service_area, shortest_path,
+    NetworkRouter, apply_live_traffic_overrides, build_network_graph,
+    edge_impedance_cost, hierarchy_aware_shortest_path,
+    live_traffic_shortest_path, multi_criteria_shortest_path,
+    multimodal_shortest_path, service_area, shortest_path,
     time_dependent_shortest_path,
 )
 from .classification import (
@@ -1123,6 +1128,7 @@ __all__ = [
     "relate_pattern",
     "repair_geometry",
     "representative_point",
+    "affine_transform",
     "rotate_geometry",
     "scale_geometry",
     "skew_geometry",
@@ -1349,6 +1355,10 @@ __all__ = [
     "raster_class_breaks",
     "raster_clip",
     "raster_cog_info",
+    "cost_allocation",
+    "focal_statistics",
+    "block_statistics",
+    "majority_filter",
     "raster_cost_distance",
     "raster_flow_accumulation",
     "raster_flow_direction",
@@ -1364,6 +1374,8 @@ __all__ = [
     "raster_alignment_report",
     "raster_report_card",
     "raster_resample",
+    "snap_pour_points",
+    "stream_link",
     "raster_segment",
     "raster_slope_aspect",
     "raster_stream_extraction",
@@ -1456,9 +1468,22 @@ __all__ = [
     "vectorized_decay",
     "vectorized_gravity_interaction",
     "vectorized_service_probability",
+    # --- network ---
+    "NetworkRouter",
+    "build_network_graph",
+    "edge_impedance_cost",
+    "shortest_path",
+    "service_area",
+    "multi_criteria_shortest_path",
+    "multimodal_shortest_path",
+    "time_dependent_shortest_path",
+    "apply_live_traffic_overrides",
+    "live_traffic_shortest_path",
+    "hierarchy_aware_shortest_path",
     # --- topology ---
     "feature_validation_pipeline",
     "repair_suggestions",
+    "resolve_topology_conflicts",
     "snap_points",
     "topology_diff_report",
     "validate_topology_rules",

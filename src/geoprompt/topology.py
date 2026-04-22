@@ -10,10 +10,12 @@ from typing import Any, Sequence
 from .frame import GeoPromptFrame
 from .geometry import (
     geometry_distance,
+    geometry_equals,
     geometry_intersects,
     geometry_touches,
     geometry_type,
     geometry_within,
+    repair_geometry,
     validate_geometry,
 )
 
@@ -273,9 +275,46 @@ def repair_suggestions(
     return suggestions
 
 
+def resolve_topology_conflicts(
+    frame: GeoPromptFrame,
+    *,
+    rules: Sequence[str] | None = None,
+    other: GeoPromptFrame | None = None,
+    drop_duplicate_features: bool = True,
+) -> dict[str, Any]:
+    """Apply lightweight automatic fixes for common topology conflicts."""
+    if rules is None:
+        rules = ["must_not_self_intersect", "must_not_overlap"]
+
+    repaired_rows: list[dict[str, Any]] = []
+    kept_geometries: list[Any] = []
+    removed_duplicates = 0
+    for row in frame.to_records():
+        updated = dict(row)
+        fixed_geometry = repair_geometry(updated[frame.geometry_column])
+        if drop_duplicate_features and any(geometry_equals(fixed_geometry, existing) for existing in kept_geometries):
+            removed_duplicates += 1
+            continue
+        kept_geometries.append(fixed_geometry)
+        updated[frame.geometry_column] = fixed_geometry
+        repaired_rows.append(updated)
+
+    repaired_frame = GeoPromptFrame.from_records(repaired_rows, geometry=frame.geometry_column, crs=frame.crs)
+    before = feature_validation_pipeline(frame, rules=rules, other=other)
+    after = feature_validation_pipeline(repaired_frame, rules=rules, other=other)
+    return {
+        "repaired_frame": repaired_frame,
+        "before": before,
+        "after": after,
+        "removed_duplicates": removed_duplicates,
+        "suggestions": repair_suggestions(frame, rules=rules, other=other),
+    }
+
+
 __all__ = [
     "feature_validation_pipeline",
     "repair_suggestions",
+    "resolve_topology_conflicts",
     "snap_points",
     "topology_diff_report",
     "validate_topology_rules",

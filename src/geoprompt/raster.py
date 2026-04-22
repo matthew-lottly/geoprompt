@@ -1186,6 +1186,81 @@ def raster_stream_extraction(
     return {"data": streams, "transform": flow_accumulation["transform"], "rows": rows, "cols": cols}
 
 
+def snap_pour_points(
+    flow_accumulation: dict[str, Any],
+    pour_points: Sequence[tuple[int, int]],
+    *,
+    search_radius: int = 1,
+) -> list[tuple[int, int]]:
+    """Snap pour points to the highest-accumulation nearby cell."""
+    data = flow_accumulation["data"]
+    rows = len(data)
+    cols = len(data[0]) if data else 0
+    snapped: list[tuple[int, int]] = []
+    for row_index, col_index in pour_points:
+        best_row, best_col = row_index, col_index
+        best_value = -1
+        for r in range(max(0, row_index - search_radius), min(rows, row_index + search_radius + 1)):
+            for c in range(max(0, col_index - search_radius), min(cols, col_index + search_radius + 1)):
+                value = data[r][c]
+                if value is None:
+                    continue
+                if value > best_value:
+                    best_row, best_col = r, c
+                    best_value = value
+        snapped.append((best_row, best_col))
+    return snapped
+
+
+def stream_link(stream_grid: list[list[int]], flow_dir: list[list[int]]) -> list[list[int]]:
+    """Assign segment ids to connected stream reaches between confluences."""
+    rows = len(stream_grid)
+    cols = len(stream_grid[0]) if stream_grid else 0
+    d8 = {1: (0, 1), 2: (1, 1), 4: (1, 0), 8: (1, -1), 16: (0, -1), 32: (-1, -1), 64: (-1, 0), 128: (-1, 1)}
+    reverse_lookup: dict[tuple[int, int], list[tuple[int, int]]] = {}
+    for r in range(rows):
+        for c in range(cols):
+            if not stream_grid[r][c]:
+                continue
+            code = flow_dir[r][c]
+            if code not in d8:
+                continue
+            dr, dc = d8[code]
+            nr, nc = r + dr, c + dc
+            if 0 <= nr < rows and 0 <= nc < cols and stream_grid[nr][nc]:
+                reverse_lookup.setdefault((nr, nc), []).append((r, c))
+
+    links: list[list[int]] = [[0] * cols for _ in range(rows)]
+    next_id = 1
+    for r in range(rows):
+        for c in range(cols):
+            if not stream_grid[r][c] or links[r][c] != 0:
+                continue
+            if len(reverse_lookup.get((r, c), [])) > 1:
+                continue
+            current_r, current_c = r, c
+            current_id = next_id
+            next_id += 1
+            while 0 <= current_r < rows and 0 <= current_c < cols and stream_grid[current_r][current_c] and links[current_r][current_c] == 0:
+                links[current_r][current_c] = current_id
+                code = flow_dir[current_r][current_c]
+                if code not in d8:
+                    break
+                dr, dc = d8[code]
+                nr, nc = current_r + dr, current_c + dc
+                if not (0 <= nr < rows and 0 <= nc < cols) or not stream_grid[nr][nc]:
+                    break
+                if len(reverse_lookup.get((nr, nc), [])) > 1:
+                    break
+                current_r, current_c = nr, nc
+    for r in range(rows):
+        for c in range(cols):
+            if stream_grid[r][c] and links[r][c] == 0:
+                links[r][c] = next_id
+                next_id += 1
+    return links
+
+
 def raster_classify(
     raster: RasterLike,
     breaks: Sequence[float],
@@ -1517,6 +1592,12 @@ __all__ = [
     "reclassify_raster",
     "euclidean_distance_raster",
     "cost_distance_raster",
+    "cost_allocation",
+    "focal_statistics",
+    "block_statistics",
+    "majority_filter",
+    "snap_pour_points",
+    "stream_link",
     "ndvi",
     "pca_raster",
 ]
@@ -1924,6 +2005,116 @@ def cost_distance_raster(source_cells: list[tuple[int, int]], cost_grid: list[li
                     dist[nr][nc] = nd
                     heapq.heappush(pq, (nd, nr, nc))
     return dist
+
+
+def cost_allocation(source_cells: list[tuple[int, int]], cost_grid: list[list[float]]) -> list[list[int]]:
+    """Allocate each cell to the lowest-cost source region."""
+    import heapq
+
+    rows, cols = len(cost_grid), len(cost_grid[0]) if cost_grid else 0
+    dist: list[list[float]] = [[float("inf")] * cols for _ in range(rows)]
+    allocation: list[list[int]] = [[-1] * cols for _ in range(rows)]
+    pq: list[tuple[float, int, int, int]] = []
+
+    for source_id, (sr, sc) in enumerate(source_cells):
+        if 0 <= sr < rows and 0 <= sc < cols:
+            dist[sr][sc] = 0.0
+            allocation[sr][sc] = source_id
+            heapq.heappush(pq, (0.0, sr, sc, source_id))
+
+    while pq:
+        current_dist, row_index, col_index, source_id = heapq.heappop(pq)
+        if current_dist > dist[row_index][col_index]:
+            continue
+        for delta_row, delta_col in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            next_row, next_col = row_index + delta_row, col_index + delta_col
+            if 0 <= next_row < rows and 0 <= next_col < cols:
+                next_dist = current_dist + float(cost_grid[next_row][next_col])
+                if next_dist < dist[next_row][next_col]:
+                    dist[next_row][next_col] = next_dist
+                    allocation[next_row][next_col] = source_id
+                    heapq.heappush(pq, (next_dist, next_row, next_col, source_id))
+
+    return allocation
+
+
+def focal_statistics(
+    grid: list[list[float]],
+    *,
+    size: int = 3,
+    statistic: str = "mean",
+) -> list[list[float]]:
+    """Apply a moving-window statistic across a raster grid."""
+    if size < 1 or size % 2 == 0:
+        raise ValueError("size must be a positive odd integer")
+    rows = len(grid)
+    cols = len(grid[0]) if grid else 0
+    radius = size // 2
+    output: list[list[float]] = [[0.0] * cols for _ in range(rows)]
+    for r in range(rows):
+        for c in range(cols):
+            values = [
+                float(grid[nr][nc])
+                for nr in range(max(0, r - radius), min(rows, r + radius + 1))
+                for nc in range(max(0, c - radius), min(cols, c + radius + 1))
+            ]
+            if statistic == "mean":
+                output[r][c] = sum(values) / len(values)
+            elif statistic == "sum":
+                output[r][c] = sum(values)
+            elif statistic == "max":
+                output[r][c] = max(values)
+            elif statistic == "min":
+                output[r][c] = min(values)
+            elif statistic == "majority":
+                counts: dict[float, int] = {}
+                for value in values:
+                    counts[value] = counts.get(value, 0) + 1
+                output[r][c] = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
+            else:
+                raise ValueError(f"unsupported focal statistic: {statistic}")
+    return output
+
+
+def block_statistics(
+    grid: list[list[float]],
+    *,
+    block_rows: int = 2,
+    block_cols: int = 2,
+    statistic: str = "mean",
+) -> list[list[float]]:
+    """Apply a non-overlapping block statistic across a raster grid."""
+    if block_rows < 1 or block_cols < 1:
+        raise ValueError("block_rows and block_cols must be positive")
+    rows = len(grid)
+    cols = len(grid[0]) if grid else 0
+    output: list[list[float]] = [[0.0] * cols for _ in range(rows)]
+    for start_row in range(0, rows, block_rows):
+        for start_col in range(0, cols, block_cols):
+            values = [
+                float(grid[r][c])
+                for r in range(start_row, min(rows, start_row + block_rows))
+                for c in range(start_col, min(cols, start_col + block_cols))
+            ]
+            if statistic == "mean":
+                block_value = sum(values) / len(values)
+            elif statistic == "sum":
+                block_value = sum(values)
+            elif statistic == "max":
+                block_value = max(values)
+            elif statistic == "min":
+                block_value = min(values)
+            else:
+                raise ValueError(f"unsupported block statistic: {statistic}")
+            for r in range(start_row, min(rows, start_row + block_rows)):
+                for c in range(start_col, min(cols, start_col + block_cols)):
+                    output[r][c] = block_value
+    return output
+
+
+def majority_filter(grid: list[list[float]], *, size: int = 3) -> list[list[float]]:
+    """Smooth categorical rasters with a majority neighborhood filter."""
+    return focal_statistics(grid, size=size, statistic="majority")
 
 
 def ndvi(red_band: list[list[float]], nir_band: list[list[float]]) -> list[list[float]]:

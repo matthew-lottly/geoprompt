@@ -735,7 +735,14 @@ def geometry_boundary(geometry: Geometry) -> Geometry:
 
 def translate_geometry(geometry: Geometry, dx: float = 0.0, dy: float = 0.0) -> Geometry:
     """Translate a geometry by the given offset."""
-    return transform_geometry(geometry, lambda coord: (coord[0] + float(dx), coord[1] + float(dy)))
+    return transform_geometry(
+        geometry,
+        lambda coord: (
+            coord[0] + float(dx),
+            coord[1] + float(dy),
+            *coord[2:],
+        ),
+    )
 
 
 def geometry_union_all(geometries: Sequence[Geometry]) -> Geometry:
@@ -807,7 +814,11 @@ def scale_geometry(
     x_scale = float(xfact)
     return transform_geometry(
         geometry,
-        lambda coord: (ox + ((coord[0] - ox) * x_scale), oy + ((coord[1] - oy) * y_scale)),
+        lambda coord: (
+            ox + ((coord[0] - ox) * x_scale),
+            oy + ((coord[1] - oy) * y_scale),
+            *coord[2:],
+        ),
     )
 
 
@@ -829,6 +840,7 @@ def rotate_geometry(
         return (
             ox + (tx * cos_a) - (ty * sin_a),
             oy + (tx * sin_a) + (ty * cos_a),
+            *coord[2:],
         )
 
     return transform_geometry(geometry, _rotate)
@@ -852,6 +864,7 @@ def skew_geometry(
         return (
             ox + tx + (tan_x * ty),
             oy + ty + (tan_y * tx),
+            *coord[2:],
         )
 
     return transform_geometry(geometry, _skew)
@@ -5682,11 +5695,11 @@ def affine_transform(geometry: Geometry, matrix: Sequence[float]) -> Geometry:
 
         def _transform_2d(c: Coordinate) -> Coordinate:
             x, y = float(c[0]), float(c[1])
-            return (a * x + b * y + xoff, d * x + e * y + yoff)  # type: ignore[return-value]
+            return (a * x + b * y + xoff, d * x + e * y + yoff, *c[2:])  # type: ignore[return-value]
 
         transform_fn = _transform_2d
     elif len(mat) == 12:
-        a, b, c_coef, d, e, f, g, h, i_coef, xoff, yoff, zoff = mat
+        a, b, c_coef, d, e, f, g_coef, h_coef, i_coef, xoff, yoff, zoff = mat
 
         def _transform_3d(c: Coordinate) -> Coordinate:  # type: ignore[misc]
             x, y = float(c[0]), float(c[1])
@@ -5694,7 +5707,8 @@ def affine_transform(geometry: Geometry, matrix: Sequence[float]) -> Geometry:
             return (  # type: ignore[return-value]
                 a * x + b * y + c_coef * z + xoff,
                 d * x + e * y + f * z + yoff,
-                g * x + h * y + i_coef * z + zoff,
+                g_coef * x + h_coef * y + i_coef * z + zoff,
+                *c[3:],
             )
 
         transform_fn = _transform_3d  # type: ignore[assignment]

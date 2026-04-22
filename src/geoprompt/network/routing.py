@@ -306,6 +306,98 @@ def time_dependent_shortest_path(
     return result
 
 
+def apply_live_traffic_overrides(
+    graph: NetworkGraph,
+    traffic_feed: dict[str, Any],
+    *,
+    factor_field: str = "speed_factor",
+    delay_field: str = "delay",
+    default_multiplier: float = 1.0,
+) -> dict[str, float]:
+    """Build edge-cost overrides from a live traffic feed."""
+    overrides: dict[str, float] = {}
+    for edge_id, edge in graph.edge_attributes.items():
+        base_cost = float(edge.get("cost", edge.get("length", 1.0)))
+        payload = traffic_feed.get(edge_id)
+        if payload is None:
+            overrides[edge_id] = base_cost * float(default_multiplier)
+            continue
+        if isinstance(payload, (int, float)):
+            factor = _as_non_negative(payload, f"traffic_feed[{edge_id}]")
+            overrides[edge_id] = base_cost * factor
+            continue
+        if isinstance(payload, dict):
+            factor = _as_non_negative(payload.get(factor_field, default_multiplier), factor_field)
+            delay = _as_non_negative(payload.get(delay_field, 0.0), delay_field)
+            overrides[edge_id] = (base_cost * factor) + delay
+            continue
+        overrides[edge_id] = base_cost
+    return overrides
+
+
+def live_traffic_shortest_path(
+    graph: NetworkGraph,
+    origin: str,
+    destination: str,
+    *,
+    traffic_feed: dict[str, Any],
+    max_cost: float | None = None,
+    blocked_edges: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Shortest path using edge costs derived from a live traffic feed."""
+    overrides = apply_live_traffic_overrides(graph, traffic_feed)
+    result = shortest_path(
+        graph,
+        origin=origin,
+        destination=destination,
+        max_cost=max_cost,
+        blocked_edges=blocked_edges,
+        edge_cost_overrides=overrides,
+    )
+    result["cost_mode"] = "live_traffic"
+    result["traffic_edge_count"] = len(traffic_feed)
+    return result
+
+
+def hierarchy_aware_shortest_path(
+    graph: NetworkGraph,
+    origin: str,
+    destination: str,
+    *,
+    hierarchy_field: str = "hierarchy",
+    preferred_values: Sequence[str] = ("highway", "motorway", "arterial", "primary", "secondary"),
+    preferred_factor: float = 0.8,
+    local_factor: float = 1.15,
+    max_cost: float | None = None,
+    blocked_edges: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Bias shortest-path routing toward preferred network hierarchy classes."""
+    preferred = {str(value).lower() for value in preferred_values}
+    overrides: dict[str, float] = {}
+    for edge_id, edge in graph.edge_attributes.items():
+        base_cost = float(edge.get("cost", edge.get("length", 1.0)))
+        raw_hierarchy = edge.get(hierarchy_field)
+        multiplier = local_factor
+        if isinstance(raw_hierarchy, str):
+            multiplier = preferred_factor if raw_hierarchy.lower() in preferred else local_factor
+        elif isinstance(raw_hierarchy, (int, float)):
+            rank = max(1.0, float(raw_hierarchy))
+            multiplier = max(preferred_factor, local_factor - (0.1 * (rank - 1.0)))
+        overrides[edge_id] = base_cost * multiplier
+
+    result = shortest_path(
+        graph,
+        origin=origin,
+        destination=destination,
+        max_cost=max_cost,
+        blocked_edges=blocked_edges,
+        edge_cost_overrides=overrides,
+    )
+    result["cost_mode"] = "hierarchy_aware"
+    result["hierarchy_field"] = hierarchy_field
+    return result
+
+
 def multimodal_shortest_path(
     graph: NetworkGraph,
     origin: str,
@@ -314,6 +406,8 @@ def multimodal_shortest_path(
     allowed_modes: Sequence[str] | None = None,
     transfer_penalty: float = 0.0,
     turn_restrictions: Sequence[tuple[str, str]] | None = None,
+    curb_approach: str = "either",
+    allow_u_turns: bool = True,
     max_cost: float | None = None,
     blocked_edges: Sequence[str] | None = None,
 ) -> dict[str, Any]:
@@ -328,6 +422,9 @@ def multimodal_shortest_path(
     allowed = None if allowed_modes is None else {str(mode).lower() for mode in allowed_modes}
     forbidden_turns = {(str(prev_edge), str(next_edge)) for prev_edge, next_edge in (turn_restrictions or [])}
     blocked = set(blocked_edges or [])
+    required_approach = str(curb_approach).lower()
+    if required_approach not in {"either", "left", "right"}:
+        raise ValueError("curb_approach must be 'either', 'left', or 'right'")
 
     start_state = (origin, None, None)
     distances: dict[tuple[str, str | None, str | None], float] = {start_state: 0.0}
@@ -349,12 +446,18 @@ def multimodal_shortest_path(
         for step in graph.adjacency.get(node, []):
             if step.edge_id in blocked:
                 continue
+            if not allow_u_turns and prev_edge is not None and step.edge_id == prev_edge:
+                continue
             edge = graph.edge_attributes.get(step.edge_id, {})
             mode = str(edge.get("mode", "road")).lower()
             if allowed is not None and mode not in allowed:
                 continue
             if prev_edge is not None and (prev_edge, step.edge_id) in forbidden_turns:
                 continue
+            if step.to_node == destination and required_approach != "either":
+                edge_approach = str(edge.get("approach_side", "either")).lower()
+                if edge_approach not in {"either", required_approach}:
+                    continue
 
             step_cost = float(step.cost) + float(edge.get("turn_penalty", 0.0))
             if prev_mode is not None and mode != prev_mode:
@@ -412,6 +515,8 @@ def multimodal_shortest_path(
         "cost_mode": "multimodal",
         "transfer_penalty": float(transfer_penalty),
         "turn_restriction_count": len(forbidden_turns),
+        "curb_approach": required_approach,
+        "allow_u_turns": bool(allow_u_turns),
     }
 
 
@@ -517,6 +622,9 @@ __all__ = [
     "shortest_path",
     "service_area",
     "edge_impedance_cost",
+    "apply_live_traffic_overrides",
+    "live_traffic_shortest_path",
+    "hierarchy_aware_shortest_path",
     "multimodal_shortest_path",
     "multi_criteria_shortest_path",
     "time_dependent_shortest_path",
