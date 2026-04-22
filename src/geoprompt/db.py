@@ -24,6 +24,7 @@ def read_postgis(
     connection_string: str,
     geometry_column: str = "geom",
     crs: str | None = None,
+    crs_column: str | None = None,
 ) -> list[Record]:
     """Read spatial data from a PostGIS query.
 
@@ -35,6 +36,7 @@ def read_postgis(
             (e.g. ``"postgresql://user:pass@host/dbname"``).
         geometry_column: Name of the geometry column in the result set.
         crs: Optional CRS string to attach to results.
+        crs_column: Optional result-column name containing per-row CRS/SRID.
 
     Returns:
         List of row dicts suitable for :class:`~geoprompt.frame.GeoPromptFrame`.
@@ -51,8 +53,12 @@ def read_postgis(
             for col, val in zip(columns, db_row):
                 if col == geometry_column:
                     row_dict["geometry"] = _parse_postgis_geometry(val)
+                elif crs_column is not None and col == crs_column:
+                    row_dict["crs"] = val
                 else:
                     row_dict[col] = val
+            if crs is not None:
+                row_dict["crs"] = crs
             rows.append(row_dict)
 
     return rows
@@ -65,6 +71,8 @@ def write_postgis(
     geometry_column: str = "geometry",
     srid: int = 4326,
     if_exists: str = "replace",
+    create_spatial_index: bool = True,
+    batch_size: int = 500,
 ) -> int:
     """Write records to a PostGIS table.
 
@@ -78,6 +86,8 @@ def write_postgis(
         geometry_column: Name of the geometry key in the records.
         srid: Spatial reference ID for the geometry column.
         if_exists: ``"replace"`` (drop and recreate) or ``"append"``.
+        create_spatial_index: Create a GiST index on the geometry column.
+        batch_size: Number of rows to write per batch.
 
     Returns:
         Number of rows written.
@@ -87,6 +97,11 @@ def write_postgis(
 
     sa = importlib.import_module("sqlalchemy")
     engine = sa.create_engine(connection_string)
+
+    if if_exists not in {"replace", "append"}:
+        raise ValueError("if_exists must be 'replace' or 'append'")
+    if batch_size <= 0:
+        raise ValueError("batch_size must be >= 1")
 
     non_geom_cols = [k for k in records[0] if k != geometry_column]
 
@@ -98,17 +113,30 @@ def write_postgis(
                 f"CREATE TABLE {table_name} ({col_defs}, {geometry_column} geometry(Geometry, {srid}))"
             ))
 
+        cols = ", ".join(non_geom_cols + [geometry_column])
+        placeholders = ", ".join(f":{col}" for col in non_geom_cols)
+        insert_sql = (
+            f"INSERT INTO {table_name} ({cols}) "
+            f"VALUES ({placeholders}, ST_SetSRID(ST_GeomFromGeoJSON(:__geom__), {srid}))"
+        )
+        stmt = sa.text(insert_sql)
+
+        batch: list[dict[str, Any]] = []
         for record in records:
-            geojson_str = json.dumps(_geometry_to_geojson(record[geometry_column]))
             values = {col: str(record.get(col, "")) for col in non_geom_cols}
-            cols = ", ".join(non_geom_cols + [geometry_column])
-            placeholders = ", ".join(f":{col}" for col in non_geom_cols)
-            values["__geom__"] = geojson_str
-            insert_sql = (
-                f"INSERT INTO {table_name} ({cols}) "
-                f"VALUES ({placeholders}, ST_SetSRID(ST_GeomFromGeoJSON(:__geom__), {srid}))"
-            )
-            conn.execute(sa.text(insert_sql), values)
+            values["__geom__"] = json.dumps(_geometry_to_geojson(record[geometry_column]))
+            batch.append(values)
+            if len(batch) >= batch_size:
+                conn.execute(stmt, batch)
+                batch = []
+        if batch:
+            conn.execute(stmt, batch)
+
+        if create_spatial_index:
+            conn.execute(sa.text(
+                f"CREATE INDEX IF NOT EXISTS {table_name}_{geometry_column}_gist "
+                f"ON {table_name} USING GIST ({geometry_column})"
+            ))
 
     return len(records)
 
@@ -202,7 +230,7 @@ def write_duckdb(
 
 def read_spatialite(
     query: str,
-    database: str,
+    database: str | None,
     geometry_column: str = "geometry",
 ) -> list[Record]:
     """Read rows from a SQLite or SpatiaLite-style database.
@@ -211,7 +239,7 @@ def read_spatialite(
     """
     import sqlite3
 
-    conn = sqlite3.connect(database)
+    conn = sqlite3.connect(database or ":memory:")
     try:
         cursor = conn.execute(query)
         columns = [desc[0] for desc in cursor.description]
@@ -232,9 +260,12 @@ def read_spatialite(
 def write_spatialite(
     records: Sequence[Record],
     table_name: str,
-    database: str,
+    database: str | None,
     geometry_column: str = "geometry",
     if_exists: str = "replace",
+    create_spatial_index: bool = True,
+    create_metadata_table: bool = True,
+    srid: int = 4326,
 ) -> int:
     """Write rows to a SQLite or SpatiaLite-style database using WKT text."""
     if not records:
@@ -242,14 +273,27 @@ def write_spatialite(
 
     import sqlite3
 
-    conn = sqlite3.connect(database)
+    conn = sqlite3.connect(database or ":memory:")
     try:
+        if if_exists not in {"replace", "append"}:
+            raise ValueError("if_exists must be 'replace' or 'append'")
         non_geom_cols = [k for k in records[0] if k != geometry_column]
         with conn:
             if if_exists == "replace":
                 conn.execute(f"DROP TABLE IF EXISTS {table_name}")
                 col_defs = ", ".join(f'"{col}" TEXT' for col in non_geom_cols)
                 conn.execute(f"CREATE TABLE {table_name} ({col_defs}, " + geometry_column + " TEXT)")
+
+            if create_metadata_table:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS geoprompt_spatial_metadata "
+                    "(table_name TEXT PRIMARY KEY, geometry_column TEXT, srid INTEGER)"
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO geoprompt_spatial_metadata(table_name, geometry_column, srid) "
+                    "VALUES (?, ?, ?)",
+                    (table_name, geometry_column, srid),
+                )
 
             for record in records:
                 values = [str(record.get(col, "")) for col in non_geom_cols]
@@ -258,6 +302,11 @@ def write_spatialite(
                 conn.execute(
                     f"INSERT INTO {table_name} VALUES ({placeholders})",
                     values + [wkt],
+                )
+            if create_spatial_index:
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table_name}_{geometry_column} "
+                    f"ON {table_name}({geometry_column})"
                 )
         return len(records)
     finally:

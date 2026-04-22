@@ -762,3 +762,203 @@ def trajectory_analysis(frame: _Any, *,
             "end_time": str(track_rows[-1].get(time_column, "")),
         })
     return results
+
+
+# ---------------------------------------------------------------------------
+# G13 additions — change point detection, temporal aggregation, temporal join
+# ---------------------------------------------------------------------------
+
+def change_point_detection(
+    series: Sequence[float],
+    *,
+    method: str = "cusum",
+    threshold: float | None = None,
+) -> Dict[str, Any]:
+    """Detect change points in a univariate time series.
+
+    Args:
+        series: Ordered sequence of numeric values.
+        method: ``"cusum"`` (cumulative sum) or ``"pelt"`` (binary segmentation
+            via PELT-lite — pure Python).
+        threshold: Detection sensitivity.  Lower values → more change points.
+            Defaults to 2× the standard deviation (CUSUM) or 10 (PELT).
+
+    Returns:
+        Dict with ``change_points`` (list of 0-based indices) and ``method``.
+    """
+    import math
+
+    vals = [float(v) for v in series]
+    n = len(vals)
+    if n < 3:
+        return {"change_points": [], "method": method, "n": n}
+
+    mu = sum(vals) / n
+    var = sum((v - mu) ** 2 for v in vals) / n
+    std = math.sqrt(var) if var > 0 else 1.0
+
+    if method == "cusum":
+        thr = threshold if threshold is not None else 2.0 * std
+        cusum_pos = [0.0]
+        cusum_neg = [0.0]
+        change_points: List[int] = []
+        for i, v in enumerate(vals):
+            cusum_pos.append(max(0.0, cusum_pos[-1] + (v - mu) - thr / 2))
+            cusum_neg.append(max(0.0, cusum_neg[-1] - (v - mu) - thr / 2))
+            if cusum_pos[-1] > thr or cusum_neg[-1] > thr:
+                change_points.append(i)
+                # Reset
+                cusum_pos[-1] = 0.0
+                cusum_neg[-1] = 0.0
+    else:
+        # PELT-lite: binary segmentation
+        thr = threshold if threshold is not None else 10.0
+
+        def _rss(seg: List[float]) -> float:
+            if not seg:
+                return 0.0
+            m = sum(seg) / len(seg)
+            return sum((v - m) ** 2 for v in seg)
+
+        def _binseg(lo: int, hi: int, pts: List[int]) -> None:
+            if hi - lo < 3:
+                return
+            best_gain, best_t = -1.0, -1
+            total = _rss(vals[lo:hi])
+            for t in range(lo + 1, hi - 1):
+                gain = total - _rss(vals[lo:t]) - _rss(vals[t:hi])
+                if gain > best_gain:
+                    best_gain, best_t = gain, t
+            if best_gain > thr:
+                pts.append(best_t)
+                _binseg(lo, best_t, pts)
+                _binseg(best_t, hi, pts)
+
+        change_points = []
+        _binseg(0, n, change_points)
+        change_points.sort()
+
+    return {"change_points": change_points, "method": method, "n": n}
+
+
+def temporal_aggregation(
+    events: Sequence[Dict[str, Any]],
+    *,
+    time_field: str = "t",
+    value_field: str = "value",
+    period: str = "day",
+    aggfunc: str = "sum",
+) -> List[Dict[str, Any]]:
+    """Aggregate a sequence of time-stamped events by calendar period.
+
+    Args:
+        events: Rows, each containing at least *time_field* and *value_field*.
+        time_field: Name of the ISO 8601 timestamp or numeric epoch field.
+        value_field: Name of the numeric value to aggregate.
+        period: ``"hour"``, ``"day"``, ``"week"``, ``"month"``, or ``"year"``.
+        aggfunc: ``"sum"``, ``"mean"``, ``"count"``, ``"min"``, ``"max"``.
+
+    Returns:
+        List of dicts ``{"period": str, "value": float}``, sorted by period.
+    """
+    from collections import defaultdict
+    import math
+
+    def _period_key(ts: Any) -> str:
+        s = str(ts)
+        if period == "hour":
+            return s[:13]
+        if period == "day":
+            return s[:10]
+        if period == "week":
+            # Crude: truncate to 7-day buckets using day-of-year
+            try:
+                parts = s[:10].split("-")
+                y, m, d = int(parts[0]), int(parts[1]), int(parts[2])
+                # Day of year (approximate)
+                doy = (m - 1) * 30 + d
+                week = (doy - 1) // 7
+                return f"{y}-W{week:02d}"
+            except Exception:
+                return s[:7]
+        if period == "month":
+            return s[:7]
+        if period == "year":
+            return s[:4]
+        return s[:10]
+
+    buckets: Dict[str, List[float]] = defaultdict(list)
+    for ev in events:
+        key = _period_key(ev.get(time_field, ""))
+        try:
+            val = float(ev.get(value_field, 0))
+        except (TypeError, ValueError):
+            val = 0.0
+        buckets[key].append(val)
+
+    def _agg(vals: List[float]) -> float:
+        if not vals:
+            return 0.0
+        if aggfunc == "sum":
+            return sum(vals)
+        if aggfunc == "mean":
+            return sum(vals) / len(vals)
+        if aggfunc == "count":
+            return float(len(vals))
+        if aggfunc == "min":
+            return min(vals)
+        if aggfunc == "max":
+            return max(vals)
+        return sum(vals)
+
+    return [
+        {"period": k, "value": _agg(v)}
+        for k, v in sorted(buckets.items())
+    ]
+
+
+def temporal_join_window(
+    left: Sequence[Dict[str, Any]],
+    right: Sequence[Dict[str, Any]],
+    *,
+    left_time_field: str = "t",
+    right_time_field: str = "t",
+    window: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """Join two event tables where timestamps are within *window* of each other.
+
+    Both tables should use numeric timestamps (e.g. POSIX epoch seconds).
+    String timestamps are converted to float via ``float()``; on failure they
+    fall back to 0.
+
+    Args:
+        left: Left table rows.
+        right: Right table rows.
+        left_time_field: Timestamp column in *left*.
+        right_time_field: Timestamp column in *right*.
+        window: Maximum absolute time difference to consider a match.
+
+    Returns:
+        List of merged dicts; unmatched left rows are included with
+        ``_right_matched = False``.
+    """
+    def _t(row: Dict[str, Any], field: str) -> float:
+        try:
+            return float(row.get(field, 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    results: List[Dict[str, Any]] = []
+    for lr in left:
+        lt = _t(lr, left_time_field)
+        matched = False
+        for rr in right:
+            rt = _t(rr, right_time_field)
+            if abs(lt - rt) <= window:
+                merged = {**rr, **lr, "_right_matched": True}
+                results.append(merged)
+                matched = True
+        if not matched:
+            results.append({**lr, "_right_matched": False})
+    return results
+

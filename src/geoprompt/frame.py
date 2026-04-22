@@ -15,7 +15,7 @@ from datetime import date, datetime
 from heapq import nlargest, nsmallest
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Iterable, Literal, Sequence
+from typing import Any, Callable, Iterable, Literal, Sequence
 
 from .equations import DistanceMethod, area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, repair_geometry, validate_geometry
@@ -136,26 +136,57 @@ class Bounds:
 class GeoPromptGeometryAccessor:
     """Pandas-like geometry accessor for row-wise geometry metrics."""
 
-    def __init__(self, frame: "GeoPromptFrame") -> None:
+    def __init__(self, frame: "GeoPromptFrame", geometry_column: str | None = None) -> None:
         self._frame = frame
+        self._geometry_column = geometry_column or frame.geometry_column
+        frame._require_column(self._geometry_column)
+
+    @property
+    def geometry_column(self) -> str:
+        """Column this accessor operates on."""
+        return self._geometry_column
+
+    def _geometry_values(self) -> list[Geometry]:
+        values: list[Geometry] = []
+        for row in self._frame:
+            value = row.get(self._geometry_column)
+            if value is None:
+                raise ValueError(f"geometry column '{self._geometry_column}' contains null values")
+            values.append(value)
+        return values
 
     def area(self) -> list[float]:
-        return [geometry_area(row[self._frame.geometry_column]) for row in self._frame]
+        return [geometry_area(geom) for geom in self._geometry_values()]
 
     def length(self) -> list[float]:
-        return [geometry_length(row[self._frame.geometry_column]) for row in self._frame]
+        return [geometry_length(geom) for geom in self._geometry_values()]
 
     def centroid(self) -> list[Coordinate]:
-        return [geometry_centroid(row[self._frame.geometry_column]) for row in self._frame]
+        return [geometry_centroid(geom) for geom in self._geometry_values()]
 
     def bounds(self) -> list[tuple[float, float, float, float]]:
-        return [geometry_bounds(row[self._frame.geometry_column]) for row in self._frame]
+        return [geometry_bounds(geom) for geom in self._geometry_values()]
 
     def validity(self) -> list[dict[str, object]]:
-        return [validate_geometry(row[self._frame.geometry_column]) for row in self._frame]
+        return [validate_geometry(geom) for geom in self._geometry_values()]
 
     def types(self) -> list[str]:
-        return [geometry_type(row[self._frame.geometry_column]) for row in self._frame]
+        return [geometry_type(geom) for geom in self._geometry_values()]
+
+    def buffer(self, distance: float, resolution: int = 16) -> "GeoPromptFrame":
+        """Buffer geometries in this accessor column and return an updated frame."""
+        buffered_groups = buffer_geometries(
+            self._geometry_values(),
+            distance=distance,
+            resolution=resolution,
+        )
+        rows: list[Record] = []
+        for row, buffered_geometries in _zip_strict(self._frame._rows, buffered_groups):
+            for buffered_geometry in buffered_geometries:
+                buffered_row = dict(row)
+                buffered_row[self._geometry_column] = buffered_geometry
+                rows.append(buffered_row)
+        return self._frame._clone_with_rows(rows)
 
 
 class GeoPromptCoordinateIndexer:
@@ -249,6 +280,79 @@ class GeoPromptDateTimeAccessor:
 
     def weekday(self, column: str, *, new_column: str | None = None) -> "GeoPromptFrame":
         return self._apply(column, lambda value: value.weekday(), new_column=new_column)
+
+
+class GeoPromptStyleAccessor:
+    """Minimal style accessor for HTML-oriented analyst reporting workflows."""
+
+    def __init__(self, frame: "GeoPromptFrame") -> None:
+        self._frame = frame
+        self._formats: dict[str, Callable[[Any], str]] = {}
+        self._cell_styles: dict[tuple[int, str], str] = {}
+
+    def format(self, formatter: dict[str, Any] | Callable[[Any], Any]) -> "GeoPromptStyleAccessor":
+        if callable(formatter):
+            for column in self._frame.columns:
+                if column != self._frame.geometry_column:
+                    self._formats[column] = lambda value, func=formatter: "" if value is None else str(func(value))
+            return self
+
+        for column, func in formatter.items():
+            if callable(func):
+                self._formats[column] = lambda value, inner=func: "" if value is None else str(inner(value))
+            else:
+                self._formats[column] = lambda value, fmt=func: "" if value is None else format(value, fmt)
+        return self
+
+    def highlight_max(self, subset: Sequence[str] | None = None, color: str = "#fff3b0") -> "GeoPromptStyleAccessor":
+        return self._highlight_extrema(subset=subset, color=color, highest=True)
+
+    def highlight_min(self, subset: Sequence[str] | None = None, color: str = "#d9f2e6") -> "GeoPromptStyleAccessor":
+        return self._highlight_extrema(subset=subset, color=color, highest=False)
+
+    def _highlight_extrema(
+        self,
+        *,
+        subset: Sequence[str] | None,
+        color: str,
+        highest: bool,
+    ) -> "GeoPromptStyleAccessor":
+        columns = list(subset) if subset is not None else [c for c in self._frame.columns if c != self._frame.geometry_column]
+        for column in columns:
+            numeric_values = [
+                (index, row.get(column))
+                for index, row in enumerate(self._frame._rows)
+                if isinstance(row.get(column), (int, float))
+            ]
+            if not numeric_values:
+                continue
+            target = max(value for _, value in numeric_values) if highest else min(value for _, value in numeric_values)
+            for index, value in numeric_values:
+                if value == target:
+                    self._cell_styles[(index, column)] = f"background-color: {color};"
+        return self
+
+    def to_html(self, columns: list[str] | None = None) -> str:
+        import html as _html
+
+        cols = columns or [c for c in self._frame.columns if c != self._frame.geometry_column]
+        rows_html = [
+            "<table border='1'>",
+            "<thead><tr>" + "".join(f"<th>{_html.escape(c)}</th>" for c in cols) + "</tr></thead>",
+            "<tbody>",
+        ]
+        for row_index, row in enumerate(self._frame._rows):
+            cells: list[str] = []
+            for column in cols:
+                raw_value = row.get(column, "")
+                formatter = self._formats.get(column)
+                value = formatter(raw_value) if formatter is not None else ("" if raw_value is None else str(raw_value))
+                style = self._cell_styles.get((row_index, column), "")
+                style_attr = f" style='{_html.escape(style)}'" if style else ""
+                cells.append(f"<td{style_attr}>{_html.escape(value)}</td>")
+            rows_html.append(f"<tr>{''.join(cells)}</tr>")
+        rows_html += ["</tbody></table>"]
+        return "\n".join(rows_html)
 
 
 def _compile_frame_query(expression: str) -> Any:
@@ -568,6 +672,10 @@ class GeoPromptFrame:
         """Return a geometry accessor for row-wise geometry metrics and validation."""
         return GeoPromptGeometryAccessor(self)
 
+    def geometry(self, column: str | None = None) -> GeoPromptGeometryAccessor:
+        """Return a geometry accessor bound to ``column`` (or active geometry)."""
+        return GeoPromptGeometryAccessor(self, geometry_column=column or self.geometry_column)
+
     @property
     def str(self) -> GeoPromptStringAccessor:
         """Return a string accessor for Pandas-like cleanup workflows."""
@@ -577,6 +685,11 @@ class GeoPromptFrame:
     def dt(self) -> GeoPromptDateTimeAccessor:
         """Return a datetime accessor for analyst time-derived columns."""
         return GeoPromptDateTimeAccessor(self)
+
+    @property
+    def style(self) -> GeoPromptStyleAccessor:
+        """Return a minimal style accessor for conditional HTML formatting."""
+        return GeoPromptStyleAccessor(self)
 
     @property
     def spatial_index(self) -> GeoPromptSpatialIndex | None:
@@ -889,6 +1002,250 @@ class GeoPromptFrame:
             if bool(eval(compiled, safe_globals, dict(row)))  # noqa: S307
         ]
         return self._clone_with_rows(rows)
+
+
+    def clip_values(self, columns: str | Sequence[str], min_val: float | None = None, max_val: float | None = None) -> "GeoPromptFrame":
+        """Clip (limit) values in specified columns to [min_val, max_val] bounds.
+
+        Args:
+            columns: Column name(s) to clip.
+            min_val: Minimum value (values below are replaced).
+            max_val: Maximum value (values above are replaced).
+            
+        Returns:
+            New GeoPromptFrame with values clipped.
+        """
+        if isinstance(columns, str):
+            columns = [columns]
+        else:
+            columns = list(columns)
+        
+        rows: list[Record] = []
+        for row in self._rows:
+            new_row = dict(row)
+            for col in columns:
+                if col in new_row and new_row[col] is not None:
+                    val = new_row[col]
+                    if isinstance(val, (int, float)):
+                        if min_val is not None:
+                            val = max(val, min_val)
+                        if max_val is not None:
+                            val = min(val, max_val)
+                        new_row[col] = val
+            rows.append(new_row)
+        return self._clone_with_rows(rows)
+
+    def applymap(self, func: Callable[[Any], Any]) -> "GeoPromptFrame":
+        """Apply function element-wise to all values (except geometry).
+
+        Args:
+            func: Function to apply to each element.
+            
+        Returns:
+            New GeoPromptFrame with func applied element-wise.
+        """
+        rows: list[Record] = []
+        for row in self._rows:
+            new_row = {}
+            for key, val in row.items():
+                if key == 'geometry' or val is None:
+                    new_row[key] = val
+                else:
+                    try:
+                        new_row[key] = func(val)
+                    except Exception:
+                        new_row[key] = val
+            rows.append(new_row)
+        return self._clone_with_rows(rows)
+
+    def map(self, func: Callable[[Any], Any]) -> "GeoPromptFrame":
+        """Alias for applymap() for pandas compatibility."""
+        return self.applymap(func)
+
+    @property
+    def row_bounds(self) -> list[dict[str, float]]:
+        """Return per-row bounds as list of dicts with minx, miny, maxx, maxy keys."""
+        bounds_list = []
+        for row in self._rows:
+            geom = row.get('geometry')
+            if geom is None:
+                bounds_list.append({'minx': None, 'miny': None, 'maxx': None, 'maxy': None})
+            else:
+                try:
+                    from .geometry import geometry_bounds
+                    minx, miny, maxx, maxy = geometry_bounds(geom)
+                    bounds_list.append({'minx': minx, 'miny': miny, 'maxx': maxx, 'maxy': maxy})
+                except Exception:
+                    bounds_list.append({'minx': None, 'miny': None, 'maxx': None, 'maxy': None})
+        return bounds_list
+
+    def mask(self, cond: Any | None = None, other: Any = None) -> "GeoPromptFrame":
+        """Replace values where condition is True with other (default: None/NA).
+        
+        Inverse of where(). Replaces True values in condition with other.
+        
+        Args:
+            cond: Boolean mask (list/callable) where True indicates replacement positions.
+            other: Value to replace with. Defaults to None.
+            
+        Returns:
+            New GeoPromptFrame with conditional replacement applied.
+        """
+        mask_values: list[bool] | None = None
+        if cond is not None and not callable(cond):
+            if not isinstance(cond, (list, tuple)):
+                raise TypeError("cond must be a callable or boolean mask sequence")
+            if len(cond) != len(self._rows):
+                raise ValueError("boolean mask length must match the number of rows")
+            mask_values = [bool(value) for value in cond]
+        
+        rows: list[Record] = []
+        for index, row in enumerate(self._rows):
+            new_row = dict(row)
+            
+            # Determine if this row should have values replaced
+            should_mask = False
+            if mask_values is not None:
+                should_mask = mask_values[index]
+            elif callable(cond):
+                should_mask = bool(cond(row))
+            
+            if should_mask:
+                # Replace all non-geometry values with other
+                for key in new_row:
+                    if key != 'geometry':
+                        new_row[key] = other
+            
+            rows.append(new_row)
+        return self._clone_with_rows(rows)
+
+    def resample(self, freq: str, on: str | None = None, agg: str | Callable | dict | None = None) -> "GeoPromptFrame":
+        """Resample time-series data to a different frequency.
+        
+        Groups rows by time bucket (freq) and optionally aggregates values.
+        
+        Args:
+            freq: Frequency string ('D'=daily, 'H'=hourly, 'W'=weekly, 'M'=monthly, etc).
+            on: Column name for time bucketing. If None, uses first datetime column.
+            agg: Aggregation function ('mean', 'sum', 'first', 'last', etc) or callable.
+            
+        Returns:
+            New GeoPromptFrame with resampled data.
+        """
+        from datetime import datetime, timedelta
+        
+        # Find datetime column if not specified
+        if on is None:
+            for col in self.columns:
+                if col != 'geometry':
+                    if self and isinstance(self[0].get(col), datetime):
+                        on = col
+                        break
+            if on is None:
+                raise ValueError("No datetime column found. Specify 'on' parameter.")
+        
+        if on not in self.columns:
+            raise ValueError(f"Column '{on}' not found in frame")
+        
+        # Parse frequency string to timedelta
+        freq_char = freq[-1].upper()
+        freq_count = int(freq[:-1]) if len(freq) > 1 else 1
+        
+        freq_map = {
+            'S': timedelta(seconds=freq_count),
+            'T': timedelta(minutes=freq_count),
+            'H': timedelta(hours=freq_count),
+            'D': timedelta(days=freq_count),
+            'W': timedelta(weeks=freq_count),
+            'M': timedelta(days=30*freq_count),
+            'Y': timedelta(days=365*freq_count),
+        }
+        
+        if freq_char not in freq_map:
+            raise ValueError(f"Unknown frequency: {freq}")
+        
+        bucket_size = freq_map[freq_char]
+        
+        # Group rows by time bucket
+        if not self:
+            return self._clone_with_rows([])
+        
+        buckets: dict[int, list[Record]] = {}
+        min_time = None
+        
+        for row in self._rows:
+            ts = row.get(on)
+            if not isinstance(ts, datetime):
+                continue
+            
+            if min_time is None:
+                min_time = ts
+            
+            bucket_idx = int((ts - min_time) / bucket_size)
+            if bucket_idx not in buckets:
+                buckets[bucket_idx] = []
+            buckets[bucket_idx].append(row)
+        
+        if not buckets:
+            return self._clone_with_rows([])
+        
+        # Create resampled rows
+        rows: list[Record] = []
+        for bucket_idx in sorted(buckets.keys()):
+            bucket_rows = buckets[bucket_idx]
+            if not bucket_rows:
+                continue
+            
+            # Create aggregated row
+            agg_row: Record = {}
+            
+            # Handle timestamp
+            agg_row[on] = bucket_rows[0].get(on)
+            
+            # Aggregate other columns
+            for col in self.columns:
+                if col == on or col == 'geometry':
+                    continue
+                
+                values = [row.get(col) for row in bucket_rows if row.get(col) is not None]
+                
+                if not values:
+                    agg_row[col] = None
+                elif callable(agg):
+                    agg_row[col] = agg(values)
+                elif isinstance(agg, str):
+                    if agg == 'mean':
+                        numeric_vals = [v for v in values if isinstance(v, (int, float))]
+                        agg_row[col] = sum(numeric_vals) / len(numeric_vals) if numeric_vals else None
+                    elif agg == 'sum':
+                        numeric_vals = [v for v in values if isinstance(v, (int, float))]
+                        agg_row[col] = sum(numeric_vals) if numeric_vals else None
+                    elif agg == 'count':
+                        agg_row[col] = len(values)
+                    elif agg == 'first':
+                        agg_row[col] = values[0]
+                    elif agg == 'last':
+                        agg_row[col] = values[-1]
+                    elif agg == 'min':
+                        numeric_vals = [v for v in values if isinstance(v, (int, float))]
+                        agg_row[col] = min(numeric_vals) if numeric_vals else None
+                    elif agg == 'max':
+                        numeric_vals = [v for v in values if isinstance(v, (int, float))]
+                        agg_row[col] = max(numeric_vals) if numeric_vals else None
+                    else:
+                        agg_row[col] = values[0]
+                else:
+                    agg_row[col] = values[0]
+            
+            # Preserve geometry from first row if present
+            if 'geometry' in bucket_rows[0]:
+                agg_row['geometry'] = bucket_rows[0]['geometry']
+            
+            rows.append(agg_row)
+        
+        return self._clone_with_rows(rows)
+
+
 
     def sort_values(self, by: str, descending: bool = False) -> "GeoPromptFrame":
         """Return a new frame sorted by a column, with nulls placed last."""
@@ -2354,6 +2711,24 @@ class GeoPromptFrame:
         self._spatial_index = GeoPromptSpatialIndex.from_frame(self, cell_size=cell_size)
         return self._spatial_index
 
+    def set_geometry(self, column: str, *, validate: bool = True) -> "GeoPromptFrame":
+        """Switch the active geometry column while keeping all geometry columns in rows.
+
+        This enables workflows with multiple geometry columns (for example
+        ``origin_geom`` and ``dest_geom``) by changing which geometry column is
+        treated as active for frame-level spatial operations.
+        """
+        self._require_column(column)
+        rows: list[Record] = []
+        for row in self._rows:
+            if column not in row:
+                raise KeyError(f"column '{column}' is not present in one or more rows")
+            updated = dict(row)
+            if validate and updated[column] is not None:
+                updated[column] = normalize_geometry(updated[column])
+            rows.append(updated)
+        return self._clone_with_rows(rows, geometry_column=column)
+
     def _require_column(self, name: str) -> None:
         if name not in self.columns:
             available = ", ".join(self.columns) if self.columns else "(no columns available)"
@@ -2807,6 +3182,25 @@ class GeoPromptFrame:
         for col in group_columns:
             self._require_column(col)
         return GroupedGeoPromptFrame(self._rows, group_columns, self.geometry_column, self.crs)
+
+    def agg(self, aggregations: dict[str, str | Sequence[str]]) -> "GeoPromptFrame":
+        """Aggregate the full frame into a single summary row."""
+        from .table import _apply_aggregation
+
+        summary: Record = {"row_count": len(self._rows)}
+        if self._rows:
+            summary[self.geometry_column] = self._rows[0].get(self.geometry_column)
+        for column, ops in aggregations.items():
+            self._require_column(column)
+            op_list = [ops] if isinstance(ops, str) else list(ops)
+            values = [row.get(column) for row in self._rows if column in row]
+            for op in op_list:
+                summary[f"{column}_{op}"] = _apply_aggregation(values, op)
+        return GeoPromptFrame._from_internal_rows([summary], geometry_column=self.geometry_column, crs=self.crs)
+
+    def aggregate(self, aggregations: dict[str, str | Sequence[str]]) -> "GeoPromptFrame":
+        """Alias for :meth:`agg` for pandas-style parity."""
+        return self.agg(aggregations)
 
     def stack(
         self,
@@ -4068,6 +4462,12 @@ class GeoPromptFrame:
             cursor.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders})', vals)  # noqa: S608
         connection.commit()
 
+    def to_file(self, path: str | Path, **kwargs: Any) -> Path:
+        """Write this frame using extension-based format auto-detection."""
+        from .io import write_data
+
+        return write_data(path, self, **kwargs)
+
     def memory_usage(self, deep: bool = False) -> dict[str, int]:
         """Return an estimated memory usage in bytes for each column."""
         import sys
@@ -4428,6 +4828,16 @@ class GroupedGeoPromptFrame:
         self._geometry_column = geometry_column
         self._crs = crs
 
+    def _group_items(self) -> list[tuple[tuple[Any, ...], list[Record]]]:
+        grouped: dict[tuple[Any, ...], list[Record]] = {}
+        for row in self._rows:
+            key = tuple(row.get(col) for col in self._group_columns)
+            grouped.setdefault(key, []).append(dict(row))
+        return list(grouped.items())
+
+    def _group_frame(self, rows: Sequence[Record]) -> GeoPromptFrame:
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
     def agg(self, aggregations: dict[str, str | Sequence[str]]) -> "GeoPromptFrame":
         """Aggregate each group and return a new :class:`GeoPromptFrame`.
 
@@ -4441,13 +4851,8 @@ class GroupedGeoPromptFrame:
         """
         from .table import _apply_aggregation
 
-        grouped: dict[tuple[Any, ...], list[Record]] = {}
-        for row in self._rows:
-            key = tuple(row.get(col) for col in self._group_columns)
-            grouped.setdefault(key, []).append(row)
-
         result_rows: list[Record] = []
-        for key, group_rows in grouped.items():
+        for key, group_rows in self._group_items():
             summary: Record = {col: val for col, val in zip(self._group_columns, key)}
             summary["row_count"] = len(group_rows)
             summary[self._geometry_column] = group_rows[0][self._geometry_column]
@@ -4461,6 +4866,113 @@ class GroupedGeoPromptFrame:
         return GeoPromptFrame._from_internal_rows(
             result_rows, geometry_column=self._geometry_column, crs=self._crs,
         )
+
+    def apply(self, func: Callable[[GeoPromptFrame], Any]) -> "GeoPromptFrame":
+        """Apply a callable to each group and combine results into a frame."""
+        result_rows: list[Record] = []
+        for key, group_rows in self._group_items():
+            group_frame = self._group_frame(group_rows)
+            result = func(group_frame)
+            if isinstance(result, GeoPromptFrame):
+                result_rows.extend(result.to_records())
+                continue
+            if isinstance(result, dict):
+                row = {col: val for col, val in zip(self._group_columns, key)}
+                row.update(result)
+                row.setdefault(self._geometry_column, group_rows[0].get(self._geometry_column))
+                result_rows.append(row)
+                continue
+            if isinstance(result, list) and all(isinstance(item, dict) for item in result):
+                result_rows.extend(dict(item) for item in result)
+                continue
+            row = {col: val for col, val in zip(self._group_columns, key)}
+            row["result"] = result
+            row[self._geometry_column] = group_rows[0].get(self._geometry_column)
+            result_rows.append(row)
+        return GeoPromptFrame._from_internal_rows(result_rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def transform(
+        self,
+        column: str | Callable[[list[Any]], Any],
+        func: Callable[[list[Any]], Any] | None = None,
+        *,
+        new_column: str | None = None,
+    ) -> "GeoPromptFrame":
+        """Transform grouped values and return a same-length frame."""
+        target_column: str | None
+        transform_func: Callable[[list[Any]], Any]
+        if callable(column) and func is None:
+            target_column = None
+            transform_func = column
+        else:
+            target_column = str(column)
+            transform_func = func if func is not None else (lambda values: values)
+
+        rows: list[Record] = []
+        output_column = new_column or (target_column if target_column is not None else "transform")
+        for _, group_rows in self._group_items():
+            values = group_rows if target_column is None else [row.get(target_column) for row in group_rows]
+            transformed = transform_func(values)
+            if isinstance(transformed, Sequence) and not isinstance(transformed, (str, bytes, dict)):
+                transformed_values = list(transformed)
+                if len(transformed_values) != len(group_rows):
+                    raise ValueError("transform must return a scalar or a sequence matching group length")
+            else:
+                transformed_values = [transformed] * len(group_rows)
+            for row, value in zip(group_rows, transformed_values):
+                new_row = dict(row)
+                new_row[output_column] = value
+                rows.append(new_row)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def filter(self, func: Callable[[GeoPromptFrame], bool]) -> "GeoPromptFrame":
+        """Keep only groups whose frame satisfies the predicate."""
+        rows: list[Record] = []
+        for _, group_rows in self._group_items():
+            if bool(func(self._group_frame(group_rows))):
+                rows.extend(dict(row) for row in group_rows)
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def first(self) -> "GeoPromptFrame":
+        """Return the first row from each group."""
+        rows = [dict(group_rows[0]) for _, group_rows in self._group_items() if group_rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def last(self) -> "GeoPromptFrame":
+        """Return the last row from each group."""
+        rows = [dict(group_rows[-1]) for _, group_rows in self._group_items() if group_rows]
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def nth(self, n: int) -> "GeoPromptFrame":
+        """Return the nth row from each group when present."""
+        rows: list[Record] = []
+        for _, group_rows in self._group_items():
+            index = n if n >= 0 else len(group_rows) + n
+            if 0 <= index < len(group_rows):
+                rows.append(dict(group_rows[index]))
+        return GeoPromptFrame._from_internal_rows(rows, geometry_column=self._geometry_column, crs=self._crs)
+
+    def cumcount(self) -> list[int]:
+        """Return per-row cumulative counts within each group."""
+        counts: dict[tuple[Any, ...], int] = {}
+        results: list[int] = []
+        for row in self._rows:
+            key = tuple(row.get(col) for col in self._group_columns)
+            current = counts.get(key, 0)
+            results.append(current)
+            counts[key] = current + 1
+        return results
+
+    def ngroup(self) -> list[int]:
+        """Return per-row dense group ids in original row order."""
+        labels: dict[tuple[Any, ...], int] = {}
+        results: list[int] = []
+        for row in self._rows:
+            key = tuple(row.get(col) for col in self._group_columns)
+            if key not in labels:
+                labels[key] = len(labels)
+            results.append(labels[key])
+        return results
 
 
 geopromptframe = GeoPromptFrame

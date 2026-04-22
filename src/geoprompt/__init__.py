@@ -52,6 +52,8 @@ from .crs import (
     state_plane_zone_auto_detect, utm_zone_for_lonlat,
     validate_crs_area_of_use, validate_crs_bounds, vertical_crs_from_epsg,
     vertical_transform, web_mercator_crs, xy_table_to_geographic_features,
+    # G4 CRS functions
+    estimate_utm_crs, list_crs, search_crs, ntv2_grid_shift,
 )
 from .crs_advanced import *  # noqa: F401,F403
 from .crs_advanced import __all__ as _CRS_ADVANCED_ALL
@@ -84,6 +86,10 @@ from .data_management import (
     transformer_chain, truncate_records, upsert_records,
     validate_domains, versioning_reconcile_post, versioning_register_unregister,
     write_excel_styled, write_metadata,
+    # G8 additions
+    add_field, delete_field, topology_validate, find_identical_features, near_table_multi,
+    describe_dataset, pivot_table, multipart_to_singlepart, singlepart_to_multipart,
+    feature_vertices_to_points, repair_geometry_full,
 )
 from .domain import (
     ada_ramp_inventory, agriculture_field_boundary, air_quality_network_design,
@@ -226,7 +232,14 @@ from .geometry import (geometry_area, geometry_boundary, geometry_bounds,
                       repair_geometry, representative_point,
                       rotate_geometry, scale_geometry, skew_geometry,
                       split_line_at_point, transform_geometry,
-                      translate_geometry, validate_geometry)
+                      translate_geometry, validate_geometry,
+                      # G1 additions
+                      offset_curve, concave_hull, minimum_rotated_rectangle,
+                      minimum_bounding_circle, force_2d, force_3d,
+                      voronoi_polygons, delaunay_triangulation, polygonize,
+                      line_merge, set_precision, get_precision,
+                      exterior_ring, get_interior_rings, boundary_geometry,
+                      normalize, line_project)
 from .geometry3d import *  # noqa: F401,F403
 from .geometry3d import __all__ as _GEOMETRY3D_ALL
 from .overlay import buffer_geometries, dissolve_geometries, geometry_from_shapely, geometry_to_geojson, geometry_to_shapely
@@ -236,12 +249,12 @@ from .io import (WORKLOAD_PRESETS, apply_field_aliases, apply_schema_mapping,
                  inspect_remote_dataset_metadata,
                  iter_csv_points, iter_data,
                  iter_data_with_preset, list_remote_dataset_entries, read_cloud_json, read_csv_points, read_data, read_data_with_preset,
-                 read_excel, read_features, read_geojson, read_geopackage,
+                 read_dxf, read_excel, read_features, read_file, read_feather, read_filegdb, read_flatgeobuf, read_geojson, read_geopackage,
                  read_geoparquet_metadata, read_points, read_stac_catalog,
-                 read_service_url, read_shapefile, read_table,
+                 read_service_url, read_shapefile, read_table, read_mapinfo_tab, read_osm_pbf, read_wfs,
                  read_zipped_shapefile,
                  schema_report, validate_schema,
-                 write_cloud_json, write_data, write_excel, write_geojson, write_geopackage,
+                 to_file, write_cloud_json, write_data, write_excel, write_feather, write_filegdb, write_flatgeobuf, write_geojson, write_geopackage,
                  write_geoparquet, write_json, write_shapefile)
 from .interop import (arrow_available, dataframe_protocol, from_arrow,
                       from_geopandas, from_pandas, from_polars,
@@ -418,7 +431,17 @@ from .stats import (adaptive_kernel_density, catchment_analysis,
                     scenario_comparison_engine, semivariogram, spatial_lag,
                     spatial_outliers, spatial_regression, spatial_weights_matrix,
                     spline_interpolation, suitability_model, territory_design,
-                    trend_surface, zonal_statistics_by_class)
+                    trend_surface, zonal_statistics_by_class,
+                    # G5 additions
+                    geary_c, ripley_k, ripley_l, clark_evans,
+                    anselin_local_morans_scatterplot, variogram_fit,
+                    spatial_lag_regression, spatial_error_regression,
+                    gwr, mgwr, spatial_outlier_lof,
+                    natural_neighbor_interpolation, tin_interpolation,
+                    # G5.2 classification breaks
+                    head_tail_breaks, fisher_jenks,
+                    maximum_breaks_classification, box_plot_classification,
+                    pretty_breaks_classification, percentile_classification)
 from .table import PromptTable, prompttable
 from .temporal import (EventTracker, animation_frames,
                        asset_criticality_ranking, capital_planning_prioritize,
@@ -688,13 +711,16 @@ __all__ = [
     "custom_crs_definition",
     "define_projection",
     "engineering_local_crs",
+    "estimate_utm_crs",
     "geodesic_area_on_ellipsoid",
     "geodesic_densify_line",
     "geodesic_distance",
     "geodesic_midpoint",
     "geographic_to_projected",
     "height_system_info",
+    "list_crs",
     "normalize_coordinate_order",
+    "ntv2_grid_shift",
     "parse_coordinate_text",
     "parse_utm_coordinate",
     "planetary_crs",
@@ -703,6 +729,7 @@ __all__ = [
     "projected_to_geographic",
     "resolve_crs_conflicts",
     "rhumb_line_distance",
+    "search_crs",
     "state_plane_zone_auto_detect",
     "utm_zone_for_lonlat",
     "validate_crs_area_of_use",
@@ -1135,17 +1162,24 @@ __all__ = [
     "read_csv_points",
     "read_data",
     "read_data_with_preset",
+    "read_dxf",
     "read_excel",
     "read_feather",
+    "read_file",
+    "read_filegdb",
     "read_features",
+    "read_flatgeobuf",
     "read_geojson",
     "read_geopackage",
     "read_geoparquet_metadata",
+    "read_mapinfo_tab",
+    "read_osm_pbf",
     "read_points",
     "read_stac_catalog",
     "read_service_url",
     "read_shapefile",
     "read_table",
+    "read_wfs",
     "read_zipped_shapefile",
     "schema_report",
     "validate_schema",
@@ -1153,6 +1187,8 @@ __all__ = [
     "write_data",
     "write_excel",
     "write_feather",
+    "write_filegdb",
+    "write_flatgeobuf",
     "write_geojson",
     "write_geopackage",
     "write_json",
@@ -1726,4 +1762,29 @@ __all__ = [
     "corridor_analysis",
     "graph_connectivity_metric",
     *_STANDARDS_ALL,
+    # G8 additions
+    "add_field", "delete_field", "topology_validate", "find_identical_features",
+    "near_table_multi", "describe_dataset", "pivot_table",
+    "multipart_to_singlepart", "singlepart_to_multipart",
+    "feature_vertices_to_points", "repair_geometry_full",
+    # G13 additions
+    "change_point_detection", "temporal_aggregation", "temporal_join_window",
+    "trajectory_analysis",
+    # G1 geometry additions
+    "offset_curve", "concave_hull", "minimum_rotated_rectangle",
+    "minimum_bounding_circle", "force_2d", "force_3d",
+    "voronoi_polygons", "delaunay_triangulation", "polygonize",
+    "line_merge", "set_precision", "get_precision",
+    "exterior_ring", "get_interior_rings", "boundary_geometry",
+    "normalize", "line_project",
+    # G5 stats additions
+    "geary_c", "ripley_k", "ripley_l", "clark_evans",
+    "anselin_local_morans_scatterplot", "variogram_fit",
+    "spatial_lag_regression", "spatial_error_regression",
+    "gwr", "mgwr", "spatial_outlier_lof",
+    "natural_neighbor_interpolation", "tin_interpolation",
+    # G5.2 classification breaks
+    "head_tail_breaks", "fisher_jenks",
+    "maximum_breaks_classification", "box_plot_classification",
+    "pretty_breaks_classification", "percentile_classification",
 ]

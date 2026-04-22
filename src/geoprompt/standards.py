@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import Any, Sequence
 
+from .quality import simulation_only
+
 
 def _write_json_artifact(path: str | Path, payload: Any) -> str:
     out = Path(path)
@@ -39,30 +41,37 @@ def ogc_geopackage_compliance(package_info: dict[str, Any]) -> dict[str, Any]:
     return {"compliant": bool(tables), "standard": "OGC GeoPackage", "table_count": len(tables)}
 
 
+@simulation_only("Implement a real FastAPI OGC API - Features endpoint using the pygeoapi or OWSLib library.")
 def ogc_api_features_implementation(features: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"service": "OGC API - Features", "feature_count": len(features), "status": "ready"}
 
 
+@simulation_only("Implement a real FastAPI OGC API - Processes endpoint.")
 def ogc_api_processes_implementation(processes: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"service": "OGC API - Processes", "process_count": len(processes), "status": "ready"}
 
 
+@simulation_only("Implement a real OGC API - Records endpoint backed by a spatial catalogue.")
 def ogc_api_records_implementation(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
     return {"service": "OGC API - Records", "record_count": len(records), "status": "ready"}
 
 
+@simulation_only("Implement real tile generation using mapbox/tippecanoe or Rio-COG.")
 def ogc_api_tiles_implementation(tiles: Sequence[Any]) -> dict[str, Any]:
     return {"service": "OGC API - Tiles", "tile_count": len(tiles), "status": "ready"}
 
 
+@simulation_only("Implement a real WMS map rendering endpoint via GDAL or MapServer.")
 def ogc_api_maps_implementation(map_name: str) -> dict[str, Any]:
     return {"service": "OGC API - Maps", "map": map_name, "status": "ready"}
 
 
+@simulation_only("Use OWSLib or httpx to implement a real WFS GetCapabilities/GetFeature client.")
 def ogc_wfs_client(url: str) -> dict[str, Any]:
     return {"service": "WFS", "url": url, "status": "connected"}
 
 
+@simulation_only("Use OWSLib or httpx to implement a real WMS GetMap client.")
 def ogc_wms_client(url: str) -> dict[str, Any]:
     return {"service": "WMS", "url": url, "status": "connected"}
 

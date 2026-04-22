@@ -4087,6 +4087,783 @@ def stroke_curve(curve: Geometry, *, max_segment_length: float = 0.25) -> Geomet
     return segmentize(curve, max_segment_length)
 
 
+# ---------------------------------------------------------------------------
+# G1.2 / G1.3 / G1.4 / G1.5 / G1.6 / G1.7 — Additions for full parity
+# ---------------------------------------------------------------------------
+
+def offset_curve(geometry: Geometry, distance: float, *, join_style: str = "round", mitre_limit: float = 5.0) -> Geometry:
+    """Return a linestring offset by *distance* perpendicular to the original.
+
+    Positive distance offsets to the left of the line direction; negative to
+    the right.  A buffer-subtraction approach is used so no external library is
+    required.
+    """
+    gtype = str(geometry.get("type", ""))
+    if gtype not in ("LineString", "MultiLineString"):
+        raise ValueError("offset_curve requires a LineString or MultiLineString")
+    coords = geometry.get("coordinates", [])
+    if gtype == "LineString":
+        pts = list(coords)
+        if len(pts) < 2:
+            return geometry
+        result: list[Coordinate] = []
+        for i, (cx, cy) in enumerate(pts):
+            if i == 0:
+                nx, ny = pts[1][0] - cx, pts[1][1] - cy
+            elif i == len(pts) - 1:
+                nx, ny = cx - pts[i - 1][0], cy - pts[i - 1][1]
+            else:
+                ax, ay = cx - pts[i - 1][0], cy - pts[i - 1][1]
+                bx, by = pts[i + 1][0] - cx, pts[i + 1][1] - cy
+                nx, ny = ax + bx, ay + by
+            mag = math.hypot(nx, ny) or 1.0
+            ox, oy = -ny / mag * distance, nx / mag * distance
+            result.append((cx + ox, cy + oy))
+        return {"type": "LineString", "coordinates": tuple(result)}
+    # MultiLineString — apply recursively
+    parts = [offset_curve({"type": "LineString", "coordinates": c}, distance, join_style=join_style, mitre_limit=mitre_limit) for c in coords]
+    return {"type": "MultiLineString", "coordinates": tuple(p["coordinates"] for p in parts)}
+
+
+def concave_hull(geometries: Sequence[Geometry], *, ratio: float = 0.5, allow_holes: bool = False) -> Geometry | None:
+    """Compute a concave hull (alpha shape) of a point set.
+
+    *ratio* (0–1) controls concavity: 0 = very concave, 1 = convex hull.
+    Falls back to the convex hull if fewer than 3 unique points are present or
+    if scipy is not available.
+    """
+    all_pts: list[tuple[float, float]] = []
+    for geom in geometries:
+        all_pts.extend(_extract_flat_coords(geom))
+    unique_pts = list({(round(x, 10), round(y, 10)) for x, y in all_pts})
+    if len(unique_pts) < 3:
+        return None
+    # Try scipy Delaunay-based alpha-shape approach
+    try:
+        scipy_spatial = importlib.import_module("scipy.spatial")
+        np_mod = importlib.import_module("numpy")
+        pts_arr = np_mod.array(unique_pts)
+        tri = scipy_spatial.Delaunay(pts_arr)
+        # Compute circumradius for each triangle; keep if radius ≤ alpha threshold
+        all_edges: set[tuple[int, int]] = set()
+        boundary_edges: list[tuple[int, int]] = []
+        edge_count: dict[tuple[int, int], int] = {}
+        alpha = (1.0 - ratio) * max(
+            math.hypot(pts_arr[:, 0].max() - pts_arr[:, 0].min(),
+                       pts_arr[:, 1].max() - pts_arr[:, 1].min()) / 4.0,
+            1e-9,
+        )
+        for simplex in tri.simplices:
+            a, b, c = (pts_arr[simplex[i]] for i in range(3))
+            la = math.hypot(b[0] - c[0], b[1] - c[1])
+            lb = math.hypot(a[0] - c[0], a[1] - c[1])
+            lc = math.hypot(a[0] - b[0], a[1] - b[1])
+            s = (la + lb + lc) / 2
+            area = math.sqrt(max(s * (s - la) * (s - lb) * (s - lc), 0))
+            if area < 1e-12:
+                continue
+            circum_r = (la * lb * lc) / (4.0 * area)
+            if circum_r <= alpha:
+                for pair in [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[0], simplex[2])]:
+                    key = (min(pair), max(pair))
+                    edge_count[key] = edge_count.get(key, 0) + 1
+        boundary_edges = [e for e, cnt in edge_count.items() if cnt == 1]
+        if not boundary_edges:
+            # alpha too tight — use convex hull
+            hull = scipy_spatial.ConvexHull(pts_arr)
+            ring = [tuple(pts_arr[i]) for i in hull.vertices] + [tuple(pts_arr[hull.vertices[0]])]
+            return {"type": "Polygon", "coordinates": (tuple(ring),)}
+        # Stitch boundary edges into a ring
+        adj: dict[int, list[int]] = {}
+        for a, b in boundary_edges:
+            adj.setdefault(a, []).append(b)
+            adj.setdefault(b, []).append(a)
+        start = boundary_edges[0][0]
+        ring_idx = [start]
+        prev = -1
+        current = start
+        for _ in range(len(boundary_edges)):
+            neighbors = [n for n in adj.get(current, []) if n != prev]
+            if not neighbors:
+                break
+            nxt = neighbors[0]
+            if nxt == start and len(ring_idx) > 2:
+                break
+            ring_idx.append(nxt)
+            prev, current = current, nxt
+        ring_coords = [tuple(pts_arr[i]) for i in ring_idx] + [tuple(pts_arr[ring_idx[0]])]
+        return {"type": "Polygon", "coordinates": (tuple(ring_coords),)}
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Pure Python convex hull fallback
+    return geometry_convex_hull({"type": "MultiPoint", "coordinates": tuple(unique_pts)})
+
+
+def _extract_flat_coords(geometry: Geometry) -> list[tuple[float, float]]:
+    """Extract all (x, y) pairs from any geometry type."""
+    gtype = str(geometry.get("type", ""))
+    coords = geometry.get("coordinates", [])
+    result: list[tuple[float, float]] = []
+    if gtype == "Point":
+        c = coords
+        if c and len(c) >= 2:
+            result.append((float(c[0]), float(c[1])))
+    elif gtype in ("LineString", "MultiPoint"):
+        for c in coords:
+            if len(c) >= 2:
+                result.append((float(c[0]), float(c[1])))
+    elif gtype in ("Polygon", "MultiLineString"):
+        for ring in coords:
+            for c in ring:
+                if len(c) >= 2:
+                    result.append((float(c[0]), float(c[1])))
+    elif gtype == "MultiPolygon":
+        for polygon in coords:
+            for ring in polygon:
+                for c in ring:
+                    if len(c) >= 2:
+                        result.append((float(c[0]), float(c[1])))
+    elif gtype == "GeometryCollection":
+        for g in geometry.get("geometries", []):
+            result.extend(_extract_flat_coords(g))
+    return result
+
+
+def minimum_rotated_rectangle(geometry: Geometry) -> Geometry | None:
+    """Return the minimum-area bounding rectangle (rotating calipers approach).
+
+    Works on any geometry type by operating on the convex hull vertices.
+    Returns a Polygon or None if fewer than 2 unique points exist.
+    """
+    pts = _extract_flat_coords(geometry)
+    unique = list({(round(x, 10), round(y, 10)) for x, y in pts})
+    if len(unique) < 2:
+        return None
+    if len(unique) == 2:
+        a, b = unique[0], unique[1]
+        return {"type": "LineString", "coordinates": (a, b)}
+    # Compute convex hull using geometry module
+    hull_geom = geometry_convex_hull({"type": "MultiPoint", "coordinates": tuple(unique)})
+    if hull_geom is None:
+        return None
+    hull_coords = list(hull_geom.get("coordinates", [[]])[0] if hull_geom.get("type") == "Polygon" else hull_geom.get("coordinates", []))
+    # geometry_convex_hull may return flat coords or nested ring coords
+    if hull_coords and not isinstance(hull_coords[0], (list, tuple)):
+        hull_coords = list(hull_geom.get("coordinates", []))
+    elif hull_coords and isinstance(hull_coords[0], (list, tuple)) and hull_coords[0] and isinstance(hull_coords[0][0], (list, tuple)):
+        # nested rings
+        hull_coords = list(hull_coords[0])
+    if len(hull_coords) < 3:
+        return None
+    # Rotating calipers: iterate over edges of hull
+    best_area = float("inf")
+    best_rect: list[tuple[float, float]] = []
+    n = len(hull_coords) - 1  # last = first for closed ring
+    for i in range(n):
+        ax, ay = hull_coords[i]
+        bx, by = hull_coords[(i + 1) % n]
+        ex, ey = bx - ax, by - ay
+        mag = math.hypot(ex, ey)
+        if mag < 1e-12:
+            continue
+        ex, ey = ex / mag, ey / mag
+        nx, ny = -ey, ex  # perpendicular
+        # Project all hull points onto edge and normal axes
+        projs_e = [pt[0] * ex + pt[1] * ey for pt in hull_coords[:n]]
+        projs_n = [pt[0] * nx + pt[1] * ny for pt in hull_coords[:n]]
+        min_e, max_e = min(projs_e), max(projs_e)
+        min_n, max_n = min(projs_n), max(projs_n)
+        area = (max_e - min_e) * (max_n - min_n)
+        if area < best_area:
+            best_area = area
+            # Build the four corners
+            best_rect = [
+                (min_e * ex + min_n * nx, min_e * ey + min_n * ny),
+                (max_e * ex + min_n * nx, max_e * ey + min_n * ny),
+                (max_e * ex + max_n * nx, max_e * ey + max_n * ny),
+                (min_e * ex + max_n * nx, min_e * ey + max_n * ny),
+            ]
+    if not best_rect:
+        return None
+    ring = best_rect + [best_rect[0]]
+    return {"type": "Polygon", "coordinates": (tuple(ring),)}
+
+
+def minimum_bounding_circle(geometry: Geometry) -> dict[str, Any]:
+    """Return ``{"center": (cx, cy), "radius": r}`` of the minimum bounding circle.
+
+    Uses Welzl's randomised algorithm (simplified iterative version) on the
+    convex hull vertices for efficiency.
+    """
+    pts = list({(round(x, 10), round(y, 10)) for x, y in _extract_flat_coords(geometry)})
+    if not pts:
+        return {"center": (0.0, 0.0), "radius": 0.0}
+    if len(pts) == 1:
+        return {"center": pts[0], "radius": 0.0}
+
+    def _circle_2(a: tuple[float, float], b: tuple[float, float]) -> tuple[tuple[float, float], float]:
+        cx = (a[0] + b[0]) / 2
+        cy = (a[1] + b[1]) / 2
+        return (cx, cy), math.hypot(cx - a[0], cy - a[1])
+
+    def _circle_3(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> tuple[tuple[float, float], float] | None:
+        ax, ay = a; bx, by = b; cx, cy = c
+        d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+        if abs(d) < 1e-12:
+            return None
+        ux = ((ax**2 + ay**2) * (by - cy) + (bx**2 + by**2) * (cy - ay) + (cx**2 + cy**2) * (ay - by)) / d
+        uy = ((ax**2 + ay**2) * (cx - bx) + (bx**2 + by**2) * (ax - cx) + (cx**2 + cy**2) * (bx - ax)) / d
+        center = (ux, uy)
+        return center, math.hypot(ux - ax, uy - ay)
+
+    import random as _random
+    shuffled = pts[:]
+    _random.shuffle(shuffled)
+    center, radius = _circle_2(shuffled[0], shuffled[1]) if len(shuffled) > 1 else (shuffled[0], 0.0)
+    for i in range(2, len(shuffled)):
+        p = shuffled[i]
+        if math.hypot(p[0] - center[0], p[1] - center[1]) > radius + 1e-10:
+            center, radius = _circle_2(shuffled[0], p)
+            for j in range(1, i):
+                q = shuffled[j]
+                if math.hypot(q[0] - center[0], q[1] - center[1]) > radius + 1e-10:
+                    center, radius = _circle_2(p, q)
+                    for k in range(j):
+                        r = shuffled[k]
+                        if math.hypot(r[0] - center[0], r[1] - center[1]) > radius + 1e-10:
+                            result = _circle_3(p, q, r)
+                            if result is not None:
+                                center, radius = result
+    return {"center": center, "radius": radius}
+
+
+def force_2d(geometry: Geometry) -> Geometry:
+    """Return a copy of the geometry with the Z coordinate removed (if present)."""
+    gtype = str(geometry.get("type", ""))
+
+    def _drop_z(coord: Any) -> tuple[float, float]:
+        return (float(coord[0]), float(coord[1]))
+
+    def _drop_ring(ring: Any) -> tuple[tuple[float, float], ...]:
+        return tuple(_drop_z(c) for c in ring)
+
+    if gtype == "Point":
+        return {"type": "Point", "coordinates": _drop_z(geometry["coordinates"])}
+    if gtype == "LineString":
+        return {"type": "LineString", "coordinates": tuple(_drop_z(c) for c in geometry["coordinates"])}
+    if gtype == "MultiPoint":
+        return {"type": "MultiPoint", "coordinates": tuple(_drop_z(c) for c in geometry["coordinates"])}
+    if gtype == "Polygon":
+        return {"type": "Polygon", "coordinates": tuple(_drop_ring(r) for r in geometry["coordinates"])}
+    if gtype == "MultiLineString":
+        return {"type": "MultiLineString", "coordinates": tuple(tuple(_drop_z(c) for c in line) for line in geometry["coordinates"])}
+    if gtype == "MultiPolygon":
+        return {"type": "MultiPolygon", "coordinates": tuple(tuple(_drop_ring(r) for r in poly) for poly in geometry["coordinates"])}
+    if gtype == "GeometryCollection":
+        return {"type": "GeometryCollection", "geometries": [force_2d(g) for g in geometry.get("geometries", [])]}
+    return geometry
+
+
+def force_3d(geometry: Geometry, z: float = 0.0) -> Geometry:
+    """Return a copy of the geometry with a Z coordinate added (or replaced)."""
+    gtype = str(geometry.get("type", ""))
+
+    def _add_z(coord: Any) -> tuple[float, float, float]:
+        return (float(coord[0]), float(coord[1]), z)
+
+    def _add_ring(ring: Any) -> tuple[tuple[float, float, float], ...]:
+        return tuple(_add_z(c) for c in ring)
+
+    if gtype == "Point":
+        return {"type": "Point", "coordinates": _add_z(geometry["coordinates"])}
+    if gtype == "LineString":
+        return {"type": "LineString", "coordinates": tuple(_add_z(c) for c in geometry["coordinates"])}
+    if gtype == "MultiPoint":
+        return {"type": "MultiPoint", "coordinates": tuple(_add_z(c) for c in geometry["coordinates"])}
+    if gtype == "Polygon":
+        return {"type": "Polygon", "coordinates": tuple(_add_ring(r) for r in geometry["coordinates"])}
+    if gtype == "MultiLineString":
+        return {"type": "MultiLineString", "coordinates": tuple(tuple(_add_z(c) for c in line) for line in geometry["coordinates"])}
+    if gtype == "MultiPolygon":
+        return {"type": "MultiPolygon", "coordinates": tuple(tuple(_add_ring(r) for r in poly) for poly in geometry["coordinates"])}
+    if gtype == "GeometryCollection":
+        return {"type": "GeometryCollection", "geometries": [force_3d(g, z) for g in geometry.get("geometries", [])]}
+    return geometry
+
+
+def voronoi_polygons(
+    geometries: Sequence[Geometry],
+    *,
+    envelope: Geometry | None = None,
+    tolerance: float = 0.0,
+) -> list[Geometry]:
+    """Generate Voronoi polygons from the input geometries.
+
+    Requires *scipy*.  Falls back to approximate bounding-box cells if scipy
+    is not available.  Returns a list of Polygon geometries.
+    """
+    all_pts = []
+    for g in geometries:
+        all_pts.extend(_extract_flat_coords(g))
+    if not all_pts:
+        return []
+    if tolerance > 0:
+        # Snap nearby points
+        snapped: list[tuple[float, float]] = []
+        for p in all_pts:
+            if not any(math.hypot(p[0] - q[0], p[1] - q[1]) < tolerance for q in snapped):
+                snapped.append(p)
+        all_pts = snapped
+    unique_pts = list({(round(x, 10), round(y, 10)) for x, y in all_pts})
+    if len(unique_pts) < 2:
+        return []
+    try:
+        scipy_spatial = importlib.import_module("scipy.spatial")
+        np_mod = importlib.import_module("numpy")
+        pts_arr = np_mod.array(unique_pts)
+        # Add 4 far-away points to ensure all regions are bounded
+        xmin, ymin = pts_arr[:, 0].min(), pts_arr[:, 1].min()
+        xmax, ymax = pts_arr[:, 0].max(), pts_arr[:, 1].max()
+        dx = (xmax - xmin) * 10 or 1.0
+        dy = (ymax - ymin) * 10 or 1.0
+        far = np_mod.array([
+            [xmin - dx, ymin - dy], [xmax + dx, ymin - dy],
+            [xmax + dx, ymax + dy], [xmin - dx, ymax + dy],
+        ])
+        extended = np_mod.vstack([pts_arr, far])
+        vor = scipy_spatial.Voronoi(extended)
+        polys: list[Geometry] = []
+        for region_idx in vor.point_region[: len(unique_pts)]:
+            region = vor.regions[region_idx]
+            if -1 in region or len(region) == 0:
+                continue
+            ring = [tuple(float(v) for v in vor.vertices[vi]) for vi in region]
+            ring.append(ring[0])
+            polys.append({"type": "Polygon", "coordinates": (tuple(ring),)})
+        return polys
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Fallback: simple bounding-box subdivision (one cell per point)
+    xs = [p[0] for p in unique_pts]
+    ys = [p[1] for p in unique_pts]
+    xmin, xmax = min(xs), max(xs)
+    ymin, ymax = min(ys), max(ys)
+    step_x = (xmax - xmin) / max(len(unique_pts), 1)
+    step_y = (ymax - ymin) / max(len(unique_pts), 1)
+    polys = []
+    for i, (px, py) in enumerate(unique_pts):
+        x0, x1 = px - step_x / 2, px + step_x / 2
+        y0, y1 = py - step_y / 2, py + step_y / 2
+        ring = [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)]
+        polys.append({"type": "Polygon", "coordinates": (tuple(ring),)})
+    return polys
+
+
+def delaunay_triangulation(
+    geometries: Sequence[Geometry],
+    *,
+    tolerance: float = 0.0,
+    edges_only: bool = False,
+) -> list[Geometry]:
+    """Return Delaunay triangles (Polygon) or edges (LineString) for input points.
+
+    Uses scipy.spatial.Delaunay when available; otherwise falls back to a simple
+    Bowyer-Watson implementation.
+    """
+    all_pts: list[tuple[float, float]] = []
+    for g in geometries:
+        all_pts.extend(_extract_flat_coords(g))
+    unique_pts = list({(round(x, 10), round(y, 10)) for x, y in all_pts})
+    if len(unique_pts) < 3:
+        return []
+    try:
+        scipy_spatial = importlib.import_module("scipy.spatial")
+        np_mod = importlib.import_module("numpy")
+        pts_arr = np_mod.array(unique_pts)
+        tri = scipy_spatial.Delaunay(pts_arr)
+        result: list[Geometry] = []
+        for simplex in tri.simplices:
+            pts_s = [tuple(float(v) for v in pts_arr[i]) for i in simplex]
+            if edges_only:
+                for j in range(3):
+                    result.append({"type": "LineString", "coordinates": (pts_s[j], pts_s[(j + 1) % 3])})
+            else:
+                ring = pts_s + [pts_s[0]]
+                result.append({"type": "Polygon", "coordinates": (tuple(ring),)})
+        return result
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Pure Python fallback: super-triangle Bowyer-Watson
+    def _circumcircle(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> tuple[float, float, float] | None:
+        ax, ay = a; bx, by = b; cx, cy = c
+        d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+        if abs(d) < 1e-12:
+            return None
+        ux = ((ax**2 + ay**2) * (by - cy) + (bx**2 + by**2) * (cy - ay) + (cx**2 + cy**2) * (ay - by)) / d
+        uy = ((ax**2 + ay**2) * (cx - bx) + (bx**2 + by**2) * (ax - cx) + (cx**2 + cy**2) * (bx - ax)) / d
+        r = math.hypot(ux - ax, uy - ay)
+        return ux, uy, r
+
+    xs = [p[0] for p in unique_pts]; ys = [p[1] for p in unique_pts]
+    dx = max(xs) - min(xs) + 1; dy = max(ys) - min(ys) + 1; d = max(dx, dy)
+    mx = (min(xs) + max(xs)) / 2; my = (min(ys) + max(ys)) / 2
+    sup = [(mx - 20 * d, my - d), (mx, my + 20 * d), (mx + 20 * d, my - d)]
+    triangles: list[tuple[tuple[float, float], tuple[float, float], tuple[float, float]]] = [tuple(sup)]  # type: ignore[list-item]
+    for p in unique_pts:
+        bad = []
+        boundary: list[tuple[tuple[float, float], tuple[float, float]]] = []
+        for tri in triangles:
+            cc = _circumcircle(*tri)
+            if cc and math.hypot(p[0] - cc[0], p[1] - cc[1]) < cc[2] + 1e-10:
+                bad.append(tri)
+        for tri in bad:
+            for j in range(3):
+                e = (tri[j], tri[(j + 1) % 3])
+                shared = any(e == (t[k], t[(k + 1) % 3]) or e[::-1] == (t[k], t[(k + 1) % 3]) for t in bad for k in range(3) if t is not tri)
+                if not shared:
+                    boundary.append(e)
+        triangles = [t for t in triangles if t not in bad]
+        for e in boundary:
+            triangles.append((e[0], e[1], p))
+    sup_set = set(map(id, sup))
+    result = []
+    for tri in triangles:
+        if any(v in sup for v in tri):
+            continue
+        if edges_only:
+            for j in range(3):
+                result.append({"type": "LineString", "coordinates": (tri[j], tri[(j + 1) % 3])})
+        else:
+            ring = list(tri) + [tri[0]]
+            result.append({"type": "Polygon", "coordinates": (tuple(ring),)})
+    return result
+
+
+def polygonize(geometries: Sequence[Geometry]) -> list[Geometry]:
+    """Build closed polygons from a collection of linestrings.
+
+    Lines are merged into rings by matching endpoints; any complete rings are
+    returned as Polygon geometries.
+    """
+    # Collect all line segments as pairs of rounded endpoints
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for g in geometries:
+        gtype = str(g.get("type", ""))
+        coords = g.get("coordinates", [])
+        if gtype == "LineString":
+            pts = [(round(float(c[0]), 10), round(float(c[1]), 10)) for c in coords]
+            for i in range(len(pts) - 1):
+                segments.append((pts[i], pts[i + 1]))
+        elif gtype == "MultiLineString":
+            for line in coords:
+                pts = [(round(float(c[0]), 10), round(float(c[1]), 10)) for c in line]
+                for i in range(len(pts) - 1):
+                    segments.append((pts[i], pts[i + 1]))
+    if not segments:
+        return []
+    # Build adjacency from endpoint to next points
+    adj: dict[tuple[float, float], list[tuple[float, float]]] = {}
+    for a, b in segments:
+        adj.setdefault(a, []).append(b)
+        adj.setdefault(b, []).append(a)
+    # Walk adjacency to find closed rings
+    used: set[tuple[tuple[float, float], tuple[float, float]]] = set()
+    polygons: list[Geometry] = []
+    for start in list(adj.keys()):
+        if not adj[start]:
+            continue
+        ring = [start]
+        prev = start
+        current = adj[start][0] if adj[start] else None
+        if current is None:
+            continue
+        edge = (min(prev, current), max(prev, current))
+        if edge in used:
+            continue
+        used.add(edge)
+        ring.append(current)
+        for _ in range(len(segments)):
+            neighbors = [n for n in adj.get(current, []) if (min(current, n), max(current, n)) not in used]
+            if not neighbors:
+                break
+            nxt = neighbors[0]
+            edge = (min(current, nxt), max(current, nxt))
+            used.add(edge)
+            if nxt == start and len(ring) >= 3:
+                ring.append(start)
+                polygons.append({"type": "Polygon", "coordinates": (tuple(ring),)})
+                break
+            ring.append(nxt)
+            prev, current = current, nxt
+    return polygons
+
+
+def line_merge(geometries: Sequence[Geometry]) -> Geometry:
+    """Merge a sequence of linestrings into as few linestrings as possible.
+
+    Contiguous lines (shared endpoints) are joined; non-connecting lines are
+    kept as separate members of a MultiLineString.
+    """
+    # Extract all lines as coord sequences
+    lines: list[list[tuple[float, float]]] = []
+    for g in geometries:
+        gtype = str(g.get("type", ""))
+        coords = g.get("coordinates", [])
+        if gtype == "LineString":
+            lines.append([(round(float(c[0]), 10), round(float(c[1]), 10)) for c in coords])
+        elif gtype == "MultiLineString":
+            for sub in coords:
+                lines.append([(round(float(c[0]), 10), round(float(c[1]), 10)) for c in sub])
+    if not lines:
+        return {"type": "GeometryCollection", "geometries": []}
+    # Build endpoint adjacency
+    end_map: dict[tuple[float, float], list[int]] = {}
+    for i, line in enumerate(lines):
+        for ep in (line[0], line[-1]):
+            end_map.setdefault(ep, []).append(i)
+    merged: list[list[tuple[float, float]]] = []
+    used = set()
+    for start_idx in range(len(lines)):
+        if start_idx in used:
+            continue
+        used.add(start_idx)
+        chain = list(lines[start_idx])
+        # Extend forward
+        while True:
+            tail = chain[-1]
+            candidates = [i for i in end_map.get(tail, []) if i not in used]
+            if not candidates:
+                break
+            nxt_idx = candidates[0]
+            used.add(nxt_idx)
+            nxt = lines[nxt_idx]
+            if nxt[0] == tail:
+                chain.extend(nxt[1:])
+            else:
+                chain.extend(reversed(nxt[:-1]))
+        # Extend backward
+        while True:
+            head = chain[0]
+            candidates = [i for i in end_map.get(head, []) if i not in used]
+            if not candidates:
+                break
+            nxt_idx = candidates[0]
+            used.add(nxt_idx)
+            nxt = lines[nxt_idx]
+            if nxt[-1] == head:
+                chain = list(nxt) + chain[1:]
+            else:
+                chain = list(reversed(nxt)) + chain[1:]
+        merged.append(chain)
+    if len(merged) == 1:
+        return {"type": "LineString", "coordinates": tuple(merged[0])}
+    return {"type": "MultiLineString", "coordinates": tuple(tuple(line) for line in merged)}
+
+
+def set_precision(geometry: Geometry, grid_size: float) -> Geometry:
+    """Snap all coordinates to a grid of the given *grid_size*.
+
+    Equivalent to GEOS GEOSGeom_setPrecision / shapely set_precision.
+    """
+    if grid_size <= 0:
+        return geometry
+
+    def _snap(coord: Any) -> tuple[float, ...]:
+        return tuple(round(float(v) / grid_size) * grid_size for v in coord)
+
+    def _snap_ring(ring: Any) -> tuple[tuple[float, ...], ...]:
+        return tuple(_snap(c) for c in ring)
+
+    gtype = str(geometry.get("type", ""))
+    if gtype == "Point":
+        return {"type": "Point", "coordinates": _snap(geometry["coordinates"])}
+    if gtype in ("LineString", "MultiPoint"):
+        return {"type": gtype, "coordinates": tuple(_snap(c) for c in geometry["coordinates"])}
+    if gtype == "Polygon":
+        return {"type": "Polygon", "coordinates": tuple(_snap_ring(r) for r in geometry["coordinates"])}
+    if gtype == "MultiLineString":
+        return {"type": "MultiLineString", "coordinates": tuple(tuple(_snap(c) for c in line) for line in geometry["coordinates"])}
+    if gtype == "MultiPolygon":
+        return {"type": "MultiPolygon", "coordinates": tuple(tuple(_snap_ring(r) for r in poly) for poly in geometry["coordinates"])}
+    if gtype == "GeometryCollection":
+        return {"type": "GeometryCollection", "geometries": [set_precision(g, grid_size) for g in geometry.get("geometries", [])]}
+    return geometry
+
+
+def get_precision(geometry: Geometry) -> float:
+    """Estimate the coordinate precision of a geometry.
+
+    Returns the smallest non-zero difference between consecutive coordinate
+    values across all axes, or 0.0 if the geometry contains fewer than two
+    distinct coordinate values.
+    """
+    all_coords = _extract_flat_coords(geometry)
+    if len(all_coords) < 2:
+        return 0.0
+    xs = sorted({c[0] for c in all_coords})
+    ys = sorted({c[1] for c in all_coords})
+    diffs: list[float] = []
+    for seq in (xs, ys):
+        for i in range(1, len(seq)):
+            d = abs(seq[i] - seq[i - 1])
+            if d > 1e-15:
+                diffs.append(d)
+    return min(diffs) if diffs else 0.0
+
+
+def exterior_ring(geometry: Geometry) -> Geometry | None:
+    """Return the exterior ring of a Polygon as a LineString.
+
+    Returns None for non-polygon geometries.
+    """
+    if str(geometry.get("type")) != "Polygon":
+        return None
+    rings = geometry.get("coordinates", [])
+    if not rings:
+        return None
+    return {"type": "LineString", "coordinates": tuple(rings[0])}
+
+
+def get_interior_rings(geometry: Geometry) -> list[Geometry]:
+    """Return the interior rings (holes) of a Polygon as a list of LineStrings.
+
+    Returns an empty list for non-polygon geometries or polygons without holes.
+    """
+    if str(geometry.get("type")) != "Polygon":
+        return []
+    rings = geometry.get("coordinates", [])
+    return [{"type": "LineString", "coordinates": tuple(r)} for r in rings[1:]]
+
+
+def boundary_geometry(geometry: Geometry) -> Geometry | None:
+    """Return the topological boundary of the geometry.
+
+    - Point / MultiPoint → empty GeometryCollection
+    - LineString → MultiPoint of endpoints
+    - Polygon → LineString exterior ring
+    - MultiPolygon → MultiLineString of all exterior rings
+    """
+    gtype = str(geometry.get("type", ""))
+    coords = geometry.get("coordinates", [])
+    if gtype == "Point":
+        return {"type": "GeometryCollection", "geometries": []}
+    if gtype == "MultiPoint":
+        return {"type": "GeometryCollection", "geometries": []}
+    if gtype == "LineString":
+        pts = list(coords)
+        if len(pts) < 2:
+            return {"type": "GeometryCollection", "geometries": []}
+        if pts[0] == pts[-1]:
+            # Closed ring — boundary is empty
+            return {"type": "GeometryCollection", "geometries": []}
+        return {"type": "MultiPoint", "coordinates": (tuple(pts[0]), tuple(pts[-1]))}
+    if gtype == "Polygon":
+        return exterior_ring(geometry)
+    if gtype == "MultiLineString":
+        endpoints: list[tuple[float, float]] = []
+        for line in coords:
+            pts = list(line)
+            if len(pts) >= 2 and pts[0] != pts[-1]:
+                endpoints.extend([tuple(pts[0])[:2], tuple(pts[-1])[:2]])
+        # Keep only endpoints that appear an odd number of times
+        from collections import Counter as _Counter
+        counts = _Counter(endpoints)
+        odd = [ep for ep, cnt in counts.items() if cnt % 2 == 1]
+        return {"type": "MultiPoint", "coordinates": tuple(odd)} if odd else {"type": "GeometryCollection", "geometries": []}
+    if gtype == "MultiPolygon":
+        rings = []
+        for poly in coords:
+            if poly:
+                rings.append({"type": "LineString", "coordinates": tuple(poly[0])})
+        if not rings:
+            return {"type": "GeometryCollection", "geometries": []}
+        if len(rings) == 1:
+            return rings[0]
+        return {"type": "MultiLineString", "coordinates": tuple(r["coordinates"] for r in rings)}
+    return {"type": "GeometryCollection", "geometries": []}
+
+
+def normalize(geometry: Geometry) -> Geometry:
+    """Return the geometry in canonical normal form.
+
+    - Ring coordinates are rotated so that the lowest coordinate comes first.
+    - Polygon holes are sorted.
+    - MultiGeometry parts are sorted by their first coordinate.
+
+    This is equivalent to shapely's ``normalize()`` / GEOS GEOSNormalize.
+    """
+    gtype = str(geometry.get("type", ""))
+
+    def _normalize_ring(ring: Any) -> list[Any]:
+        pts = list(ring)
+        if pts and pts[0] == pts[-1]:
+            pts = pts[:-1]
+        if not pts:
+            return []
+        min_idx = min(range(len(pts)), key=lambda i: pts[i])
+        rotated = pts[min_idx:] + pts[:min_idx]
+        # Ensure consistent winding (make copy closed)
+        return rotated + [rotated[0]]
+
+    if gtype == "Point":
+        return geometry
+    if gtype in ("LineString", "MultiPoint"):
+        return geometry
+    if gtype == "Polygon":
+        rings = list(geometry.get("coordinates", []))
+        if not rings:
+            return geometry
+        exterior = _normalize_ring(rings[0])
+        interiors = sorted([_normalize_ring(r) for r in rings[1:]])
+        return {"type": "Polygon", "coordinates": tuple([tuple(exterior)] + [tuple(r) for r in interiors])}
+    if gtype in ("MultiLineString", "MultiPolygon", "MultiPoint"):
+        parts = sorted(list(geometry.get("coordinates", [])))
+        return {**geometry, "coordinates": tuple(parts)}
+    if gtype == "GeometryCollection":
+        parts = list(geometry.get("geometries", []))
+        normalized = sorted([normalize(g) for g in parts], key=lambda g: str(g.get("type", "")) + str(g.get("coordinates", "")))
+        return {"type": "GeometryCollection", "geometries": normalized}
+    return geometry
+
+
+def line_project(line: Geometry, point: Geometry, *, normalized: bool = False) -> float:
+    """Return the distance along *line* of the point nearest to *point*.
+
+    If *normalized* is True, returns a fraction in [0, 1] instead of a
+    distance in the same units as the coordinates.
+
+    Equivalent to shapely's ``line.project(point)``.
+    """
+    if str(line.get("type")) != "LineString":
+        raise ValueError("line_project requires a LineString geometry")
+    pt_coords = point.get("coordinates", ())
+    px, py = float(pt_coords[0]), float(pt_coords[1])
+    line_coords = list(line.get("coordinates", []))
+    if not line_coords:
+        return 0.0
+    total = 0.0
+    best_dist = float("inf")
+    best_along = 0.0
+    for i in range(len(line_coords) - 1):
+        ax, ay = float(line_coords[i][0]), float(line_coords[i][1])
+        bx, by = float(line_coords[i + 1][0]), float(line_coords[i + 1][1])
+        seg_len = math.hypot(bx - ax, by - ay)
+        if seg_len < 1e-12:
+            t = 0.0
+        else:
+            t = max(0.0, min(1.0, ((px - ax) * (bx - ax) + (py - ay) * (by - ay)) / (seg_len ** 2)))
+        cx = ax + t * (bx - ax)
+        cy = ay + t * (by - ay)
+        d = math.hypot(px - cx, py - cy)
+        if d < best_dist:
+            best_dist = d
+            best_along = total + t * seg_len
+        total += seg_len
+    if normalized:
+        return best_along / total if total > 0 else 0.0
+    return best_along
+
+
 __all__ = [
     "Coordinate",
     "Geometry",
@@ -4288,6 +5065,24 @@ __all__ = [
     "get_geometry_n",
     "build_area",
     "affine_transform",
+    # G1.2 – G1.7 additions
+    "offset_curve",
+    "concave_hull",
+    "minimum_rotated_rectangle",
+    "minimum_bounding_circle",
+    "force_2d",
+    "force_3d",
+    "voronoi_polygons",
+    "delaunay_triangulation",
+    "polygonize",
+    "line_merge",
+    "set_precision",
+    "get_precision",
+    "exterior_ring",
+    "get_interior_rings",
+    "boundary_geometry",
+    "normalize",
+    "line_project",
 ]
 
 

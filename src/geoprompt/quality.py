@@ -2,14 +2,20 @@
 
 These utilities provide lightweight AST-based checks used to validate the
 B1 code-quality cleanup work across selected files.
+
+Also exports the :func:`simulation_only` decorator used throughout GeoPrompt
+to clearly mark functions that return heuristic/simulated results rather than
+real implementations.
 """
 from __future__ import annotations
 
 import ast
+import functools
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 try:
     import tomllib
@@ -18,6 +24,52 @@ except ModuleNotFoundError:  # pragma: no cover
         import tomli as tomllib  # type: ignore[no-redef]
     except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+SIMULATION_ONLY_ATTR = "_geoprompt_simulation_only"
+
+
+def simulation_only(reason: str = "") -> Callable[[_F], _F]:
+    """Decorator that marks a function as returning simulated/heuristic results.
+
+    Functions decorated with ``@simulation_only(reason)`` will emit a
+    :class:`UserWarning` on every call explaining that the results are not
+    based on a real implementation.  The function object is also tagged with
+    a ``_geoprompt_simulation_only`` attribute so tooling can detect stubs.
+
+    Usage::
+
+        @simulation_only("Use pandapower for a real power-flow solver.")
+        def electric_load_flow(network, ...):
+            ...
+
+    The ``reason`` argument should reference the real library or algorithm that
+    should be used instead.
+    """
+    def _decorator(func: _F) -> _F:
+        msg = (
+            f"{func.__module__}.{func.__qualname__} is a simulation-only "
+            f"placeholder and does not return real results."
+        )
+        if reason:
+            msg += f"  {reason}"
+
+        @functools.wraps(func)
+        def _wrapper(*args: Any, **kwargs: Any) -> Any:
+            warnings.warn(msg, UserWarning, stacklevel=2)
+            return func(*args, **kwargs)
+
+        setattr(_wrapper, SIMULATION_ONLY_ATTR, True)
+        setattr(_wrapper, "__simulation_reason__", reason)
+        return _wrapper  # type: ignore[return-value]
+
+    return _decorator
+
+
+def is_simulation_only(func: Callable[..., Any]) -> bool:
+    """Return True if *func* has been decorated with :func:`simulation_only`."""
+    return bool(getattr(func, SIMULATION_ONLY_ATTR, False))
 
 
 @dataclass(frozen=True)
@@ -262,15 +314,18 @@ def release_readiness_report(
 
 __all__ = [
     "QualityAuditResult",
+    "SIMULATION_ONLY_ATTR",
     "audit_public_docstrings",
     "audit_type_annotations",
     "audit_mutable_defaults",
     "audit_pathlib_usage",
     "audit_print_debugging",
     "documentation_asset_manifest",
+    "is_simulation_only",
     "packaging_smoke_matrix",
     "placeholder_inventory",
     "quality_scorecard",
     "release_readiness_report",
+    "simulation_only",
     "subsystem_maturity_matrix",
 ]

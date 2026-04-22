@@ -15,6 +15,8 @@ import statistics
 from collections import Counter, defaultdict
 from typing import Any, Iterable, Sequence
 
+from .quality import simulation_only
+
 
 def _try_import(name: str) -> bool:
     try:
@@ -140,11 +142,45 @@ def xgboost_lightgbm_integration() -> dict[str, Any]:
 def random_forest_spatial_prediction(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Heuristic random-forest style probability scoring."""
+    """Spatial prediction using Random Forest.
+
+    When *scikit-learn* is installed, trains a real
+    ``RandomForestClassifier`` (or ``Regressor`` for continuous targets) on
+    the provided rows.  Falls back to a heuristic threshold classifier when
+    sklearn is not available.
+    """
+    if not rows or not feature_keys:
+        return list(rows)
+    try:
+        sklearn_ensemble = __import__("sklearn.ensemble", fromlist=["RandomForestClassifier", "RandomForestRegressor"])
+        import numpy as np_mod
+        X = np_mod.array([[float(r.get(k, 0.0)) for k in feature_keys] for r in rows])
+        y_raw = [r.get(target_key, 0) for r in rows]
+        # Detect classification vs regression
+        is_classification = all(isinstance(v, (bool, int)) and v in (0, 1) for v in y_raw)
+        y = np_mod.array([int(v) for v in y_raw] if is_classification else [float(v) for v in y_raw])
+        if is_classification:
+            model = sklearn_ensemble.RandomForestClassifier(n_estimators=100, random_state=42)
+        else:
+            model = sklearn_ensemble.RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X, y)
+        predictions = model.predict(X)
+        result = []
+        for r, pred in zip(rows, predictions):
+            entry = {**r, "prediction": float(pred)}
+            if hasattr(model, "predict_proba") and is_classification:
+                proba = model.predict_proba(X[list(rows).index(r): list(rows).index(r) + 1])
+                entry["probability"] = round(float(proba[0][1]), 4)
+            result.append(entry)
+        return result
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Heuristic fallback
     threshold = _mean([_simple_score(r, feature_keys) for r in rows])
     return [{**r, "prediction": int(_simple_score(r, feature_keys) >= threshold)} for r in rows]
 
 
+@simulation_only("Use sklearn.ensemble.GradientBoostingClassifier or xgboost for real gradient boosting.")
 def gradient_boosted_spatial_prediction(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
@@ -155,6 +191,7 @@ def gradient_boosted_spatial_prediction(
     return [{**r, "prediction": int(s >= cutoff), "score": round(s, 4)} for r, s in zip(rows, scores)]
 
 
+@simulation_only("Use sklearn.svm.SVC for a real support vector machine classifier.")
 def svm_spatial_classification(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
@@ -166,7 +203,25 @@ def svm_spatial_classification(
 def logistic_regression_spatial_features(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Logistic scoring over numeric spatial covariates."""
+    """Logistic scoring over numeric spatial covariates.
+
+    Uses sklearn.linear_model.LogisticRegression when available.
+    """
+    if not rows or not feature_keys:
+        return list(rows)
+    try:
+        sklearn_lm = __import__("sklearn.linear_model", fromlist=["LogisticRegression"])
+        import numpy as np_mod
+        X = np_mod.array([[float(r.get(k, 0.0)) for k in feature_keys] for r in rows])
+        y_raw = [r.get(target_key, 0) for r in rows]
+        y = np_mod.array([int(v) for v in y_raw])
+        model = sklearn_lm.LogisticRegression(max_iter=500, random_state=42)
+        model.fit(X, y)
+        proba = model.predict_proba(X)
+        return [{**r, "probability": round(float(p[1]), 4), "prediction": int(p[1] >= 0.5)} for r, p in zip(rows, proba)]
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Heuristic fallback
     out = []
     for r in rows:
         z = _simple_score(r, feature_keys)
@@ -175,6 +230,7 @@ def logistic_regression_spatial_features(
     return out
 
 
+@simulation_only("Use PyTorch (torch.nn) or TensorFlow for real neural network integration.")
 def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
     """Describe the available neural-network backend and simple sequence embedding."""
     backend = "heuristic"
@@ -185,6 +241,7 @@ def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str
     return {"backend": backend, "sequence_count": len(sequences), "embedding": [round(_mean(seq), 4) for seq in sequences]}
 
 
+@simulation_only("Use PyG (torch_geometric) or DGL for a real Graph Neural Network.")
 def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
     """Compute simple node centrality scores as a GNN-like placeholder."""
     nodes = list(graph.get("nodes", []))
@@ -193,18 +250,21 @@ def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
     return {"node_count": len(nodes), "edge_count": len(edges), "node_scores": {n: degrees.get(n, 0) for n in nodes}}
 
 
+@simulation_only("Use PyTorch torchvision or TensorFlow Keras for a real CNN on rasters.")
 def convolutional_neural_network_on_rasters(raster: Sequence[Sequence[float]]) -> dict[str, Any]:
     """Return lightweight raster feature embeddings."""
     vals = _flatten_grid(raster)
     return {"embedding_dim": 4, "embedding": [min(vals or [0]), max(vals or [0]), round(_mean(vals), 4), len(vals)]}
 
 
+@simulation_only("Use PyTorch LSTM/GRU or TensorFlow Keras for a real RNN time-series model.")
 def recurrent_neural_network_spatial_time_series(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
     """Summarise temporal trends across multiple sequences."""
     trends = [round(seq[-1] - seq[0], 4) if len(seq) >= 2 else 0.0 for seq in sequences]
     return {"sequence_count": len(sequences), "trend": trends}
 
 
+@simulation_only("Use PyTorch transformers or Hugging Face for a real attention/transformer model.")
 def transformer_model_spatial_sequences(sequences: Sequence[Sequence[float]], *, attention_heads: int = 4) -> dict[str, Any]:
     """Summarise sequence attention statistics."""
     return {"sequence_count": len(sequences), "attention_heads": attention_heads, "token_count": sum(len(s) for s in sequences)}

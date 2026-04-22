@@ -1778,6 +1778,12 @@ __all__ = [
     "topology_validate",
     "find_identical_features",
     "near_table_multi",
+    "describe_dataset",
+    "pivot_table",
+    "multipart_to_singlepart",
+    "singlepart_to_multipart",
+    "feature_vertices_to_points",
+    "repair_geometry_full",
 ]
 
 
@@ -1974,3 +1980,255 @@ def near_table_multi(frame: _Any, search_frame: _Any, *,
         for dist, j in dists[:n_nearest]:
             results.append({"in_fid": i, "near_fid": j, "near_dist": dist})
     return results
+
+
+# ---------------------------------------------------------------------------
+# G8 additional — describe, pivot, multipart, vertices, repair
+# ---------------------------------------------------------------------------
+
+def describe_dataset(records: Sequence[dict[str, Any]], *,
+                     geometry_column: str = "geometry") -> dict[str, Any]:
+    """Describe a dataset: field names/types, geometry info, extent, row count, CRS.
+
+    Returns a summary dict with ``fields``, ``geometry_type``, ``extent``,
+    ``row_count``, and ``crs`` keys.
+    """
+    if not records:
+        return {"fields": [], "geometry_type": None, "extent": None, "row_count": 0, "crs": None}
+
+    fields: list[dict[str, Any]] = []
+    sample = records[0]
+    for fname, val in sample.items():
+        if fname == geometry_column:
+            continue
+        if isinstance(val, bool):
+            ftype = "bool"
+        elif isinstance(val, int):
+            ftype = "int"
+        elif isinstance(val, float):
+            ftype = "float"
+        else:
+            ftype = "str"
+        fields.append({"name": fname, "type": ftype})
+
+    # Geometry summary
+    geom_type: str | None = None
+    xs: list[float] = []
+    ys: list[float] = []
+    crs: str | None = None
+    for r in records:
+        geom = r.get(geometry_column)
+        if geom and isinstance(geom, dict):
+            geom_type = geom.get("type", geom_type)
+            if "crs" in geom:
+                crs = geom["crs"]
+            coords = geom.get("coordinates")
+            if coords:
+                def _flatten(c: Any) -> list[tuple[float, float]]:
+                    if not c:
+                        return []
+                    if isinstance(c[0], (int, float)):
+                        return [(float(c[0]), float(c[1]))]
+                    return [p for sub in c for p in _flatten(sub)]
+                for pt in _flatten(coords):
+                    xs.append(pt[0])
+                    ys.append(pt[1])
+
+    extent = (
+        {"min_x": min(xs), "min_y": min(ys), "max_x": max(xs), "max_y": max(ys)}
+        if xs else None
+    )
+    return {
+        "fields": fields,
+        "geometry_type": geom_type,
+        "extent": extent,
+        "row_count": len(records),
+        "crs": crs or "unknown",
+    }
+
+
+def pivot_table(records: Sequence[dict[str, Any]], *,
+                row_field: str,
+                col_field: str,
+                value_field: str,
+                aggfunc: str = "sum") -> dict[str, Any]:
+    """Create a pivot table from a list of records.
+
+    Args:
+        records: Input rows.
+        row_field: Field whose distinct values become row labels.
+        col_field: Field whose distinct values become column headers.
+        value_field: Field to aggregate.
+        aggfunc: One of ``"sum"``, ``"mean"``, ``"count"``, ``"min"``, ``"max"``.
+
+    Returns:
+        Dict with ``rows``, ``columns``, and ``table`` (list of lists).
+    """
+    from collections import defaultdict
+
+    cells: dict[Any, dict[Any, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for r in records:
+        rv = r.get(row_field)
+        cv = r.get(col_field)
+        vv = r.get(value_field, 0)
+        try:
+            cells[rv][cv].append(float(vv))
+        except (TypeError, ValueError):
+            cells[rv][cv].append(0.0)
+
+    row_labels = sorted(cells.keys(), key=str)
+    col_labels = sorted({cv for rv_dict in cells.values() for cv in rv_dict}, key=str)
+
+    def _agg(vals: list[float]) -> float:
+        if not vals:
+            return 0.0
+        if aggfunc == "sum":
+            return sum(vals)
+        if aggfunc == "mean":
+            return sum(vals) / len(vals)
+        if aggfunc == "count":
+            return float(len(vals))
+        if aggfunc == "min":
+            return min(vals)
+        if aggfunc == "max":
+            return max(vals)
+        return sum(vals)
+
+    table = [[_agg(cells[r].get(c, [])) for c in col_labels] for r in row_labels]
+    return {"rows": row_labels, "columns": col_labels, "table": table, "aggfunc": aggfunc}
+
+
+def multipart_to_singlepart(records: Sequence[dict[str, Any]], *,
+                             geometry_column: str = "geometry") -> list[dict[str, Any]]:
+    """Explode multipart geometries into individual singlepart features.
+
+    Non-multi geometries are passed through unchanged.  Multi-geometries
+    (MultiPoint, MultiLineString, MultiPolygon, GeometryCollection) are
+    split into one record per part.
+    """
+    out: list[dict[str, Any]] = []
+    multi_types = {
+        "MultiPoint": "Point",
+        "MultiLineString": "LineString",
+        "MultiPolygon": "Polygon",
+    }
+    for r in records:
+        geom = r.get(geometry_column)
+        if not geom or not isinstance(geom, dict):
+            out.append(dict(r))
+            continue
+        gtype = geom.get("type", "")
+        if gtype in multi_types:
+            part_type = multi_types[gtype]
+            for part_coords in geom.get("coordinates", []):
+                new_row = {k: v for k, v in r.items() if k != geometry_column}
+                new_row[geometry_column] = {"type": part_type, "coordinates": part_coords}
+                out.append(new_row)
+        elif gtype == "GeometryCollection":
+            for part_geom in geom.get("geometries", []):
+                new_row = {k: v for k, v in r.items() if k != geometry_column}
+                new_row[geometry_column] = part_geom
+                out.append(new_row)
+        else:
+            out.append(dict(r))
+    return out
+
+
+def singlepart_to_multipart(records: Sequence[dict[str, Any]], *,
+                              group_field: str,
+                              geometry_column: str = "geometry") -> list[dict[str, Any]]:
+    """Combine singlepart features sharing the same *group_field* value into multipart geometries.
+
+    The first row in each group contributes all non-geometry attributes.
+    """
+    from collections import defaultdict
+
+    groups: dict[Any, list[dict[str, Any]]] = defaultdict(list)
+    for r in records:
+        groups[r.get(group_field)].append(r)
+
+    out: list[dict[str, Any]] = []
+    type_to_multi = {"Point": "MultiPoint", "LineString": "MultiLineString", "Polygon": "MultiPolygon"}
+    for key, rows in groups.items():
+        base = {k: v for k, v in rows[0].items() if k != geometry_column}
+        coords_list: list[Any] = []
+        gtype: str | None = None
+        for r in rows:
+            geom = r.get(geometry_column)
+            if geom and isinstance(geom, dict):
+                gtype = geom.get("type")
+                coords_list.append(geom.get("coordinates"))
+        multi_type = type_to_multi.get(gtype or "", "GeometryCollection") if gtype else "GeometryCollection"
+        base[geometry_column] = {"type": multi_type, "coordinates": coords_list}
+        out.append(base)
+    return out
+
+
+def feature_vertices_to_points(records: Sequence[dict[str, Any]], *,
+                                 geometry_column: str = "geometry") -> list[dict[str, Any]]:
+    """Extract every vertex of each geometry as an individual Point feature.
+
+    Each output row preserves the attributes of its parent feature plus
+    ``vertex_index`` and ``part_index`` fields.
+    """
+    def _extract_pts(coords: Any, depth: int = 0) -> list[tuple[int, tuple[float, ...]]]:
+        if not coords:
+            return []
+        if isinstance(coords[0], (int, float)):
+            return [(depth, tuple(float(v) for v in coords))]
+        result = []
+        for sub in coords:
+            result.extend(_extract_pts(sub, depth + 1))
+        return result
+
+    out: list[dict[str, Any]] = []
+    for r in records:
+        geom = r.get(geometry_column)
+        if not geom or not isinstance(geom, dict):
+            continue
+        coords = geom.get("coordinates") or []
+        pts = _extract_pts(coords)
+        attrs = {k: v for k, v in r.items() if k != geometry_column}
+        for vi, (part_idx, pt) in enumerate(pts):
+            xy = list(pt[:2])
+            new_row = dict(attrs)
+            new_row[geometry_column] = {"type": "Point", "coordinates": xy}
+            new_row["vertex_index"] = vi
+            new_row["part_index"] = part_idx
+            out.append(new_row)
+    return out
+
+
+def repair_geometry_full(records: Sequence[dict[str, Any]], *,
+                          geometry_column: str = "geometry") -> list[dict[str, Any]]:
+    """Repair invalid geometries to produce OGC-valid results.
+
+    Uses ``shapely.make_valid`` when Shapely ≥ 1.8 is available.  Falls back
+    to removing self-intersections by buffering by zero (``buffer(0)``).
+    For pure-Python fallback, returns the geometry unchanged with an
+    ``_repair_note`` field explaining the limitation.
+    """
+    out: list[dict[str, Any]] = []
+    for r in records:
+        geom = r.get(geometry_column)
+        if not geom or not isinstance(geom, dict):
+            out.append(dict(r))
+            continue
+        try:
+            import shapely.geometry as sg  # type: ignore[import]
+            try:
+                from shapely.validation import make_valid  # type: ignore[import]
+                shp = make_valid(sg.shape(geom))
+            except ImportError:
+                shp = sg.shape(geom).buffer(0)
+            import json
+            new_row = dict(r)
+            new_row[geometry_column] = sg.mapping(shp)
+            new_row.pop("_repair_note", None)
+            out.append(new_row)
+        except Exception:
+            new_row = dict(r)
+            new_row["_repair_note"] = "geometry unchanged: shapely unavailable or parse error"
+            out.append(new_row)
+    return out
+

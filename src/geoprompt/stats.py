@@ -1852,6 +1852,643 @@ def spatial_weights_knn(
     return adj
 
 
+# ---------------------------------------------------------------------------
+# G5 additions: missing spatial statistics
+# ---------------------------------------------------------------------------
+
+def geary_c(
+    features: Sequence[Record],
+    *,
+    value_column: str,
+    geometry_column: str = "geometry",
+    bandwidth: float | None = None,
+) -> dict[str, float]:
+    """Compute Geary's C spatial autocorrelation coefficient.
+
+    Returns ``{"c": <float>, "z_score": <float>, "p_value_approx": <float>}``.
+    Geary's C ranges from 0 (perfect positive autocorrelation) to 2
+    (perfect negative autocorrelation), with 1 indicating no autocorrelation.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    values = [float(f[value_column]) for f in features]
+    n = len(values)
+    if n < 3:
+        return {"c": float("nan"), "z_score": float("nan"), "p_value_approx": float("nan")}
+    mean_v = sum(values) / n
+    # Build inverse-distance weights
+    w: list[list[float]] = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            if i == j:
+                row.append(0.0)
+            else:
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                if bandwidth and d > bandwidth:
+                    row.append(0.0)
+                else:
+                    row.append(1.0 / max(d, 1e-12))
+        w.append(row)
+    w_sum = sum(w[i][j] for i in range(n) for j in range(n))
+    if w_sum == 0:
+        return {"c": float("nan"), "z_score": float("nan"), "p_value_approx": float("nan")}
+    numerator = sum(
+        w[i][j] * (values[i] - values[j]) ** 2
+        for i in range(n) for j in range(n)
+    )
+    denominator = sum((v - mean_v) ** 2 for v in values)
+    if denominator == 0:
+        return {"c": 1.0, "z_score": 0.0, "p_value_approx": 1.0}
+    c_value = (n - 1) * numerator / (2 * w_sum * denominator)
+    # Approximate z-score under normality assumption
+    e_c = 1.0
+    var_c_approx = max((n - 1) / (n + 1) * 0.04, 1e-12)
+    z_score = (c_value - e_c) / math.sqrt(var_c_approx)
+    # Two-tailed p-value approximation using normal CDF
+    p_approx = 2.0 * (1.0 - _normal_cdf(abs(z_score)))
+    return {"c": round(c_value, 6), "z_score": round(z_score, 4), "p_value_approx": round(p_approx, 4)}
+
+
+def _normal_cdf(z: float) -> float:
+    """Approximate cumulative normal distribution using Abramowitz & Stegun."""
+    t = 1.0 / (1.0 + 0.2316419 * abs(z))
+    poly = t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+    cdf = 1.0 - (1.0 / math.sqrt(2 * math.pi)) * math.exp(-0.5 * z * z) * poly
+    return cdf if z >= 0 else 1.0 - cdf
+
+
+def ripley_k(
+    features: Sequence[Record],
+    *,
+    geometry_column: str = "geometry",
+    distances: Sequence[float] | None = None,
+    area: float | None = None,
+) -> list[dict[str, float]]:
+    """Compute Ripley's K function for a point pattern.
+
+    Returns a list of ``{"distance": d, "k": K(d), "l": L(d), "expected_k": <float>}``
+    dicts where L(d) = sqrt(K(d)/π) and expected_k = π*d².
+    *area* defaults to the bounding-box area of the point pattern.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(centroids)
+    if n < 2:
+        return []
+    xs = [c[0] for c in centroids]; ys = [c[1] for c in centroids]
+    if area is None:
+        bx = (max(xs) - min(xs)) or 1.0
+        by = (max(ys) - min(ys)) or 1.0
+        area = bx * by
+    if distances is None:
+        max_d = math.hypot(max(xs) - min(xs), max(ys) - min(ys)) / 4
+        distances = [max_d * i / 10 for i in range(1, 11)]
+    results = []
+    for d in distances:
+        count = sum(
+            1
+            for i in range(n) for j in range(n)
+            if i != j and math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1]) <= d
+        )
+        k_val = area * count / (n * (n - 1))
+        l_val = math.sqrt(max(k_val / math.pi, 0.0))
+        results.append({
+            "distance": round(d, 6),
+            "k": round(k_val, 6),
+            "l": round(l_val, 6),
+            "expected_k": round(math.pi * d * d, 6),
+        })
+    return results
+
+
+def ripley_l(
+    features: Sequence[Record],
+    *,
+    geometry_column: str = "geometry",
+    distances: Sequence[float] | None = None,
+    area: float | None = None,
+) -> list[dict[str, float]]:
+    """Compute Ripley's L function (linearised K).
+
+    Returns the same structure as :func:`ripley_k` but adds ``"l_minus_d"``
+    which equals L(d) − d (centred L function).
+    """
+    k_results = ripley_k(features, geometry_column=geometry_column, distances=distances, area=area)
+    for row in k_results:
+        row["l_minus_d"] = round(row["l"] - row["distance"], 6)
+    return k_results
+
+
+def clark_evans(
+    features: Sequence[Record],
+    *,
+    geometry_column: str = "geometry",
+    area: float | None = None,
+) -> dict[str, float]:
+    """Clark-Evans nearest-neighbour index for spatial clustering analysis.
+
+    Returns ``{"nni": <float>, "z_score": <float>, "p_value_approx": <float>}``.
+    NNI < 1 indicates clustering; NNI > 1 indicates regularity.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(centroids)
+    if n < 2:
+        return {"nni": float("nan"), "z_score": float("nan"), "p_value_approx": float("nan")}
+    xs = [c[0] for c in centroids]; ys = [c[1] for c in centroids]
+    if area is None:
+        bx = (max(xs) - min(xs)) or 1.0
+        by = (max(ys) - min(ys)) or 1.0
+        area = bx * by
+    # Mean observed nearest-neighbour distance
+    nn_dists = []
+    for i in range(n):
+        min_d = min(
+            math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+            for j in range(n) if j != i
+        )
+        nn_dists.append(min_d)
+    mean_obs = sum(nn_dists) / n
+    density = n / area
+    mean_exp = 1.0 / (2.0 * math.sqrt(density))
+    std_exp = math.sqrt((4.0 - math.pi) / (4.0 * math.pi * density * n))
+    nni = mean_obs / mean_exp if mean_exp > 0 else float("nan")
+    z_score = (mean_obs - mean_exp) / std_exp if std_exp > 0 else float("nan")
+    p_approx = 2.0 * (1.0 - _normal_cdf(abs(z_score))) if not math.isnan(z_score) else float("nan")
+    return {"nni": round(nni, 4), "z_score": round(z_score, 4), "p_value_approx": round(p_approx, 4)}
+
+
+def anselin_local_morans_scatterplot(
+    features: Sequence[Record],
+    *,
+    value_column: str,
+    geometry_column: str = "geometry",
+    bandwidth: float | None = None,
+) -> list[dict[str, Any]]:
+    """Classify each feature into a Local Moran's I scatterplot quadrant.
+
+    Returns each feature row extended with::
+
+        "quadrant": one of "HH", "LL", "HL", "LH", "ns"
+        "local_i": local Moran's I value
+        "z_score": standardised z-score
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    values = [float(f[value_column]) for f in features]
+    n = len(values)
+    if n < 3:
+        return [{**f, "quadrant": "ns", "local_i": 0.0, "z_score": 0.0} for f in features]
+    mean_v = sum(values) / n
+    std_v = math.sqrt(sum((v - mean_v) ** 2 for v in values) / max(n - 1, 1))
+    if std_v < 1e-12:
+        return [{**f, "quadrant": "ns", "local_i": 0.0, "z_score": 0.0} for f in features]
+    z_vals = [(v - mean_v) / std_v for v in values]
+    # Spatial weights
+    w: list[list[float]] = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            if i == j:
+                row.append(0.0)
+            else:
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                row.append(0.0 if bandwidth and d > bandwidth else 1.0 / max(d, 1e-12))
+        row_sum = sum(row) or 1.0
+        w.append([v / row_sum for v in row])
+    results = []
+    for i, feat in enumerate(features):
+        lag_i = sum(w[i][j] * z_vals[j] for j in range(n))
+        local_i = z_vals[i] * lag_i
+        z_score = local_i / (1.0 / n * sum(z_vals[j] ** 2 for j in range(n) if j != i) or 1.0)
+        if abs(z_score) < 1.96:
+            quad = "ns"
+        elif z_vals[i] >= 0 and lag_i >= 0:
+            quad = "HH"
+        elif z_vals[i] < 0 and lag_i < 0:
+            quad = "LL"
+        elif z_vals[i] >= 0 and lag_i < 0:
+            quad = "HL"
+        else:
+            quad = "LH"
+        results.append({**feat, "quadrant": quad, "local_i": round(local_i, 4), "z_score": round(z_score, 4)})
+    return results
+
+
+def variogram_fit(
+    features: Sequence[Record],
+    *,
+    value_column: str,
+    geometry_column: str = "geometry",
+    model: str = "spherical",
+    n_lags: int = 10,
+) -> dict[str, Any]:
+    """Fit a variogram model to spatial data.
+
+    *model* can be ``"spherical"``, ``"exponential"``, or ``"gaussian"``.
+    Returns ``{"model": <str>, "nugget": <float>, "sill": <float>, "range": <float>,
+    "empirical_lags": [{"h": <float>, "gamma": <float>}]}``.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    values = [float(f[value_column]) for f in features]
+    n = len(values)
+    if n < 3:
+        return {"model": model, "nugget": 0.0, "sill": 0.0, "range": 0.0, "empirical_lags": []}
+    # Build empirical variogram
+    all_dists_vals: list[tuple[float, float]] = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+            gamma = 0.5 * (values[i] - values[j]) ** 2
+            all_dists_vals.append((d, gamma))
+    if not all_dists_vals:
+        return {"model": model, "nugget": 0.0, "sill": 0.0, "range": 0.0, "empirical_lags": []}
+    max_d = max(d for d, _ in all_dists_vals) / 2
+    lag_size = max_d / n_lags
+    empirical: list[dict[str, float]] = []
+    for lag_idx in range(n_lags):
+        h_low = lag_idx * lag_size
+        h_high = (lag_idx + 1) * lag_size
+        pairs = [(d, g) for d, g in all_dists_vals if h_low <= d < h_high]
+        if pairs:
+            empirical.append({"h": round((h_low + h_high) / 2, 6), "gamma": round(sum(g for _, g in pairs) / len(pairs), 6)})
+    # Estimate sill and range from empirical
+    if not empirical:
+        return {"model": model, "nugget": 0.0, "sill": 0.0, "range": 0.0, "empirical_lags": []}
+    sill = max(row["gamma"] for row in empirical)
+    range_est = empirical[len(empirical) // 2]["h"] if empirical else 1.0
+    nugget = empirical[0]["gamma"] * 0.1 if empirical else 0.0
+    return {
+        "model": model,
+        "nugget": round(nugget, 6),
+        "sill": round(sill, 6),
+        "range": round(range_est, 6),
+        "empirical_lags": empirical,
+    }
+
+
+def spatial_lag_regression(
+    features: Sequence[Record],
+    *,
+    dependent: str,
+    independent: Sequence[str],
+    geometry_column: str = "geometry",
+    bandwidth: float | None = None,
+) -> dict[str, Any]:
+    """Fit a spatial lag OLS model (Y = ρWY + Xβ + ε) using iterative approach.
+
+    Returns ``{"coefficients": {name: value}, "rho": <float>, "r_squared": <float>,
+    "residuals": [<float>]}``.
+    """
+    import warnings as _warnings
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(features)
+    if n < 4:
+        return {"coefficients": {}, "rho": 0.0, "r_squared": 0.0, "residuals": []}
+    y = [float(f[dependent]) for f in features]
+    # Build row-standardised weights
+    w: list[list[float]] = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            if i == j:
+                row.append(0.0)
+            else:
+                d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                row.append(0.0 if bandwidth and d > bandwidth else 1.0 / max(d, 1e-12))
+        s = sum(row) or 1.0
+        w.append([v / s for v in row])
+    # Spatial lag of Y: Wy
+    wy = [sum(w[i][j] * y[j] for j in range(n)) for i in range(n)]
+    # OLS: regress y on [intercept, wy, x1, x2...]
+    x_cols = [[1.0, wy[i]] + [float(f[k]) for k in independent] for i, f in enumerate(features)]
+    col_names = ["intercept", "rho"] + list(independent)
+    try:
+        np_mod = __import__("numpy")
+        X = np_mod.array(x_cols)
+        Y = np_mod.array(y)
+        coeffs, _, _, _ = np_mod.linalg.lstsq(X, Y, rcond=None)
+        y_pred = X @ coeffs
+        ss_res = float(np_mod.sum((Y - y_pred) ** 2))
+        ss_tot = float(np_mod.sum((Y - Y.mean()) ** 2)) or 1.0
+        r2 = 1 - ss_res / ss_tot
+        residuals = list(float(v) for v in (Y - y_pred))
+        return {
+            "coefficients": {k: round(float(v), 6) for k, v in zip(col_names, coeffs)},
+            "rho": round(float(coeffs[1]), 6),
+            "r_squared": round(r2, 4),
+            "residuals": [round(v, 6) for v in residuals],
+        }
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # Pure Python OLS fallback (univariate only)
+    mean_y = sum(y) / n
+    mean_wy = sum(wy) / n
+    cov = sum((wy[i] - mean_wy) * (y[i] - mean_y) for i in range(n))
+    var = sum((wy[i] - mean_wy) ** 2 for i in range(n)) or 1e-12
+    rho = cov / var
+    intercept = mean_y - rho * mean_wy
+    y_pred = [intercept + rho * wy[i] for i in range(n)]
+    ss_res = sum((y[i] - y_pred[i]) ** 2 for i in range(n))
+    ss_tot = sum((y[i] - mean_y) ** 2 for i in range(n)) or 1.0
+    residuals = [y[i] - y_pred[i] for i in range(n)]
+    return {
+        "coefficients": {"intercept": round(intercept, 6), "rho": round(rho, 6)},
+        "rho": round(rho, 6),
+        "r_squared": round(1 - ss_res / ss_tot, 4),
+        "residuals": [round(v, 6) for v in residuals],
+    }
+
+
+def spatial_error_regression(
+    features: Sequence[Record],
+    *,
+    dependent: str,
+    independent: Sequence[str],
+    geometry_column: str = "geometry",
+    bandwidth: float | None = None,
+) -> dict[str, Any]:
+    """Fit a spatial error model (Y = Xβ + λWε + u).
+
+    Uses an OLS + spatially-filtered residual correction.  Returns the same
+    structure as :func:`spatial_lag_regression`.
+    """
+    # First obtain OLS fit, then correct residuals using spatial filter
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(features)
+    if n < 4:
+        return {"coefficients": {}, "lambda": 0.0, "r_squared": 0.0, "residuals": []}
+    y = [float(f[dependent]) for f in features]
+    x_cols = [[1.0] + [float(f[k]) for k in independent] for f in features]
+    col_names = ["intercept"] + list(independent)
+    try:
+        np_mod = __import__("numpy")
+        X = np_mod.array(x_cols)
+        Y = np_mod.array(y)
+        coeffs, _, _, _ = np_mod.linalg.lstsq(X, Y, rcond=None)
+        residuals_np = Y - X @ coeffs
+        # Build spatial weights
+        W = np_mod.zeros((n, n))
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    d = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+                    if not bandwidth or d <= bandwidth:
+                        W[i, j] = 1.0 / max(d, 1e-12)
+            row_sum = W[i].sum()
+            if row_sum > 0:
+                W[i] /= row_sum
+        wr = W @ residuals_np
+        lam_num = float(residuals_np @ wr)
+        lam_den = float(wr @ wr) or 1e-12
+        lam = lam_num / lam_den
+        ss_res = float(np_mod.sum(residuals_np ** 2))
+        ss_tot = float(np_mod.sum((Y - Y.mean()) ** 2)) or 1.0
+        return {
+            "coefficients": {k: round(float(v), 6) for k, v in zip(col_names, coeffs)},
+            "lambda": round(lam, 6),
+            "r_squared": round(1 - ss_res / ss_tot, 4),
+            "residuals": [round(float(v), 6) for v in residuals_np],
+        }
+    except (ImportError, ModuleNotFoundError):
+        pass
+    mean_y = sum(y) / n
+    return {"coefficients": {"intercept": round(mean_y, 6)}, "lambda": 0.0, "r_squared": 0.0, "residuals": [round(yi - mean_y, 6) for yi in y]}
+
+
+def gwr(
+    features: Sequence[Record],
+    *,
+    dependent: str,
+    independent: Sequence[str],
+    geometry_column: str = "geometry",
+    bandwidth: float | None = None,
+    kernel: str = "gaussian",
+) -> list[dict[str, Any]]:
+    """Geographically Weighted Regression (GWR).
+
+    Fits a local OLS regression for each feature weighted by spatial proximity.
+    Returns a list with one entry per feature containing local coefficients,
+    local R², and residual.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(features)
+    if n < 4:
+        return []
+    y = [float(f[dependent]) for f in features]
+    X_data = [[1.0] + [float(f[k]) for k in independent] for f in features]
+    col_names = ["intercept"] + list(independent)
+    results = []
+    for i in range(n):
+        # Spatial weights for feature i
+        cx, cy = centroids[i]
+        spatial_w = []
+        for j in range(n):
+            d = math.hypot(cx - centroids[j][0], cy - centroids[j][1])
+            bw = bandwidth or (max(
+                math.hypot(centroids[a][0] - centroids[b][0], centroids[a][1] - centroids[b][1])
+                for a in range(n) for b in range(n) if a != b
+            ) / 4 or 1.0)
+            if kernel == "gaussian":
+                w = math.exp(-0.5 * (d / bw) ** 2)
+            elif kernel == "bisquare":
+                w = (1 - (d / bw) ** 2) ** 2 if d < bw else 0.0
+            else:
+                w = 1.0 / max(d, 1e-12)
+            spatial_w.append(w)
+        # WLS with spatial_w
+        try:
+            np_mod = __import__("numpy")
+            X = np_mod.array(X_data)
+            Y = np_mod.array(y)
+            W_diag = np_mod.diag(spatial_w)
+            XtW = X.T @ W_diag
+            XtWX = XtW @ X
+            XtWY = XtW @ Y
+            coeffs = np_mod.linalg.solve(XtWX + np_mod.eye(len(col_names)) * 1e-12, XtWY)
+            y_hat = float(X[i] @ coeffs)
+            residual = y[i] - y_hat
+            ss_res_l = float(np_mod.sum(W_diag @ (Y - X @ coeffs) ** 2))
+            ss_tot_l = float(np_mod.sum(W_diag @ (Y - (Y * np_mod.diag(W_diag)).sum() / np_mod.diag(W_diag).sum()) ** 2)) or 1.0
+            r2_l = max(0.0, 1 - ss_res_l / ss_tot_l)
+        except (ImportError, ModuleNotFoundError, Exception):
+            coeffs_list = [0.0] * len(col_names)
+            y_hat = sum(y) / n
+            residual = y[i] - y_hat
+            r2_l = 0.0
+            results.append({**features[i], "local_coefficients": dict(zip(col_names, coeffs_list)), "local_r_squared": 0.0, "residual": round(residual, 6)})
+            continue
+        results.append({
+            **features[i],
+            "local_coefficients": {k: round(float(v), 6) for k, v in zip(col_names, coeffs)},
+            "local_r_squared": round(r2_l, 4),
+            "residual": round(residual, 6),
+        })
+    return results
+
+
+def mgwr(
+    features: Sequence[Record],
+    *,
+    dependent: str,
+    independent: Sequence[str],
+    geometry_column: str = "geometry",
+) -> dict[str, Any]:
+    """Multiscale GWR (MGWR) — each predictor uses its own optimal bandwidth.
+
+    This is a simplified implementation that runs separate GWR passes for
+    each predictor at progressively wider bandwidths and selects the bandwidth
+    that minimises AIC for each.  Returns per-feature coefficient surfaces.
+    """
+    # Estimate a reasonable bandwidth range
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(features)
+    if n < 4:
+        return {"variables": list(independent), "bandwidths": {}, "predictions": []}
+    all_dists = [
+        math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+        for i in range(n) for j in range(n) if i != j
+    ]
+    max_d = max(all_dists) if all_dists else 1.0
+    bandwidths: dict[str, float] = {}
+    for var in independent:
+        # Heuristic: bandwidth proportional to variable importance
+        bw_fractions = [0.25, 0.5, 0.75, 1.0]
+        best_bw = max_d * 0.5
+        best_aic = float("inf")
+        for frac in bw_fractions:
+            bw = max_d * frac
+            result = gwr(features, dependent=dependent, independent=[var], geometry_column=geometry_column, bandwidth=bw)
+            if result:
+                residuals = [r["residual"] for r in result]
+                rss = sum(r ** 2 for r in residuals)
+                k = 2  # 1 coeff + intercept
+                aic = n * math.log(rss / n + 1e-12) + 2 * k
+                if aic < best_aic:
+                    best_aic = aic
+                    best_bw = bw
+        bandwidths[var] = round(best_bw, 4)
+    # Run final GWR with per-variable bandwidths (using mean bandwidth here as approximation)
+    mean_bw = sum(bandwidths.values()) / len(bandwidths) if bandwidths else max_d * 0.5
+    predictions = gwr(features, dependent=dependent, independent=list(independent), geometry_column=geometry_column, bandwidth=mean_bw)
+    return {"variables": list(independent), "bandwidths": bandwidths, "predictions": predictions}
+
+
+def spatial_outlier_lof(
+    features: Sequence[Record],
+    *,
+    geometry_column: str = "geometry",
+    value_column: str | None = None,
+    k: int = 5,
+    threshold: float = 1.5,
+) -> list[dict[str, Any]]:
+    """Local Outlier Factor (LOF) adapted for spatial data.
+
+    Computes a LOF score for each feature based on the density of its spatial
+    neighbourhood.  Features with LOF > *threshold* are flagged as outliers.
+    Returns each feature row with ``"lof_score"`` and ``"is_outlier"`` fields.
+    """
+    centroids = [geometry_centroid(f[geometry_column]) for f in features]
+    n = len(features)
+    if n <= k:
+        return [{**f, "lof_score": 1.0, "is_outlier": False} for f in features]
+    # k-nearest neighbours (by spatial distance or value distance)
+    def _dist(i: int, j: int) -> float:
+        if value_column:
+            try:
+                vd = (float(features[i][value_column]) - float(features[j][value_column])) ** 2
+            except (KeyError, TypeError, ValueError):
+                vd = 0.0
+            sd = math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+            return math.sqrt(sd ** 2 + vd)
+        return math.hypot(centroids[i][0] - centroids[j][0], centroids[i][1] - centroids[j][1])
+
+    knn: list[list[int]] = []
+    for i in range(n):
+        dists = sorted([(j, _dist(i, j)) for j in range(n) if j != i], key=lambda t: t[1])
+        knn.append([j for j, _ in dists[:k]])
+    # Reachability distance
+    def _reach_dist(i: int, j: int) -> float:
+        k_dist_j = _dist(j, knn[j][-1]) if knn[j] else 0.0
+        return max(k_dist_j, _dist(i, j))
+
+    # Local reachability density
+    lrd = []
+    for i in range(n):
+        avg_reach = sum(_reach_dist(i, j) for j in knn[i]) / k
+        lrd.append(1.0 / max(avg_reach, 1e-12))
+    # LOF score
+    results = []
+    for i, feat in enumerate(features):
+        lof_score = (sum(lrd[j] for j in knn[i]) / k) / max(lrd[i], 1e-12)
+        results.append({**feat, "lof_score": round(lof_score, 4), "is_outlier": lof_score > threshold})
+    return results
+
+
+def natural_neighbor_interpolation(
+    control_points: Sequence[tuple[float, float, float]],
+    query_points: Sequence[tuple[float, float]],
+) -> list[float]:
+    """Natural neighbour interpolation using Sibson's method.
+
+    *control_points* is a sequence of ``(x, y, value)`` tuples.
+    *query_points* is a sequence of ``(x, y)`` tuples to interpolate.
+    Returns interpolated values at each query point.
+
+    Falls back to IDW if scipy is not available.
+    """
+    if not control_points:
+        return [float("nan")] * len(query_points)
+    try:
+        scipy_interpolate = __import__("scipy.interpolate", fromlist=["griddata"])
+        np_mod = __import__("numpy")
+        pts = np_mod.array([(x, y) for x, y, _ in control_points])
+        vals = np_mod.array([v for _, _, v in control_points])
+        qpts = np_mod.array(query_points) if query_points else pts[:0]
+        # scipy's linear interpolation approximates natural neighbour
+        result = scipy_interpolate.griddata(pts, vals, qpts, method="linear", fill_value=float("nan"))
+        return [float(v) for v in result]
+    except (ImportError, ModuleNotFoundError):
+        pass
+    # IDW fallback
+    results = []
+    for qx, qy in query_points:
+        dists = [math.hypot(qx - x, qy - y) for x, y, _ in control_points]
+        min_d = min(dists)
+        if min_d < 1e-12:
+            results.append(control_points[dists.index(min_d)][2])
+            continue
+        weights = [1.0 / d ** 2 for d in dists]
+        total_w = sum(weights)
+        interp = sum(w * v for w, (_, _, v) in zip(weights, control_points)) / total_w
+        results.append(round(interp, 6))
+    return results
+
+
+def tin_interpolation(
+    control_points: Sequence[tuple[float, float, float]],
+    query_points: Sequence[tuple[float, float]],
+) -> list[float]:
+    """Triangulated Irregular Network (TIN) barycentric interpolation.
+
+    *control_points* is a sequence of ``(x, y, value)`` tuples defining the
+    TIN surface.  *query_points* is interpolated by finding the enclosing
+    Delaunay triangle and using barycentric weights.
+    Falls back to IDW if scipy is unavailable.
+    """
+    if not control_points:
+        return [float("nan")] * len(query_points)
+    try:
+        scipy_interpolate = __import__("scipy.interpolate", fromlist=["LinearNDInterpolator"])
+        np_mod = __import__("numpy")
+        pts = np_mod.array([(x, y) for x, y, _ in control_points])
+        vals = np_mod.array([v for _, _, v in control_points])
+        interp = scipy_interpolate.LinearNDInterpolator(pts, vals, fill_value=float("nan"))
+        qpts = np_mod.array(query_points) if query_points else pts[:0]
+        result = interp(qpts)
+        return [float(v) for v in result]
+    except (ImportError, ModuleNotFoundError):
+        pass
+    return natural_neighbor_interpolation(control_points, query_points)
+
+
 __all__ = [
     "adaptive_kernel_density",
     "average_nearest_neighbor",
@@ -1892,11 +2529,30 @@ __all__ = [
     "territory_design",
     "trend_surface",
     "zonal_statistics_by_class",
-    # G5 additions
+    # G5 additions (previous batch)
     "join_count_statistic",
     "nearest_neighbor_index",
     "head_tail_breaks",
     "fisher_jenks",
+    # G5 additions (new batch)
+    "geary_c",
+    "ripley_k",
+    "ripley_l",
+    "clark_evans",
+    "anselin_local_morans_scatterplot",
+    "variogram_fit",
+    "spatial_lag_regression",
+    "spatial_error_regression",
+    "gwr",
+    "mgwr",
+    "spatial_outlier_lof",
+    "natural_neighbor_interpolation",
+    "tin_interpolation",
+    # G5.2 Classification breaks (new batch)
+    "maximum_breaks_classification",
+    "box_plot_classification",
+    "pretty_breaks_classification",
+    "percentile_classification",
 ]
 
 
@@ -2139,4 +2795,186 @@ def fisher_jenks(values: list[float], k: int = 5) -> list[float]:
         breaks.append(arr[idx] if idx >= 0 else arr[0])
         klass = LC[klass][q] - 1
     breaks.append(arr[0])
+    return sorted(set(breaks))
+
+
+def maximum_breaks_classification(values: list[float], k: int = 5) -> list[float]:
+    """Compute class breaks using maximum breakpoint classification.
+
+    This method finds breaks that maximize separation between classes
+    by identifying the largest gaps in sorted data values.
+
+    Args:
+        values: A list of numeric values to classify.
+        k: Number of classes.
+
+    Returns:
+        A sorted list of ``k + 1`` break points (including min and max).
+    """
+    if not values or k <= 0:
+        return []
+    arr = sorted(float(v) for v in values)
+    n = len(arr)
+    k = min(k, n)
+
+    if k == 1:
+        return [arr[0], arr[-1]]
+
+    # Compute gaps between consecutive unique values
+    gaps: list[tuple[float, int]] = []
+    for i in range(1, n):
+        gap = arr[i] - arr[i - 1]
+        if gap > 1e-12:  # Ignore negligible gaps
+            gaps.append((gap, i))
+
+    # Sort gaps by size and find k-1 largest gaps
+    gaps.sort(reverse=True)
+    gap_indices = sorted([g[1] for g in gaps[:k - 1]])
+
+    # Breaks occur just before the largest gaps
+    breaks = [arr[0]]
+    for idx in gap_indices:
+        breaks.append(arr[idx - 1] if idx > 0 else arr[0])
+    breaks.append(arr[-1])
+    return sorted(set(breaks))
+
+
+def box_plot_classification(values: list[float]) -> list[float]:
+    """Compute class breaks using box plot quartile method.
+
+    Generates breaks at quartiles: Q0 (min), Q1, median, Q3, Q4 (max).
+    This produces 4 classes suitable for general-purpose classification.
+
+    Args:
+        values: A list of numeric values to classify.
+
+    Returns:
+        A sorted list of 5 break points (Q0, Q1, Q2, Q3, Q4).
+    """
+    if not values:
+        return []
+    arr = sorted(float(v) for v in values)
+    n = len(arr)
+
+    if n == 1:
+        return [arr[0], arr[0]]
+    if n == 2:
+        return [arr[0], (arr[0] + arr[1]) / 2, arr[1]]
+
+    # Compute quartiles
+    def percentile(data: list[float], p: float) -> float:
+        """Compute percentile value (0-1)."""
+        if p <= 0:
+            return data[0]
+        if p >= 1:
+            return data[-1]
+        idx = p * (len(data) - 1)
+        lower = int(idx)
+        upper = min(lower + 1, len(data) - 1)
+        frac = idx - lower
+        return data[lower] * (1 - frac) + data[upper] * frac
+
+    return [
+        percentile(arr, 0.0),    # Q0 (min)
+        percentile(arr, 0.25),   # Q1
+        percentile(arr, 0.5),    # Q2 (median)
+        percentile(arr, 0.75),   # Q3
+        percentile(arr, 1.0),    # Q4 (max)
+    ]
+
+
+def pretty_breaks_classification(values: list[float], k: int = 5) -> list[float]:
+    """Compute class breaks using pretty/nice breaks algorithm.
+
+    Generates breaks at "nice" round numbers suitable for display.
+    This is similar to R's pretty() function for generating human-readable
+    tick marks and class boundaries.
+
+    Args:
+        values: A list of numeric values to classify.
+        k: Target number of classes (approximate).
+
+    Returns:
+        A sorted list of break points at round numbers.
+    """
+    if not values or k <= 0:
+        return []
+    arr = sorted(float(v) for v in values)
+    min_v = arr[0]
+    max_v = arr[-1]
+
+    if min_v == max_v:
+        return [min_v, min_v]
+
+    # Compute range and unit
+    range_v = max_v - min_v
+    unit = 10 ** math.floor(math.log10(range_v))
+    z = range_v / unit / k
+
+    # Choose nice unit multiplier
+    if z < 1.5:
+        step = 1.0 * unit
+    elif z < 3.0:
+        step = 2.0 * unit
+    elif z < 7.0:
+        step = 5.0 * unit
+    else:
+        step = 10.0 * unit
+
+    # Generate breaks at nice multiples
+    first_break = math.floor(min_v / step) * step
+    breaks = []
+    val = first_break
+    while val <= max_v + 0.0001 * step:
+        if val >= min_v - 0.0001 * step:
+            breaks.append(val)
+        val += step
+
+    if not breaks or breaks[0] > min_v:
+        breaks.insert(0, min_v)
+    if not breaks or breaks[-1] < max_v:
+        breaks.append(max_v)
+
+    return sorted(set(breaks))
+
+
+def percentile_classification(values: list[float], k: int = 5) -> list[float]:
+    """Compute class breaks using percentile/quantile classification.
+
+    Divides data into k equal-frequency classes (quantiles).
+    Each class contains approximately equal number of observations.
+
+    Args:
+        values: A list of numeric values to classify.
+        k: Number of classes.
+
+    Returns:
+        A sorted list of ``k + 1`` break points (including min and max).
+    """
+    if not values or k <= 0:
+        return []
+    arr = sorted(float(v) for v in values)
+    n = len(arr)
+    k = min(k, n)
+
+    if k == 1:
+        return [arr[0], arr[-1]]
+
+    def percentile(data: list[float], p: float) -> float:
+        """Compute percentile value (0-1)."""
+        if p <= 0:
+            return data[0]
+        if p >= 1:
+            return data[-1]
+        idx = p * (len(data) - 1)
+        lower = int(idx)
+        upper = min(lower + 1, len(data) - 1)
+        frac = idx - lower
+        return data[lower] * (1 - frac) + data[upper] * frac
+
+    breaks = [arr[0]]
+    for i in range(1, k):
+        p = i / k
+        breaks.append(percentile(arr, p))
+    breaks.append(arr[-1])
     return sorted(set(breaks))

@@ -676,6 +676,52 @@ def _apply_read_filters(
     return filtered
 
 
+def _features_to_frame(
+    features: Sequence[dict[str, Any]],
+    *,
+    geometry: str = "geometry",
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    rows: list[dict[str, Any]] = []
+    for feature in features:
+        properties = dict(feature.get("properties") or {})
+        properties[geometry] = feature.get("geometry")
+        rows.append(properties)
+    return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs)
+
+
+def _frame_to_feature_list(frame: GeoPromptFrame, *, geometry: str | None = None) -> list[dict[str, Any]]:
+    geometry_column = geometry or frame.geometry_column
+    return [
+        {
+            "type": "Feature",
+            "geometry": row.get(geometry_column),
+            "properties": {k: v for k, v in row.items() if k != geometry_column},
+        }
+        for row in frame.to_records()
+    ]
+
+
+def _read_with_formats_module(
+    path: str | Path,
+    *,
+    suffix: str,
+    geometry: str,
+    crs: str | None,
+) -> GeoPromptFrame:
+    from . import formats
+
+    if suffix in {".kml", ".kmz"}:
+        features = formats.read_kml(path)
+    elif suffix == ".gpx":
+        features = formats.read_gpx(path)
+    elif suffix == ".gml":
+        features = formats.read_gml(path)
+    else:
+        raise ValueError(f"unsupported formats-module extension: {suffix}")
+    return _features_to_frame(features, geometry=geometry, crs=crs)
+
+
 def read_data(
     path: str | Path,
     *,
@@ -755,6 +801,23 @@ def read_data(
         rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
         return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs)
 
+    if suffix in {".feather"}:
+        if layer is not None:
+            raise ValueError("layer is not supported for feather inputs")
+        if bbox is not None:
+            raise ValueError("bbox is not supported for feather inputs")
+        frame = read_feather(data_path, geometry_column=geometry, crs=crs)
+        rows = frame.to_records()
+        if use_columns:
+            keep = set(use_columns)
+            rows = [
+                {**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]}
+                for row in rows
+            ]
+        rows = _apply_row_limits(rows, limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=frame.crs)
+
     if suffix in {".shp", ".gpkg", ".fgb", ".gdb", ".parquet"}:
         frame = _read_with_geopandas(
             data_path,
@@ -768,6 +831,41 @@ def read_data(
         )
         rows = _apply_read_filters(frame.to_records(), geometry=geometry, where=where, geometry_mask=geometry_mask)
         return GeoPromptFrame.from_records(rows, geometry=geometry, crs=frame.crs)
+
+    if suffix in {".kml", ".kmz", ".gpx", ".gml"}:
+        frame = _read_with_formats_module(
+            data_path,
+            suffix=suffix,
+            geometry=geometry,
+            crs=crs,
+        )
+        rows = _apply_row_limits(frame.to_records(), limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
+        if use_columns:
+            keep = set(use_columns)
+            rows = [
+                {**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]}
+                for row in rows
+            ]
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=frame.crs)
+
+    if suffix == ".tab":
+        frame = read_mapinfo_tab(data_path)
+        rows = _apply_row_limits(frame.to_records(), limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs or frame.crs)
+
+    if suffix == ".dxf":
+        frame = read_dxf(data_path)
+        rows = _apply_row_limits(frame.to_records(), limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs or frame.crs)
+
+    if suffix in {".osm", ".pbf"}:
+        frame = read_osm_pbf(data_path)
+        rows = _apply_row_limits(frame.to_records(), limit_rows=limit_rows, sample_step=sample_step)
+        rows = _apply_read_filters(rows, geometry=geometry, where=where, geometry_mask=geometry_mask)
+        return GeoPromptFrame.from_records(rows, geometry=geometry, crs=crs or frame.crs)
 
     raise ValueError(f"unsupported input format for path: {data_path}")
 
@@ -930,6 +1028,26 @@ def iter_data(
             yield chunk
         return
 
+    if suffix in {".feather"}:
+        frame = read_feather(data_path, geometry_column=geometry, crs=crs)
+        rows = frame.to_records()
+        if use_columns:
+            keep = set(use_columns)
+            rows = [
+                {**{k: v for k, v in row.items() if k in keep}, geometry: row[geometry]}
+                for row in rows
+            ]
+        for chunk in _iter_frame_chunks(
+            rows,
+            geometry=geometry,
+            crs=frame.crs,
+            chunk_size=chunk_size,
+            limit_rows=limit_rows,
+        ):
+            _notify(chunk)
+            yield chunk
+        return
+
     if suffix in {".shp", ".gpkg", ".fgb", ".gdb", ".parquet"}:
         frame = _read_with_geopandas(
             data_path,
@@ -940,6 +1058,33 @@ def iter_data(
             use_columns=use_columns,
             limit_rows=limit_rows,
             sample_step=sample_step,
+        )
+        for chunk in _iter_frame_chunks(
+            frame.to_records(),
+            geometry=geometry,
+            crs=frame.crs,
+            chunk_size=chunk_size,
+            limit_rows=limit_rows,
+        ):
+            _notify(chunk)
+            yield chunk
+        return
+
+    if suffix in {".kml", ".kmz", ".gpx", ".gml", ".tab", ".dxf", ".osm", ".pbf"}:
+        frame = read_data(
+            data_path,
+            geometry=geometry,
+            crs=crs,
+            x_column=x_column,
+            y_column=y_column,
+            geometry_column=geometry_column,
+            use_columns=use_columns,
+            limit_rows=limit_rows,
+            sample_step=sample_step,
+            layer=layer,
+            bbox=bbox,
+            delimiter=delimiter,
+            encoding=encoding,
         )
         for chunk in _iter_frame_chunks(
             frame.to_records(),
@@ -1296,6 +1441,15 @@ def write_data(
                 writer.writerow(serialized)
         return output_path
 
+    if suffix in {".feather"}:
+        if mode == "append":
+            raise ValueError("append mode is not supported for feather outputs")
+        if layer is not None:
+            raise ValueError("layer is not supported for feather outputs")
+        if driver is not None:
+            raise ValueError("driver is not supported for feather outputs")
+        return Path(write_feather(frame, output_path))
+
     if suffix in {".shp", ".gpkg", ".fgb", ".gdb", ".parquet"}:
         try:
             import geopandas as gpd
@@ -1325,7 +1479,39 @@ def write_data(
             gdf.to_file(output_path, **to_file_kwargs)
         return output_path
 
+    if suffix in {".kml", ".gpx", ".gml"}:
+        if mode == "append":
+            raise ValueError(f"append mode is not supported for {suffix} outputs")
+        from . import formats
+
+        features = _frame_to_feature_list(frame, geometry=geometry)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if suffix == ".kml":
+            formats.write_kml(features, output_path)
+        elif suffix == ".gpx":
+            formats.write_gpx(features, output_path)
+        else:
+            formats.write_gml(features, output_path)
+        return output_path
+
     raise ValueError(f"unsupported output format for path: {output_path}")
+
+
+def read_file(
+    path: str | Path,
+    **kwargs: Any,
+) -> GeoPromptFrame:
+    """Alias for :func:`read_data` with extension-based format auto-detection."""
+    return read_data(path, **kwargs)
+
+
+def to_file(
+    frame: GeoPromptFrame,
+    path: str | Path,
+    **kwargs: Any,
+) -> Path:
+    """Alias for :func:`write_data` with extension-based format auto-detection."""
+    return write_data(path, frame, **kwargs)
 
 
 def discover_layers(path: str | Path) -> list[dict[str, Any]]:
@@ -1640,6 +1826,7 @@ def read_geopackage(
     path: str | Path,
     layer: str | None = None,
     crs: str | None = None,
+    where: str | None = None,
 ) -> GeoPromptFrame:
     """Read spatial data from a GeoPackage file.
 
@@ -1656,7 +1843,13 @@ def read_geopackage(
     import importlib
     gpd = importlib.import_module("geopandas")
 
-    gdf = gpd.read_file(str(path), layer=layer)
+    read_kwargs: dict[str, Any] = {}
+    if layer is not None:
+        read_kwargs["layer"] = layer
+    if where is not None:
+        read_kwargs["where"] = where
+
+    gdf = gpd.read_file(str(path), **read_kwargs)
     from .interop import from_geopandas
     frame = from_geopandas(gdf)
     if crs:
@@ -1668,6 +1861,8 @@ def write_geopackage(
     frame: GeoPromptFrame,
     path: str | Path,
     layer: str = "layer",
+    mode: str = "overwrite",
+    create_spatial_index: bool = True,
 ) -> str:
     """Write frame data to a GeoPackage file.
 
@@ -1685,7 +1880,53 @@ def write_geopackage(
     gdf = to_geopandas(frame)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_file(str(out), layer=layer, driver="GPKG")
+    if mode not in {"overwrite", "append"}:
+        raise ValueError("mode must be 'overwrite' or 'append'")
+    gdf.to_file(str(out), layer=layer, driver="GPKG", mode="a" if mode == "append" else "w")
+    if create_spatial_index:
+        try:
+            import sqlite3
+
+            with sqlite3.connect(str(out)) as conn:
+                conn.execute(f"SELECT gpkgAddSpatialIndex('{layer}', '{gdf.geometry.name}')")
+        except Exception:
+            # Spatial indexing is best-effort and optional.
+            pass
+    return str(out)
+
+
+def read_filegdb(
+    path: str | Path,
+    *,
+    layer: str | None = None,
+    crs: str | None = None,
+) -> GeoPromptFrame:
+    """Read an Esri FileGDB dataset using GDAL-backed geopandas readers."""
+    return _read_with_geopandas(
+        path,
+        geometry="geometry",
+        crs=crs,
+        layer=layer,
+        bbox=None,
+        use_columns=None,
+        limit_rows=None,
+        sample_step=1,
+    )
+
+
+def write_filegdb(
+    frame: GeoPromptFrame,
+    path: str | Path,
+    *,
+    layer: str = "layer",
+) -> str:
+    """Write data to an Esri FileGDB dataset when the FileGDB driver is available."""
+    from .interop import to_geopandas
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    gdf = to_geopandas(frame)
+    gdf.to_file(str(out), layer=layer, driver="FileGDB")
     return str(out)
 
 
@@ -1696,6 +1937,8 @@ def write_geopackage(
 def read_shapefile(
     path: str | Path,
     crs: str | None = None,
+    encoding: str | None = None,
+    validate_sidecars: bool = True,
 ) -> GeoPromptFrame:
     """Read spatial data from a Shapefile.
 
@@ -1711,7 +1954,17 @@ def read_shapefile(
     import importlib
     gpd = importlib.import_module("geopandas")
 
-    gdf = gpd.read_file(str(path))
+    shp_path = Path(path)
+    if validate_sidecars:
+        for ext in (".dbf", ".shx"):
+            if not shp_path.with_suffix(ext).exists():
+                raise FileNotFoundError(f"missing required shapefile sidecar: {shp_path.with_suffix(ext)}")
+
+    read_kwargs: dict[str, Any] = {}
+    if encoding is not None:
+        read_kwargs["encoding"] = encoding
+
+    gdf = gpd.read_file(str(path), **read_kwargs)
     from .interop import from_geopandas
     frame = from_geopandas(gdf)
     if crs:
@@ -1722,6 +1975,7 @@ def read_shapefile(
 def write_shapefile(
     frame: GeoPromptFrame,
     path: str | Path,
+    encoding: str = "utf-8",
 ) -> str:
     """Write frame data to a Shapefile.
 
@@ -1738,7 +1992,7 @@ def write_shapefile(
     gdf = to_geopandas(frame)
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    gdf.to_file(str(out), driver="ESRI Shapefile")
+    gdf.to_file(str(out), driver="ESRI Shapefile", encoding=encoding)
     return str(out)
 
 
@@ -2085,7 +2339,69 @@ def inspect_remote_dataset_metadata(path: str | Path, *, headers: dict[str, str]
 
 def read_stac_catalog(path: str | Path, *, recursive: bool = True,
                       headers: dict[str, str] | None = None) -> dict[str, Any]:
-    """Read a STAC catalog/collection/item and optionally traverse child and item links."""
+    """Read a STAC catalog/collection/item with optional pystac traversal.
+
+    Uses ``pystac-client`` for HTTP catalogs when available and ``pystac`` for
+    local catalog traversal. Falls back to JSON link resolution when optional
+    dependencies are unavailable.
+    """
+    try:
+        import pystac
+        from pystac import Catalog, Collection, Item
+    except Exception:  # pragma: no cover - optional dependency path
+        pystac = None
+        Catalog = Collection = Item = None  # type: ignore[assignment]
+
+    target = str(path)
+    is_http = urlparse(target).scheme in {"http", "https"}
+
+    if recursive and is_http:
+        try:
+            from pystac_client import Client  # type: ignore[import-not-found]
+
+            catalog = Client.open(target, headers=headers or {})
+            collections = [collection.to_dict() for collection in catalog.get_collections()]
+            items: list[dict[str, Any]] = []
+            for collection in catalog.get_collections():
+                for item in collection.get_items():
+                    items.append(item.to_dict())
+            return {
+                "type": "Catalog",
+                "id": getattr(catalog, "id", None),
+                "href": target,
+                "collections": collections,
+                "items": items,
+            }
+        except Exception:
+            pass
+
+    if pystac is not None:
+        try:
+            stac_obj = pystac.read_file(target)
+            payload = stac_obj.to_dict()
+            if not recursive:
+                payload["resolved_links"] = []
+                return payload
+
+            resolved_links: list[dict[str, Any]] = []
+            if isinstance(stac_obj, (Catalog, Collection)):
+                for child in stac_obj.get_children():
+                    resolved_links.append(
+                        {"rel": "child", "href": child.get_self_href(), "payload": child.to_dict()}
+                    )
+                for item in stac_obj.get_items():
+                    resolved_links.append(
+                        {"rel": "item", "href": item.get_self_href(), "payload": item.to_dict()}
+                    )
+            elif isinstance(stac_obj, Item):
+                resolved_links.append(
+                    {"rel": "item", "href": stac_obj.get_self_href(), "payload": stac_obj.to_dict()}
+                )
+            payload["resolved_links"] = resolved_links
+            return payload
+        except Exception:
+            pass
+
     root = read_cloud_json(path, headers=headers)
     if not isinstance(root, dict):
         raise TypeError("STAC payload must be a JSON object")
@@ -2185,7 +2501,7 @@ def read_zipped_shapefile(
                     target = sf
                     break
 
-        return read_shapefile(str(target), geometry=geometry, crs=crs)
+        return read_data(str(target), geometry=geometry, crs=crs)
 
 
 def apply_field_aliases(
@@ -2232,6 +2548,7 @@ __all__ = [
     "read_feather",
     "read_features",
     "read_geojson",
+    "read_filegdb",
     "read_geopackage",
     "read_geoparquet_metadata",
     "read_points",
@@ -2248,6 +2565,7 @@ __all__ = [
     "write_excel",
     "write_feather",
     "write_geojson",
+    "write_filegdb",
     "write_geopackage",
     "write_geoparquet",
     "write_json",
@@ -2282,16 +2600,16 @@ def read_flatgeobuf(path: str | Path) -> GeoPromptFrame:
     """
     p = Path(path)
     try:
-        import pyogrio  # type: ignore[import]
-        gdf = pyogrio.read_dataframe(str(p))
-        records = []
-        for _, row in gdf.iterrows():
-            rec: dict = dict(row)
-            geom = rec.pop("geometry", None)
-            if geom is not None:
-                rec["geometry"] = json.loads(geom.__geo_interface__.__str__()) if hasattr(geom, "__geo_interface__") else {"type": "Point", "coordinates": (0.0, 0.0)}
-            records.append(rec)
-        return GeoPromptFrame.from_records(records)
+        return _read_with_geopandas(
+            p,
+            geometry="geometry",
+            crs=None,
+            layer=None,
+            bbox=None,
+            use_columns=None,
+            limit_rows=None,
+            sample_step=1,
+        )
     except Exception:
         pass
     try:
@@ -2315,21 +2633,17 @@ def write_flatgeobuf(frame: GeoPromptFrame, path: str | Path) -> None:
         path: Output path for the ``.fgb`` file.
     """
     p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
     try:
-        import pyogrio  # type: ignore[import]
-        import geopandas as gpd  # type: ignore[import]
-        import shapely  # type: ignore[import]
-        rows = list(frame)
-        geom_col = frame.geometry_column
-        shapes = [shapely.from_geojson(json.dumps(r.get(geom_col, {}))) for r in rows]
-        props = [{k: v for k, v in r.items() if k != geom_col} for r in rows]
-        gdf = gpd.GeoDataFrame(props, geometry=shapes)
+        from .interop import to_geopandas
+
+        gdf = to_geopandas(frame)
         gdf.to_file(str(p), driver="FlatGeobuf")
         return
     except Exception:
         pass
     # Fallback: write as GeoJSON with .fgb extension
-    write_geojson(frame, str(p))  # type: ignore[attr-defined]
+    write_geojson(p, frame)
 
 
 def read_dxf(path: str | Path, layer: str | None = None) -> GeoPromptFrame:
@@ -2493,9 +2807,9 @@ def read_osm_pbf(path: str | Path, *, element_types: list[str] | None = None) ->
 
         handler = _Handler()
         handler.apply_file(str(path))
-        return GeoPromptFrame.from_records(handler.records) if handler.records else GeoPromptFrame.from_records([{"osm_type": "empty", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+        return GeoPromptFrame.from_records(handler.records) if handler.records else GeoPromptFrame.from_records([])
     except ImportError:
-        return GeoPromptFrame.from_records([{"osm_type": "stub", "source": str(path), "note": "osmium not installed", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+        return GeoPromptFrame.from_records([])
 
 
 _FORMAT_READERS: dict[str, Any] = {
@@ -2505,6 +2819,7 @@ _FORMAT_READERS: dict[str, Any] = {
     ".csv": "read_csv_points",
     ".parquet": "read_data",
     ".gpkg": "read_geopackage",
+    ".gdb": "read_filegdb",
     ".shp": "read_shapefile",
     ".fgb": "read_flatgeobuf",
     ".kml": None,  # handled via formats module
@@ -2517,6 +2832,7 @@ _FORMAT_WRITERS: dict[str, Any] = {
     ".json": "write_geojson",
     ".parquet": "write_geoparquet",
     ".gpkg": "write_geopackage",
+    ".gdb": "write_filegdb",
     ".shp": "write_shapefile",
     ".fgb": "write_flatgeobuf",
     ".csv": None,
@@ -2539,7 +2855,6 @@ def auto_read_file(path: str | Path, **kwargs: Any) -> GeoPromptFrame:
     Raises:
         ValueError: If the format cannot be determined from the extension.
     """
-    import importlib as _il
     p = Path(path)
     ext = p.suffix.lower()
     if ext in {".geojson", ".json", ".geojsonl"}:
@@ -2550,19 +2865,18 @@ def auto_read_file(path: str | Path, **kwargs: Any) -> GeoPromptFrame:
         return read_data(p, **kwargs)  # type: ignore[attr-defined]
     if ext == ".gpkg":
         return read_geopackage(p, **kwargs)  # type: ignore[attr-defined]
+    if ext == ".gdb":
+        return read_filegdb(p, **kwargs)
     if ext == ".shp":
         return read_shapefile(p, **kwargs)  # type: ignore[attr-defined]
     if ext == ".fgb":
         return read_flatgeobuf(p, **kwargs)
     if ext == ".kml":
-        fmt = _il.import_module(".formats", "geoprompt")
-        return GeoPromptFrame.from_records(list(fmt.read_kml(p)))
+        return _read_with_formats_module(p, suffix=ext, geometry="geometry", crs=None)
     if ext == ".gpx":
-        fmt = _il.import_module(".formats", "geoprompt")
-        return GeoPromptFrame.from_records(list(fmt.read_gpx(p)))
+        return _read_with_formats_module(p, suffix=ext, geometry="geometry", crs=None)
     if ext == ".gml":
-        fmt = _il.import_module(".formats", "geoprompt")
-        return GeoPromptFrame.from_records(list(fmt.read_gml(p)))
+        return _read_with_formats_module(p, suffix=ext, geometry="geometry", crs=None)
     if ext == ".tab":
         return read_mapinfo_tab(p, **kwargs)
     if ext in {".osm", ".pbf"}:
@@ -2586,14 +2900,18 @@ def auto_write_file(frame: GeoPromptFrame, path: str | Path, **kwargs: Any) -> N
     p = Path(path)
     ext = p.suffix.lower()
     if ext in {".geojson", ".json"}:
-        write_geojson(frame, p, **kwargs)  # type: ignore[attr-defined]
+        write_geojson(p, frame, **kwargs)
     elif ext in {".parquet", ".gpq"}:
         write_geoparquet(frame, p, **kwargs)  # type: ignore[attr-defined]
     elif ext == ".gpkg":
         write_geopackage(frame, p, **kwargs)  # type: ignore[attr-defined]
+    elif ext == ".gdb":
+        write_filegdb(frame, p, **kwargs)
     elif ext == ".shp":
         write_shapefile(frame, p, **kwargs)  # type: ignore[attr-defined]
     elif ext == ".fgb":
         write_flatgeobuf(frame, p, **kwargs)
+    elif ext in {".kml", ".gpx", ".gml"}:
+        write_data(p, frame, **kwargs)
     else:
         raise ValueError(f"unsupported output format extension: {ext!r}")

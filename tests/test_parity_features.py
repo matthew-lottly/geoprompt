@@ -3,6 +3,8 @@ viz, stats, db, and io modules.
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 import pytest
 
 from geoprompt.frame import GeoPromptFrame
@@ -77,6 +79,114 @@ class TestGroupby:
         frame = _sample_frame()
         with pytest.raises(KeyError):
             frame.groupby("nonexistent")
+
+    def test_groupby_apply_returns_summary_rows(self):
+        frame = _sample_frame()
+        result = frame.groupby("region").apply(lambda group: {"sites": len(group)})
+        records = result.to_records()
+        north = next(r for r in records if r["region"] == "north")
+        south = next(r for r in records if r["region"] == "south")
+        assert north["sites"] == 2
+        assert south["sites"] == 3
+
+    def test_groupby_filter_keeps_matching_groups(self):
+        frame = _sample_frame()
+        result = frame.groupby("region").filter(lambda group: len(group) > 2)
+        assert {row["region"] for row in result} == {"south"}
+
+    def test_groupby_first_last_and_nth(self):
+        frame = _sample_frame()
+        first = frame.groupby("region").first().sort_values("region")
+        last = frame.groupby("region").last().sort_values("region")
+        nth = frame.groupby("region").nth(1).sort_values("region")
+        assert [row["site_id"] for row in first] == ["A", "C"]
+        assert [row["site_id"] for row in last] == ["B", "E"]
+        assert [row["site_id"] for row in nth] == ["B", "D"]
+
+    def test_groupby_cumcount_and_ngroup(self):
+        frame = _sample_frame()
+        grouped = frame.groupby("region")
+        assert grouped.cumcount() == [0, 1, 0, 1, 2]
+        assert grouped.ngroup() == [0, 0, 1, 1, 1]
+
+    def test_groupby_transform_broadcasts_scalar(self):
+        frame = _sample_frame()
+        result = frame.groupby("region").transform("value", lambda values: len([v for v in values if v is not None]), new_column="value_count")
+        north_counts = [row["value_count"] for row in result if row["region"] == "north"]
+        south_counts = [row["value_count"] for row in result if row["region"] == "south"]
+        assert north_counts == [2, 2]
+        assert south_counts == [2, 2, 2]
+
+
+class TestFrameAggregationAndStyle:
+    def test_frame_agg_and_aggregate_alias(self):
+        frame = _sample_frame()
+        agg_frame = frame.agg({"value": ["sum", "mean"]})
+        alias_frame = frame.aggregate({"site_id": "count"})
+        agg_row = agg_frame[0]
+        alias_row = alias_frame[0]
+        assert agg_row["value_sum"] == 110.0
+        assert agg_row["value_mean"] == 27.5
+        assert alias_row["site_id_count"] == 5
+
+    def test_style_accessor_formats_and_highlights_html(self):
+        frame = _sample_frame()
+        html = frame.style.format({"value": ".1f"}).highlight_max(["value"]).to_html()
+        assert "<table" in html
+        assert "background-color" in html
+        assert "50.0" in html
+
+    def test_resample_groups_datetime_rows(self):
+        frame = GeoPromptFrame([
+            {"site_id": "A", "timestamp": datetime(2025, 1, 1, 8, 0), "value": 10.0, "geometry": _point(0, 0)},
+            {"site_id": "B", "timestamp": datetime(2025, 1, 1, 9, 0), "value": 20.0, "geometry": _point(1, 1)},
+            {"site_id": "C", "timestamp": datetime(2025, 1, 2, 8, 0), "value": 30.0, "geometry": _point(2, 2)},
+        ])
+        result = frame.resample("1D", on="timestamp", agg="sum")
+        assert len(result) == 2
+        assert [row["value"] for row in result] == [30.0, 30.0]
+
+
+class TestMultiGeometryColumns:
+    def test_set_geometry_switches_active_geometry_column(self):
+        frame = GeoPromptFrame.from_records([
+            {
+                "site_id": "a",
+                "geometry": _point(0, 0),
+                "origin_geom": _point(10, 10),
+                "dest_geom": _point(20, 20),
+            },
+            {
+                "site_id": "b",
+                "geometry": _point(1, 1),
+                "origin_geom": _point(11, 11),
+                "dest_geom": _point(21, 21),
+            },
+        ])
+
+        switched = frame.set_geometry("origin_geom")
+        assert switched.geometry_column == "origin_geom"
+        assert list(switched[0]["geometry"]["coordinates"]) == [0.0, 0.0]
+        assert list(switched[0]["origin_geom"]["coordinates"]) == [10.0, 10.0]
+
+    def test_geometry_accessor_can_target_non_active_geometry_column(self):
+        frame = GeoPromptFrame.from_records([
+            {"site_id": "a", "geometry": _point(0, 0), "origin_geom": _point(10, 10)},
+            {"site_id": "b", "geometry": _point(1, 1), "origin_geom": _point(12, 12)},
+        ])
+
+        centroids = frame.geometry("origin_geom").centroid()
+        assert [tuple(point) for point in centroids] == [(10.0, 10.0), (12.0, 12.0)]
+
+    def test_geometry_accessor_buffer_works_for_non_active_geometry_column(self):
+        frame = GeoPromptFrame.from_records([
+            {"site_id": "a", "geometry": _point(0, 0), "origin_geom": _point(10, 10)},
+        ])
+
+        buffered = frame.geometry("origin_geom").buffer(1.0)
+        assert buffered.geometry_column == "geometry"
+        assert buffered[0]["geometry"]["type"] == "Point"
+        assert buffered[0]["origin_geom"]["type"] == "Polygon"
 
 
 class TestPivot:

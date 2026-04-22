@@ -26,6 +26,7 @@ from .environmental import (
 from .spacetime import (
     build_turn_features,
     calibrate_lrs_route,
+    change_point_detection,
     exploratory_regression,
     multi_distance_cluster_analysis,
     pycnophylactic_interpolation,
@@ -33,7 +34,10 @@ from .spacetime import (
     skater_regionalization,
     space_time_cube,
     space_time_pattern_mining,
+    temporal_aggregation,
+    temporal_join_window,
     time_series_clustering,
+    trajectory_analysis,
 )
 from .spatial_analysis import dbscan_spatial
 from .stats import idw_interpolation, kernel_density, kriging_interpolation
@@ -867,4 +871,9 @@ __all__ = [
     "wind_exposure_surface",
     "calibrate_lrs_routes",
     "diffusion_interpolation_with_barriers",
+    # G13 additions
+    "change_point_detection",
+    "temporal_aggregation",
+    "temporal_join_window",
+    "trajectory_analysis",
 ]

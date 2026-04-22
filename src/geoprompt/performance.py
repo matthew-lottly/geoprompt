@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
+from .quality import simulation_only
+
 logger = logging.getLogger("geoprompt")
 
 
@@ -172,12 +174,14 @@ def gpu_accelerated_point_in_polygon(
     return {"backend": "gpu", "inside": inside, "count": len(inside), "engine": "cuSpatial-style"}
 
 
+@simulation_only("Use CuPy + cuSpatial or RAPIDS for real GPU-accelerated spatial operations.")
 def gpu_accelerated_distance_matrix(points: Sequence[Sequence[float]]) -> dict[str, Any]:
     """Build a distance matrix for a set of points."""
     matrix = [[_distance(a, b) for b in points] for a in points]
     return {"backend": "gpu", "matrix": matrix, "count": len(points)}
 
 
+@simulation_only("Use CuPy for real GPU raster algebra.")
 def gpu_accelerated_raster_algebra(left: Sequence[Sequence[float]], right: Sequence[Sequence[float]], *, operator: str = "add") -> dict[str, Any]:
     """Apply a tiny raster algebra operation using nested lists."""
     out: list[list[float]] = []
@@ -257,6 +261,7 @@ def spatial_partitioning_quadtree(records: Sequence[dict[str, Any]], *, max_dept
     return {"strategy": "quadtree", "depth": max_depth, "partitions": dict(partitions)}
 
 
+@simulation_only("Use Dask-GeoDataFrame for real distributed spatial joins.")
 def distributed_spatial_join(left: Sequence[dict[str, Any]], right: Sequence[dict[str, Any]], *, key: str = "id") -> dict[str, Any]:
     """Perform a dictionary-based distributed join simulation."""
     right_lookup = {row.get(key): row for row in right}
