@@ -16,6 +16,7 @@ from typing import Any, Sequence, Union
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_type, geometry_within
+from .safe_expression import evaluate_safe_expression
 from .table import PromptTable
 
 
@@ -804,7 +805,7 @@ def raster_lazy_algebra(
                 row_vals.append(None)
             else:
                 try:
-                    row_vals.append(eval(expression, local_vars))  # noqa: S307
+                    row_vals.append(evaluate_safe_expression(expression, local_vars))
                 except Exception:
                     row_vals.append(None)
         result.append(row_vals)

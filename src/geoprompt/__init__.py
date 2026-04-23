@@ -655,8 +655,75 @@ from .standards import *  # noqa: F401,F403
 from .standards import __all__ as _STANDARDS_ALL
 
 
+# ---------------------------------------------------------------------------
+# J5.52 — Startup capability report
+# ---------------------------------------------------------------------------
+
+def capability_report() -> dict[str, object]:
+    """Return a report of enabled, disabled, and degraded capabilities at startup.
+
+    Probes optional dependencies and environment settings to indicate which
+    geoprompt features are fully operational, stub-only, or unavailable.
+
+    Returns:
+        Dict with keys ``"enabled"``, ``"disabled"``, ``"degraded"``, and
+        ``"fallback_policy"`` listing feature names in each state.
+    """
+    import importlib as _importlib
+
+    def _available(pkg: str) -> bool:
+        try:
+            _importlib.import_module(pkg)
+            return True
+        except ImportError:
+            return False
+
+    from ._exceptions import FALLBACK_POLICY, FallbackPolicy
+
+    enabled: list[str] = []
+    degraded: list[str] = []
+    disabled: list[str] = []
+
+    # Core always available
+    enabled.extend(["geojson_io", "csv_io", "geometry_engine", "crs", "safe_expression"])
+
+    # Optional dependency gates
+    _checks: list[tuple[str, str, str]] = [
+        ("shapefile_io", "fiona", ""),
+        ("parquet_io", "pyarrow", ""),
+        ("postgis_io", "sqlalchemy", ""),
+        ("duckdb_spatial", "duckdb", ""),
+        ("raster_io", "rasterio", ""),
+        ("cloud_storage", "fsspec", ""),
+        ("geopandas_bridge", "geopandas", ""),
+        ("rtree_spatial_index", "rtree", ""),
+        ("network_analysis", "networkx", ""),
+        ("ml_scikit", "sklearn", "scikit-learn not installed"),
+        ("ml_torch", "torch", "PyTorch not installed"),
+        ("enterprise_gdb", "arcpy", "arcpy not installed — enterprise GDB stubs only"),
+        ("portal_publishing", "arcgis", "ArcGIS Python API not installed — stubs only"),
+        ("osm_reader", "osmnx", "osmnx not installed — OSM reads disabled"),
+        ("dxf_reader", "fiona", ""),
+    ]
+    for feature, pkg, reason in _checks:
+        if _available(pkg):
+            enabled.append(feature)
+        elif reason:
+            degraded.append(f"{feature} ({reason})")
+        else:
+            disabled.append(feature)
+
+    return {
+        "enabled": enabled,
+        "disabled": disabled,
+        "degraded": degraded,
+        "fallback_policy": FALLBACK_POLICY.mode,
+    }
+
+
 __all__ = [
     "__version__",
+    "capability_report",
     # --- ai ---
     "ExecutionCache",
     "WorkspaceMemory",
@@ -1838,7 +1905,7 @@ __all__ = [
     "anselin_local_morans_scatterplot", "variogram_fit",
     "spatial_lag_regression", "spatial_error_regression",
     "gwr", "mgwr", "spatial_outlier_lof",
-    "natural_neighbor_interpolation", "tin_interpolation",
+    "tin_interpolation",
     # G5.2 classification breaks
     "head_tail_breaks", "fisher_jenks",
     "maximum_breaks_classification", "box_plot_classification",

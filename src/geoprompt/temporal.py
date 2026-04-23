@@ -388,7 +388,7 @@ class EventTracker:
             s = _parse_timestamp(start)
             e = _parse_timestamp(end)
             return (e - s).total_seconds() / 3600
-        except Exception:
+        except ValueError:
             return None
 
     def get_events(
@@ -615,10 +615,10 @@ def temporal_buffer(frame: _Any, duration: float, *,
         ts_str = str(r.get(time_column, ""))
         try:
             ts = datetime.datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-        except Exception:
+        except ValueError:
             try:
                 ts = datetime.datetime.strptime(ts_str, "%Y-%m-%d")
-            except Exception:
+            except ValueError:
                 ts = datetime.datetime.min
         nr = dict(r)
         nr["time_start"] = (ts - delta).isoformat()
@@ -670,7 +670,7 @@ def time_series_trend(values: list[float], timestamps: list[str] | None = None) 
         def _to_ord(ts: str) -> float:
             try:
                 return float(datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp())
-            except Exception:
+            except ValueError:
                 return 0.0
         xs = [_to_ord(t) for t in timestamps]
         # Normalise to [0, 1]

@@ -7,12 +7,43 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from typing import Any, Sequence
 
 from .geometry import Geometry, normalize_geometry
 
 
 Record = dict[str, Any]
+
+# ---------------------------------------------------------------------------
+# SQL identifier safety (J6.61-J6.62)
+# ---------------------------------------------------------------------------
+
+_IDENTIFIER_PATTERN = re.compile(r'^[A-Za-z_][A-Za-z0-9_$]{0,127}$')
+
+
+def _validate_sql_identifier(name: str, *, label: str = "identifier") -> None:
+    """Validate that *name* is a safe SQL identifier.
+
+    Accepts only names matching ``[A-Za-z_][A-Za-z0-9_$]{0,127}`` to prevent
+    SQL injection via table or column name interpolation.
+
+    Args:
+        name: Candidate identifier string.
+        label: Descriptor used in the error message (e.g. "table name").
+
+    Raises:
+        ValueError: When *name* is empty, too long, or contains characters
+            outside the safe allowlist.
+    """
+    if not name:
+        raise ValueError(f"SQL {label} must not be empty")
+    if not _IDENTIFIER_PATTERN.match(name):
+        raise ValueError(
+            f"SQL {label} {name!r} contains unsafe characters. "
+            "Only letters, digits, underscores, and dollar signs are allowed, "
+            "and the name must start with a letter or underscore."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +133,9 @@ def write_postgis(
         raise ValueError("if_exists must be 'replace' or 'append'")
     if batch_size <= 0:
         raise ValueError("batch_size must be >= 1")
+
+    _validate_sql_identifier(table_name, label="table name")
+    _validate_sql_identifier(geometry_column, label="geometry column")
 
     non_geom_cols = [k for k in records[0] if k != geometry_column]
 
@@ -205,6 +239,11 @@ def write_duckdb(
     duckdb = importlib.import_module("duckdb")
     conn = duckdb.connect(database or ":memory:")
     conn.execute("INSTALL spatial; LOAD spatial;")
+
+    _validate_sql_identifier(table_name, label="table name")
+    _validate_sql_identifier(geometry_column, label="geometry column")
+    for col in records[0]:
+        _validate_sql_identifier(col, label="column name")
 
     non_geom_cols = [k for k in records[0] if k != geometry_column]
     col_defs = ", ".join(f"{col} VARCHAR" for col in non_geom_cols)
@@ -335,7 +374,7 @@ def _parse_postgis_geometry(value: Any) -> Geometry:
         shape = shapely_wkb.loads(bytes.fromhex(text))
         geojson = json.loads(shape.__geo_interface__.__str__().replace("'", '"'))
         return normalize_geometry(geojson)
-    except Exception:
+    except (ImportError, ValueError, AttributeError, json.JSONDecodeError):
         pass
 
     raise ValueError(f"cannot parse geometry value: {text[:100]}")
@@ -378,8 +417,8 @@ def _parse_wkt(wkt: str) -> Geometry:
         shape = shapely_wkt.loads(wkt)
         geojson = shape.__geo_interface__
         return normalize_geometry(geojson)
-    except Exception:
-        raise ValueError(f"cannot parse WKT: {wkt[:100]}")
+    except (ImportError, ValueError, AttributeError) as exc:
+        raise ValueError(f"cannot parse WKT: {wkt[:100]}") from exc
 
 
 def _geometry_to_geojson(geometry: Geometry) -> dict[str, Any]:

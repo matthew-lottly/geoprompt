@@ -110,6 +110,16 @@ def morans_i(
     return {"morans_i": mi, "expected_i": expected_i, "z_score": z_score}
 
 
+def moran_i(
+    values: Sequence[float],
+    centroids: Sequence[tuple[float, float]],
+    bandwidth: float | None = None,
+    k: int | None = None,
+) -> dict[str, float]:
+    """Backward-compatible alias for :func:`morans_i`."""
+    return morans_i(values, centroids, bandwidth=bandwidth, k=k)
+
+
 def gearys_c(
     values: Sequence[float],
     centroids: Sequence[tuple[float, float]],
@@ -839,7 +849,7 @@ def spatial_regression(
         try:
             mr = morans_i(residuals, centroids, bandwidth=bandwidth, k=k)
             moran_res = mr["morans_i"]
-        except Exception:
+        except (ValueError, TypeError, KeyError, RuntimeError):
             pass
 
     return {

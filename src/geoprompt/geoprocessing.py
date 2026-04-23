@@ -19,11 +19,18 @@ import textwrap
 import time
 import tracemalloc
 import uuid
+import socket
+import urllib.error
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Generator, Sequence
 
+from .safe_expression import (
+    ExpressionExecutionError,
+    ExpressionValidationError,
+    evaluate_safe_expression,
+)
 logger = logging.getLogger("geoprompt")
 
 # ---------------------------------------------------------------------------
@@ -1867,7 +1874,7 @@ def notify_webhook(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return {"status": resp.status, "sent": True}
-    except Exception as exc:
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError, socket.timeout) as exc:
         return {"status": 0, "sent": False, "error": str(exc)}
 
 
@@ -2305,7 +2312,7 @@ def _geom_to_shape(geom: dict | None) -> "_Any":
         if geom is None:
             return _sg.Point(0, 0)
         return _sg.shape(geom)
-    except Exception:
+    except (ImportError, ValueError, TypeError, AttributeError):
         return None
 
 
@@ -2376,7 +2383,7 @@ def erase(frame: _Any, erase_frame: _Any) -> _Any:
                     row[geom_col] = diff.__geo_interface__ if not diff.is_empty else None
                     if row[geom_col] is not None:
                         results.append(row)
-                except Exception:
+                except (TypeError, ValueError, AttributeError):
                     results.append(dict(r))
             else:
                 results.append(dict(r))
@@ -2447,9 +2454,9 @@ def select_by_attributes(frame: _Any, expression: str) -> _Any:
     selected = []
     for r in rows:
         try:
-            if eval(expression, {"__builtins__": {}}, r):  # noqa: S307
+            if evaluate_safe_expression(expression, r):
                 selected.append(r)
-        except Exception:
+        except (ExpressionExecutionError, ExpressionValidationError, ValueError):
             pass
     return type(frame).from_records(selected)
 

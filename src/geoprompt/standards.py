@@ -76,6 +76,12 @@ def ogc_wms_client(url: str) -> dict[str, Any]:
     return {"service": "WMS", "url": url, "status": "connected"}
 
 
+@simulation_only("Use OWSLib or httpx to implement a real WMS capabilities document parser.")
+def wms_capabilities_document(url: str) -> dict[str, Any]:
+    """Backward-compatible alias for legacy WMS capabilities helper name."""
+    return ogc_wms_client(url)
+
+
 def ogc_wmts_client(url: str) -> dict[str, Any]:
     return {"service": "WMTS", "url": url, "status": "connected"}
 

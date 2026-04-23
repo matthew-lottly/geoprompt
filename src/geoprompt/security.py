@@ -397,7 +397,7 @@ class HealthCheck:
         for name, check in self._checks.items():
             try:
                 ok = check()
-            except Exception:
+            except Exception:  # Intentional: any exception means check failed
                 ok = False
             results[name] = ok
             if not ok:
@@ -428,7 +428,7 @@ class GracefulShutdown:
         for cb in self._callbacks:
             try:
                 cb()
-            except Exception:
+            except Exception:  # Intentional: shutdown must not fail
                 pass
 
 
@@ -880,7 +880,7 @@ def inference_cache_encryption(
             encrypted_bytes = encrypt_data(data, key)
             encrypted = True
             size = len(encrypted_bytes)
-        except Exception:
+        except (ValueError, TypeError, OSError, RuntimeError):
             size = len(data)
     else:
         size = len(data)

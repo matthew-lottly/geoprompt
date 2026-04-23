@@ -34,13 +34,6 @@ TierLevel = Literal["stable", "beta", "experimental", "simulation_only"]
 TIER_METADATA: dict[str, TierLevel] = {
     # Frame operations (frame.py) - mostly stable
     "frame.GeoPromptFrame": TIER_STABLE,
-    "frame.explore": TIER_STABLE,
-    "frame.plot": TIER_STABLE,
-    "frame.dissolve": TIER_STABLE,
-    "frame.spatial_join": TIER_STABLE,
-    "frame.nearest_join": TIER_STABLE,
-    "frame.buffer": TIER_STABLE,
-    "frame.clip": TIER_STABLE,
     
     # Geometry operations (geometry.py) - mostly stable with some experimental
     "geometry.hausdorff_distance": TIER_STABLE,
@@ -53,7 +46,6 @@ TIER_METADATA: dict[str, TierLevel] = {
     "geometry.representative_point": TIER_STABLE,
     "geometry.get_coordinates": TIER_STABLE,
     "geometry.affine_transform": TIER_BETA,  # M-coordinate support partial
-    "geometry.buffer_3d_sphere": TIER_EXPERIMENTAL,
     
     # Statistics (stats.py) - mixed maturity
     "stats.moran_i": TIER_STABLE,
@@ -62,10 +54,7 @@ TIER_METADATA: dict[str, TierLevel] = {
     "stats.clark_evans": TIER_STABLE,
     "stats.natural_neighbor_interpolation": TIER_BETA,  # IDW fallback, not true Sibson
     "stats.variogram_fit": TIER_BETA,  # Simple heuristic, not robust model fitting
-    "stats.kriging": TIER_STABLE,
     "stats.idw_interpolation": TIER_STABLE,
-    "stats.rbf_interpolation": TIER_STABLE,
-    "stats.gaussian_kde": TIER_STABLE,
     "stats.gwr": TIER_BETA,  # O(n^3) bandwidth computation
     
     # Network operations (network/) - mostly stable
@@ -76,7 +65,6 @@ TIER_METADATA: dict[str, TierLevel] = {
     "network.multimodal_network": TIER_BETA,
     "network.network_partition": TIER_STABLE,
     "network.service_area": TIER_STABLE,
-    "network.accessibility_analysis": TIER_BETA,
     
     # Raster operations (raster.py) - mixed maturity
     "raster.contour_generation": TIER_STABLE,
@@ -85,31 +73,29 @@ TIER_METADATA: dict[str, TierLevel] = {
     "raster.raster_hillshade": TIER_STABLE,
     "raster.raster_watershed": TIER_STABLE,
     "raster.zonal_summary": TIER_STABLE,
-    "raster.raster_curvature": TIER_BETA,
     "raster.terrain_ruggedness_index": TIER_BETA,
     "raster.topographic_wetness_index": TIER_BETA,
     "raster.raster_cost_distance": TIER_STABLE,
     "raster.raster_least_cost_path": TIER_STABLE,
-    "raster.neighborhood_operation": TIER_EXPERIMENTAL,  # New in recent release
     
     # I/O operations (io.py) - mostly stable
     "io.read_geojson": TIER_STABLE,
     "io.write_geojson": TIER_STABLE,
     "io.read_shapefile": TIER_STABLE,
     "io.write_shapefile": TIER_STABLE,
-    "io.read_gpkg": TIER_STABLE,
-    "io.write_gpkg": TIER_STABLE,
     "io.read_cloud_json": TIER_BETA,
     "io.write_cloud_json": TIER_BETA,
     "io.read_dxf": TIER_BETA,  # Falls back to stub without fiona
-    "io.read_osm": TIER_BETA,  # Falls back to stub without osmnx
     
     # ML operations (ml.py) - mostly experimental
     "ml.gradient_boosted_spatial_prediction": TIER_SIMULATION,  # Stub
     "ml.svm_spatial_classification": TIER_SIMULATION,  # Stub
     "ml.spatial_cross_validation": TIER_BETA,
-    "ml.kmeans_clustering": TIER_STABLE,
-    "ml.dbscan_clustering": TIER_STABLE,
+    "ml.convolutional_neural_network_on_rasters": TIER_SIMULATION,
+    "ml.graph_neural_network_prediction": TIER_SIMULATION,
+    "ml.neural_network_integration": TIER_SIMULATION,
+    "ml.recurrent_neural_network_spatial_time_series": TIER_SIMULATION,
+    "ml.transformer_model_spatial_sequences": TIER_SIMULATION,
     
     # Geoprocessing (geoprocessing.py)
     "geoprocessing.ModelBuilder": TIER_STABLE,
@@ -120,25 +106,28 @@ TIER_METADATA: dict[str, TierLevel] = {
     
     # Standards (standards.py) - mostly simulation
     "standards.wms_capabilities_document": TIER_SIMULATION,
-    "standards.wfs_capabilities_document": TIER_SIMULATION,
-    "standards.gml_to_features": TIER_SIMULATION,
-    "standards.wkt_service_query": TIER_SIMULATION,
-    "standards.ogc_filter_encoding": TIER_SIMULATION,
+    "standards.ogc_api_features_implementation": TIER_SIMULATION,
+    "standards.ogc_api_processes_implementation": TIER_SIMULATION,
+    "standards.ogc_api_records_implementation": TIER_SIMULATION,
+    "standards.ogc_api_tiles_implementation": TIER_SIMULATION,
+    "standards.ogc_api_maps_implementation": TIER_SIMULATION,
+    "standards.ogc_wfs_client": TIER_SIMULATION,
+    "standards.ogc_wms_client": TIER_SIMULATION,
     
     # Enterprise (enterprise.py)
-    "enterprise.connect_geodatabase": TIER_SIMULATION,
-    "enterprise.replicate_geodatabase": TIER_SIMULATION,
-    "enterprise.validate_geodatabase_schema": TIER_SIMULATION,
+    "enterprise.enterprise_geodatabase_connect": TIER_SIMULATION,
+    "enterprise.versioned_edit": TIER_SIMULATION,
+    "enterprise.replica_sync": TIER_SIMULATION,
+    "enterprise.portal_publish": TIER_SIMULATION,
     
     # Service (service.py)
-    "service.start_service": TIER_STABLE,
-    "service.create_feature_service": TIER_BETA,
-    "service.enforce_rbac": TIER_BETA,
+    "service.build_app": TIER_BETA,
+    "service.service_benchmark_report": TIER_STABLE,
     
     # Security (security.py)
-    "security.validate_geometry_payload": TIER_STABLE,
-    "security.rate_limiter": TIER_STABLE,
-    "security.check_injection_risk": TIER_STABLE,
+    "security.validate_geometry_safe": TIER_STABLE,
+    "security.rate_limit_check": TIER_STABLE,
+    "security.sanitize_attribute_input": TIER_STABLE,
     
     # Data management (data_management.py)
     "data_management.add_field": TIER_STABLE,
@@ -154,18 +143,22 @@ TIER_METADATA: dict[str, TierLevel] = {
     "ai.auto_select_backend": TIER_BETA,
     
     # Visualization (visualization.py)
-    "visualization.map_series": TIER_BETA,
+    "visualization.interactive_web_map_mapbox_gl_js": TIER_BETA,
     "visualization.time_slider_control": TIER_BETA,
-    "visualization.interactive_dashboard": TIER_EXPERIMENTAL,
+    "visualization.interactive_web_map_deck_gl": TIER_EXPERIMENTAL,
     
     # Performance (performance.py)
-    "performance.benchmark_suite": TIER_BETA,
-    "performance.profile_operation": TIER_STABLE,
     "performance.scale_analysis": TIER_EXPERIMENTAL,
+    "performance.profile_top_hot_functions": TIER_BETA,
+    "performance.run_with_timeout_guard": TIER_STABLE,
+    "performance.out_of_core_processing": TIER_EXPERIMENTAL,
+    "performance.distributed_spatial_join": TIER_SIMULATION,
+    "performance.gpu_accelerated_distance_matrix": TIER_SIMULATION,
+    "performance.gpu_accelerated_raster_algebra": TIER_SIMULATION,
     
     # Quality (quality.py)
-    "quality.coverage_report": TIER_BETA,
-    "quality.api_stability_check": TIER_STABLE,
+    "quality.quality_scorecard": TIER_BETA,
+    "quality.release_readiness_report": TIER_STABLE,
 }
 
 

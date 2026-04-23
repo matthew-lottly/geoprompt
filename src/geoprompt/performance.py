@@ -211,8 +211,15 @@ def out_of_core_processing(chunks: Iterable[Sequence[Any]], operation: Callable[
     """Process iterable chunks without materialising everything at once."""
     op = operation or list
     results = [op(chunk) for chunk in chunks]
-    return {"mode": "out-of-core", "chunks_processed": len(results), "results": results}
+    return {"mode": "out-of-core", "chunks_processed": len(results), "results": results, "errors": []}
 
+@simulation_only("Replace with a workload-specific scaling profiler and benchmark pipeline.")
+def scale_analysis() -> dict[str, Any]:
+    """Backward-compatible alias for historical experimental scaling helper."""
+    return {
+        "status": "experimental",
+        "message": "Use profile_top_hot_functions and out_of_core_processing for concrete workflows.",
+    }
 
 def tile_based_raster_streaming(raster: Sequence[Sequence[float]], *, tile_size: int = 2) -> dict[str, Any]:
     """Split raster rows into small tiles for streaming."""

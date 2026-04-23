@@ -653,12 +653,15 @@ from typing import Any as _Any
 def enterprise_geodatabase_connect(host: str, database: str, *,
                                    username: str = "",
                                    password: str = "",
-                                   version: str = "sde.DEFAULT") -> dict:
+                                   version: str = "sde.DEFAULT",
+                                   allow_stub_fallback: bool = False) -> dict:
     """Create a connection profile for an enterprise geodatabase.
 
-    This is a *stub* implementation that returns a connection descriptor dict.
-    Actual database I/O requires ``arcpy`` or an appropriate ODBC/PostGIS
-    driver.
+    Requires ``arcpy`` or a compatible ODBC/PostGIS driver.  Without one of
+    those backends installed this function raises ``ImportError`` by default.
+
+    Pass ``allow_stub_fallback=True`` in development/testing to receive a
+    non-functional descriptor dict instead of raising.
 
     Args:
         host: Hostname or connection string for the database server.
@@ -667,10 +670,31 @@ def enterprise_geodatabase_connect(host: str, database: str, *,
         password: Database password (not stored in plaintext in the returned
             dict — only a flag is set).
         version: Default geodatabase version to connect to.
+        allow_stub_fallback: If ``True``, return a non-functional descriptor
+            rather than raising when no real backend is available.
 
     Returns:
-        A connection descriptor dict (no actual connection is opened).
+        A connection descriptor dict (no actual connection is opened when
+        in stub-fallback mode).
+
+    Raises:
+        ImportError: When no real enterprise GDB backend is available and
+            ``allow_stub_fallback`` is ``False``.
     """
+    import warnings
+    if not allow_stub_fallback:
+        raise ImportError(
+            "enterprise_geodatabase_connect requires arcpy or a compatible "
+            "PostGIS/ODBC backend. Install the appropriate driver, or pass "
+            "allow_stub_fallback=True for development use only."
+        )
+    warnings.warn(
+        "enterprise_geodatabase_connect is running in stub mode "
+        "(allow_stub_fallback=True). No real database connection is made. "
+        "Install arcpy or psycopg2 for live connections.",
+        UserWarning,
+        stacklevel=2,
+    )
     return {
         "host": host,
         "database": database,
@@ -678,14 +702,19 @@ def enterprise_geodatabase_connect(host: str, database: str, *,
         "password_set": bool(password),
         "version": version,
         "connected": False,
+        "is_stub": True,
         "note": "stub — install arcpy or psycopg2 for live connections",
     }
 
 
 def versioned_edit(connection: dict, table: str, edits: list[dict], *,
                    version: str | None = None,
-                   auto_reconcile: bool = False) -> dict:
-    """Apply versioned edits to an enterprise geodatabase table (stub).
+                   auto_reconcile: bool = False,
+                   allow_stub_fallback: bool = False) -> dict:
+    """Apply versioned edits to an enterprise geodatabase table.
+
+    Requires a live enterprise GDB connection.  Raises ``ImportError`` by
+    default; pass ``allow_stub_fallback=True`` for development use only.
 
     Args:
         connection: Connection descriptor from :func:`enterprise_geodatabase_connect`.
@@ -696,11 +725,29 @@ def versioned_edit(connection: dict, table: str, edits: list[dict], *,
         version: Target version name.  Defaults to the connection version.
         auto_reconcile: Automatically reconcile to the DEFAULT version after
             editing.
+        allow_stub_fallback: If ``True``, return a non-functional summary
+            rather than raising when no real backend is available.
 
     Returns:
         Dict with ``n_inserted``, ``n_updated``, ``n_deleted``, and
         ``version`` keys.
+
+    Raises:
+        ImportError: When no real backend is available and
+            ``allow_stub_fallback`` is ``False``.
     """
+    import warnings
+    if not allow_stub_fallback:
+        raise ImportError(
+            "versioned_edit requires an active enterprise GDB backend. "
+            "Pass allow_stub_fallback=True for development use only."
+        )
+    warnings.warn(
+        "versioned_edit is running in stub mode (allow_stub_fallback=True). "
+        "No edits are persisted.",
+        UserWarning,
+        stacklevel=2,
+    )
     n_i = sum(1 for e in edits if e.get("operation") == "insert")
     n_u = sum(1 for e in edits if e.get("operation") == "update")
     n_d = sum(1 for e in edits if e.get("operation") == "delete")
@@ -711,29 +758,53 @@ def versioned_edit(connection: dict, table: str, edits: list[dict], *,
         "n_updated": n_u,
         "n_deleted": n_d,
         "reconciled": auto_reconcile,
+        "is_stub": True,
         "note": "stub — no live database connection",
     }
 
 
 def replica_sync(connection: dict, replica_name: str, *,
                  direction: str = "bidirectional",
-                 conflict_policy: str = "in_favour_of_referenced") -> dict:
-    """Synchronise a geodatabase replica (stub).
+                 conflict_policy: str = "in_favour_of_referenced",
+                 allow_stub_fallback: bool = False) -> dict:
+    """Synchronise a geodatabase replica.
+
+    Requires a live ArcGIS Server connector.  Raises ``ImportError`` by
+    default; pass ``allow_stub_fallback=True`` for development use only.
 
     Args:
         connection: Connection descriptor.
         replica_name: Name of the replica to synchronise.
         direction: Sync direction: ``"bidirectional"``, ``"in"``, or ``"out"``.
         conflict_policy: Conflict resolution policy.
+        allow_stub_fallback: If ``True``, return a non-functional descriptor
+            rather than raising when no real backend is available.
 
     Returns:
         Dict describing the sync operation result.
+
+    Raises:
+        ImportError: When no real backend is available and
+            ``allow_stub_fallback`` is ``False``.
     """
+    import warnings
+    if not allow_stub_fallback:
+        raise ImportError(
+            "replica_sync requires ArcGIS Server connector. "
+            "Pass allow_stub_fallback=True for development use only."
+        )
+    warnings.warn(
+        "replica_sync is running in stub mode (allow_stub_fallback=True). "
+        "No real sync is performed.",
+        UserWarning,
+        stacklevel=2,
+    )
     return {
         "replica_name": replica_name,
         "direction": direction,
         "conflict_policy": conflict_policy,
         "status": "stub",
+        "is_stub": True,
         "note": "stub — install ArcGIS Server connector for live sync",
     }
 
@@ -742,8 +813,12 @@ def portal_publish(item_path: str, item_type: str, *,
                    portal_url: str = "https://www.arcgis.com",
                    username: str = "",
                    tags: list[str] | None = None,
-                   folder: str = "") -> dict:
-    """Publish an item to ArcGIS Online / Portal for ArcGIS (stub).
+                   folder: str = "",
+                   allow_stub_fallback: bool = False) -> dict:
+    """Publish an item to ArcGIS Online / Portal for ArcGIS.
+
+    Requires the ``arcgis`` Python API.  Raises ``ImportError`` by default;
+    pass ``allow_stub_fallback=True`` for development use only.
 
     Args:
         item_path: Local path to the item file to publish.
@@ -753,11 +828,30 @@ def portal_publish(item_path: str, item_type: str, *,
         username: Portal username.
         tags: List of metadata tags.
         folder: Destination folder name in the user's content.
+        allow_stub_fallback: If ``True``, return a non-functional descriptor
+            rather than raising when no real backend is available.
 
     Returns:
         Dict with ``item_id``, ``url``, and ``status`` keys.
+
+    Raises:
+        ImportError: When the arcgis API is not installed and
+            ``allow_stub_fallback`` is ``False``.
     """
     import hashlib
+    import warnings
+    if not allow_stub_fallback:
+        raise ImportError(
+            "portal_publish requires the arcgis Python API. "
+            "Install it via: pip install arcgis. "
+            "Pass allow_stub_fallback=True for development use only."
+        )
+    warnings.warn(
+        "portal_publish is running in stub mode (allow_stub_fallback=True). "
+        "No item is published to the portal.",
+        UserWarning,
+        stacklevel=2,
+    )
     fake_id = hashlib.md5(f"{item_path}{item_type}".encode()).hexdigest()[:16]  # noqa: S324
     return {
         "item_id": fake_id,
@@ -766,5 +860,6 @@ def portal_publish(item_path: str, item_type: str, *,
         "folder": folder,
         "tags": tags or [],
         "status": "stub",
+        "is_stub": True,
         "note": "stub — install arcgis Python API for live publishing",
     }

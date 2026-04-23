@@ -211,3 +211,98 @@ def validate_not_empty(sequence: Any, *, param_name: str) -> None:
     """
     if not sequence:
         raise ParameterError(f"Parameter '{param_name}' cannot be empty")
+
+
+# ---------------------------------------------------------------------------
+# Centralized fallback policy (J2.19)
+# ---------------------------------------------------------------------------
+
+class _FallbackPolicyMode:
+    """Sentinel constants for FallbackPolicy modes."""
+    ERROR = "error"
+    WARN = "warn"
+    ALLOW = "allow"
+
+
+class FallbackPolicy:
+    """Centralized fallback-behavior policy for production and development paths.
+
+    Three modes are supported:
+
+    * ``"error"`` (default): Raise ``ImportError`` / ``NotImplementedError``
+      when a real backend is not available.  This is the correct setting for
+      production deployments.
+    * ``"warn"``: Issue a ``UserWarning`` and return the stub result.
+      Suitable for CI environments where optional deps are intentionally absent.
+    * ``"allow"``: Return stub results silently.  Intended for unit tests that
+      explicitly exercise stub-path behavior.
+
+    Usage::
+
+        policy = FallbackPolicy.for_environment()
+        policy.enforce("my_function", "install the_package for live results")
+
+    The active global policy is :data:`FALLBACK_POLICY`.
+    """
+
+    ERROR = _FallbackPolicyMode.ERROR
+    WARN = _FallbackPolicyMode.WARN
+    ALLOW = _FallbackPolicyMode.ALLOW
+
+    def __init__(self, mode: str = _FallbackPolicyMode.ERROR) -> None:
+        if mode not in {self.ERROR, self.WARN, self.ALLOW}:
+            raise ValueError(f"Unknown fallback policy mode: {mode!r}")
+        self._mode = mode
+
+    @property
+    def mode(self) -> str:
+        """The active policy mode string."""
+        return self._mode
+
+    @classmethod
+    def for_environment(cls) -> "FallbackPolicy":
+        """Return a policy appropriate for the current environment.
+
+        Reads the ``GEOPROMPT_FALLBACK_POLICY`` environment variable; defaults
+        to ``"error"`` when the variable is absent or set to an unknown value.
+        """
+        import os
+        raw = os.environ.get("GEOPROMPT_FALLBACK_POLICY", "error").lower()
+        if raw in {cls.ERROR, cls.WARN, cls.ALLOW}:
+            return cls(raw)
+        return cls(cls.ERROR)
+
+    def enforce(
+        self,
+        function_name: str,
+        remediation: str,
+        *,
+        stacklevel: int = 2,
+    ) -> None:
+        """Apply the policy at a stub entry point.
+
+        Args:
+            function_name: Public name of the function that would be a stub.
+            remediation: Actionable message telling the user how to get the
+                real implementation.
+            stacklevel: Warning stacklevel (passed to :func:`warnings.warn`).
+
+        Raises:
+            ImportError: When policy mode is ``"error"``.
+        """
+        if self._mode == self.ERROR:
+            raise ImportError(
+                f"{function_name} requires a real backend. {remediation}"
+            )
+        if self._mode == self.WARN:
+            warnings.warn(
+                f"{function_name} is running in stub mode. {remediation}",
+                UserWarning,
+                stacklevel=stacklevel + 1,
+            )
+        # ALLOW: silent pass-through
+
+
+# Module-level default policy — production-safe.
+FALLBACK_POLICY: FallbackPolicy = FallbackPolicy(FallbackPolicy.ERROR)
+

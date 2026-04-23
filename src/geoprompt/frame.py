@@ -20,6 +20,7 @@ from typing import Any, Callable, Iterable, Literal, Sequence
 from .equations import DistanceMethod, area_similarity, coordinate_distance, corridor_strength, directional_alignment, prompt_influence, prompt_interaction
 from .geometry import Geometry, geometry_area, geometry_bounds, geometry_centroid, geometry_contains, geometry_distance, geometry_intersects, geometry_intersects_bounds, geometry_length, geometry_type, geometry_within, geometry_within_bounds, normalize_geometry, repair_geometry, validate_geometry
 from .overlay import buffer_geometries, clip_geometries, dissolve_geometries, overlay_intersections
+from .safe_expression import ExpressionExecutionError, ExpressionValidationError, evaluate_safe_expression
 from .table import PromptTable
 from .tools import batch_accessibility_scores, vectorized_gravity_interaction, vectorized_service_probability
 
@@ -45,7 +46,7 @@ def _normalize_crs(crs: object | None) -> str | None:
         if authority is not None:
             return f"{authority[0]}:{authority[1]}"
         return str(resolved.to_string())
-    except Exception:
+    except (ImportError, ValueError, AttributeError):
         text = str(crs).strip()
         if not text:
             return None
@@ -820,7 +821,7 @@ class GeoPromptFrame:
             try:
                 b = self.bounds()
                 bounds = {"min_x": b.min_x, "min_y": b.min_y, "max_x": b.max_x, "max_y": b.max_y}
-            except Exception:
+            except (ValueError, AttributeError, TypeError):
                 pass
         col_stats: list[Record] = []
         for col in self.columns:
@@ -984,23 +985,13 @@ class GeoPromptFrame:
         Example:
             ``frame.query("priority >= 2 and status == 'open'")``
         """
-        compiled = _compile_frame_query(expression)
-        safe_globals = {
-            "__builtins__": {},
-            "abs": abs,
-            "len": len,
-            "min": min,
-            "max": max,
-            "round": round,
-            "None": None,
-            "True": True,
-            "False": False,
-        }
-        rows = [
-            dict(row)
-            for row in self._rows
-            if bool(eval(compiled, safe_globals, dict(row)))  # noqa: S307
-        ]
+        rows: list[Record] = []
+        for row in self._rows:
+            try:
+                if bool(evaluate_safe_expression(expression, dict(row))):
+                    rows.append(dict(row))
+            except (ExpressionValidationError, ExpressionExecutionError) as exc:
+                raise ValueError(f"invalid query expression: {expression}") from exc
         return self._clone_with_rows(rows)
 
 
@@ -4271,18 +4262,12 @@ class GeoPromptFrame:
 
             frame.eval("score * 2 + offset")
         """
-        import ast as _ast
-
         results: list[Any] = []
         for row in self._rows:
-            # Build a safe namespace from row values
             namespace: dict[str, Any] = {k: v for k, v in row.items() if isinstance(k, str)}
             try:
-                # Compile with ast.literal_eval for safety on constants only, or eval with restricted builtins
-                tree = _ast.parse(expression, mode="eval")
-                code = compile(tree, "<expr>", "eval")
-                results.append(eval(code, {"__builtins__": {}}, namespace))  # noqa: S307
-            except Exception:
+                results.append(evaluate_safe_expression(expression, namespace))
+            except (ExpressionValidationError, ExpressionExecutionError):
                 results.append(None)
         return results
 
@@ -4312,7 +4297,7 @@ class GeoPromptFrame:
                 try:
                     yield nt(*vals)
                     continue
-                except Exception:
+                except (TypeError, ValueError, AttributeError):
                     pass
             yield tuple(vals)
 
@@ -4360,7 +4345,7 @@ class GeoPromptFrame:
                     try:
                         from .geometry import geometry_wkt_write
                         v = geometry_wkt_write(v)
-                    except Exception:
+                    except (ImportError, AttributeError, ValueError):
                         v = str(v)
                 serialized[c] = "" if v is None else v
             writer.writerow(serialized)
@@ -4390,7 +4375,7 @@ class GeoPromptFrame:
                     try:
                         from .geometry import geometry_wkt_write
                         v = geometry_wkt_write(v)
-                    except Exception:
+                    except (ImportError, AttributeError, ValueError):
                         v = str(v)
                 row_vals.append("" if v is None else v)
             ws.append(row_vals)
@@ -4426,11 +4411,11 @@ class GeoPromptFrame:
         text = self.to_csv(sep=sep, include_geometry=False) or ""
         try:
             subprocess.run(["clip"], input=text.encode("utf-8"), check=True)  # noqa: S603,S607
-        except Exception:
+        except (FileNotFoundError, subprocess.CalledProcessError, OSError):
             try:
                 import pyperclip  # type: ignore[import]
                 pyperclip.copy(text)
-            except Exception:
+            except (TypeError, ValueError, AttributeError):
                 pass  # silently skip if clipboard not available
 
     def to_sql(self, table_name: str, connection: Any, if_exists: str = "fail",
@@ -4456,7 +4441,7 @@ class GeoPromptFrame:
                     try:
                         from .geometry import geometry_wkt_write
                         v = geometry_wkt_write(v)
-                    except Exception:
+                    except (ImportError, ValueError, TypeError, AttributeError):
                         v = str(v)
                 vals.append(None if v is None else str(v))
             cursor.execute(f'INSERT INTO "{table_name}" VALUES ({placeholders})', vals)  # noqa: S608

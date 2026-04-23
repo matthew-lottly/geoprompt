@@ -1,0 +1,42 @@
+File,Line,Function,Current Exception,Recommended Exceptions,Reason,Use Chaining,Status,Notes
+src/geoprompt/io.py,62,_validate_url,except Exception as exc:,ValueError,urlparse() defensive error,YES,ALREADY_CORRECT,Has 'from exc' - no change needed
+src/geoprompt/io.py,111,_fetch_json_with_retries,except Exception as exc:,"urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, UnicodeDecodeError",Network request/JSON parsing errors,YES,NEEDS_REFACTOR,Specific network and parsing errors
+src/geoprompt/io.py,1926,write_geopackage,except Exception:,"ImportError, sqlite3.Error",Optional dependency and database errors,NO,NEEDS_REFACTOR,Best-effort spatial indexing
+src/geoprompt/io.py,2393,read_stac,except Exception:,ImportError,Optional pystac dependency import,NO,NEEDS_REFACTOR,Graceful fallback
+src/geoprompt/io.py,2417,read_stac,except Exception:,"ImportError, ValueError, KeyError, AttributeError",Import/invalid STAC/unexpected structure,NO,NEEDS_REFACTOR,Fallback path
+src/geoprompt/io.py,2444,read_stac,except Exception:,"FileNotFoundError, ValueError, AttributeError",File/invalid format/unexpected structure,NO,NEEDS_REFACTOR,Fallback path
+src/geoprompt/io.py,2467,read_stac,except Exception:,"ValueError, OSError, json.JSONDecodeError",Invalid URL/file I/O/malformed JSON,NO,NEEDS_REFACTOR,Skip failed child link
+src/geoprompt/io.py,2655,_read_flatgeobuf_with_fiona,except Exception:,ImportError,Optional pyogrio import,NO,NEEDS_REFACTOR,Progressive fallback
+src/geoprompt/io.py,2662,_read_flatgeobuf_with_fiona,except Exception:,"ImportError, OSError, ValueError",Optional fiona/file I/O/invalid format,NO,NEEDS_REFACTOR,Progressive fallback
+src/geoprompt/io.py,2685,write_flatgeobuf,except Exception:,"ImportError, AttributeError, OSError, ValueError",Missing geopandas/frame/file write/invalid driver,NO,NEEDS_REFACTOR,Fallback to GeoJSON
+src/geoprompt/io.py,2730,read_dxf,except Exception:,"ValueError, AttributeError, IndexError",Invalid coords/missing attributes/unexpected dimensions,NO,NEEDS_REFACTOR,Skip malformed entities
+src/geoprompt/db.py,377,_parse_wkb,except Exception:,"ImportError, ValueError, AttributeError, json.JSONDecodeError",Optional shapely/invalid hex/unexpected object/malformed JSON,NO,NEEDS_REFACTOR,Fallback
+src/geoprompt/db.py,420,_parse_wkt_or_geojson,except Exception:,"ImportError, ValueError, AttributeError",Optional shapely/invalid WKT/unexpected object,YES,NEEDS_REFACTOR,Add 'from exc'
+src/geoprompt/temporal.py,391,get_duration,except Exception:,"ValueError, TypeError, AttributeError",Invalid timestamp/type mismatch/unexpected object,NO,NEEDS_REFACTOR,Return None for invalid input
+src/geoprompt/temporal.py,618,apply_time_window,except Exception:,ValueError,Invalid datetime format,NO,NEEDS_REFACTOR,Parse with fallback
+src/geoprompt/temporal.py,621,apply_time_window,except Exception:,ValueError,Invalid datetime format in strptime fallback,NO,NEEDS_REFACTOR,Parse with fallback
+src/geoprompt/temporal.py,673,fit_temporal_trend,except Exception:,ValueError,Invalid datetime or float conversion,NO,NEEDS_REFACTOR,Return 0.0 as default
+src/geoprompt/stats.py,852,spatial_autocorrelation,except Exception:,"ValueError, TypeError, KeyError, RuntimeError",Invalid input/type mismatch/missing key/scipy failures,NO,NEEDS_REFACTOR,Optional statistical enrichment
+src/geoprompt/geoprocessing.py,253,_run_tool,except Exception as exc:,Exception,Intentional broad catch for tool execution safety,NO,KEEP_AS_IS,Fault tolerance wrapper
+src/geoprompt/geoprocessing.py,300,_run_tool_async,except Exception as exc:,Exception,Intentional broad catch for async tool execution safety,NO,KEEP_AS_IS,Fault tolerance wrapper
+src/geoprompt/geoprocessing.py,394,transaction,except Exception:,Exception,Context manager must rollback on any exception,NO,KEEP_AS_IS,Proper exception handling
+src/geoprompt/geoprocessing.py,952,PipelineExecution.run,except Exception as exc:,Exception,Intentional broad catch for pipeline resilience,NO,KEEP_AS_IS,Step failure should not crash pipeline
+src/geoprompt/geoprocessing.py,1822,async_tool_runner,except Exception as exc:,Exception,Async wrapper must not crash event loop,NO,KEEP_AS_IS,Event loop protection
+src/geoprompt/geoprocessing.py,1847,Observable.emit,except Exception:,Exception,Observer callback failure must not crash event stream,NO,KEEP_AS_IS,Event stream protection
+src/geoprompt/geoprocessing.py,1872,post_http_notification,except Exception as exc:,"urllib.error.HTTPError, urllib.error.URLError, OSError, socket.timeout",HTTP protocol/URL/OS-level I/O/timeout failures,NO,NEEDS_REFACTOR,Gracefully handled
+src/geoprompt/geoprocessing.py,2310,bounds,except Exception:,"ImportError, ValueError, TypeError, AttributeError",Import/invalid geometry/type mismatch/missing attributes,NO,NEEDS_REFACTOR,Use None bounds as default
+src/geoprompt/geoprocessing.py,2381,to_dict,except Exception:,"TypeError, ValueError, AttributeError",Named tuple construction errors,NO,NEEDS_REFACTOR,Fallback to regular tuple
+src/geoprompt/geoprocessing.py,2452,to_csv,except Exception:,"ImportError, AttributeError, ValueError",Optional geometry module/missing function/invalid geometry,NO,NEEDS_REFACTOR,Fallback to str()
+src/geoprompt/frame.py,49,normalize_crs,except Exception:,"ImportError, ValueError, AttributeError",Optional pyproj/invalid CRS/unexpected object,NO,NEEDS_REFACTOR,Fallback CRS parsing
+src/geoprompt/frame.py,824,describe,except Exception:,"ValueError, AttributeError, TypeError",Empty frame/missing bounds fields/type mismatch,NO,NEEDS_REFACTOR,Skip bounds on error
+src/geoprompt/frame.py,1047,applymap,except Exception:,"TypeError, ValueError, AttributeError (or keep broad)",User-provided functions can raise anything,NO,OPTIONAL_REFACTOR,Document behavior or narrow
+src/geoprompt/frame.py,1069,bounds_rows,except Exception:,"ImportError, ValueError, TypeError, AttributeError",Import/invalid geometry/type mismatch/missing attributes,NO,NEEDS_REFACTOR,Use None bounds as default
+src/geoprompt/frame.py,4300,namedtuple_iterator,except Exception:,"TypeError, ValueError, AttributeError",Named tuple construction errors,NO,NEEDS_REFACTOR,Fallback to regular tuple
+src/geoprompt/frame.py,4348,to_csv,except Exception:,"ImportError, AttributeError, ValueError",Optional geometry module/missing function/invalid geometry,NO,NEEDS_REFACTOR,Fallback to str()
+src/geoprompt/frame.py,4378,to_excel,except Exception:,"ImportError, AttributeError, ValueError",Optional geometry module/missing function/invalid geometry,NO,NEEDS_REFACTOR,Fallback to str()
+src/geoprompt/frame.py,4414,to_clipboard,except Exception:,"FileNotFoundError, subprocess.CalledProcessError, OSError",clip command not found/command failure/OS error,NO,NEEDS_REFACTOR,Graceful fallback
+src/geoprompt/frame.py,4418,to_clipboard,except Exception:,"ImportError, AttributeError",Optional pyperclip import/missing copy method,NO,NEEDS_REFACTOR,Graceful fallback
+src/geoprompt/frame.py,4444,to_sql,except Exception:,"ImportError, AttributeError, ValueError",Optional geometry module/missing function/invalid geometry,NO,NEEDS_REFACTOR,Fallback to str()
+src/geoprompt/security.py,400,readiness,except Exception:,Exception,Health check callables - any exception means check failed,NO,KEEP_AS_IS,Broad catch is correct
+src/geoprompt/security.py,431,initiate,except Exception:,Exception,Shutdown callbacks must not crash shutdown,NO,KEEP_AS_IS,Broad catch is correct
+src/geoprompt/security.py,883,describe_cached_data,except Exception:,"ValueError, TypeError, OSError, RuntimeError",Invalid key/data/type mismatch/I/O errors/crypto failures,NO,NEEDS_REFACTOR,Fallback to unencrypted size

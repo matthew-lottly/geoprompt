@@ -15,6 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 
+from .safe_expression import evaluate_safe_expression
+
 Record = dict[str, Any]
 
 
@@ -431,8 +433,14 @@ def calculate_field(
         func = expression
     else:
         # Parse ArcPy-style !field! references
-        text = re.sub(r"!(\w+)!", r"row.get('\1', 0)", str(expression))
-        func = lambda row, _t=text: eval(_t, {"__builtins__": {}, "row": row, "math": math})  # noqa: S307
+        text = re.sub(r"!(\w+)!", r"\1", str(expression))
+
+        def _expr(row: Record, _t: str = text) -> Any:
+            namespace = dict(row)
+            namespace["math"] = math
+            return evaluate_safe_expression(_t, namespace, allowed_attribute_roots={"math"})
+
+        func = _expr
 
     count = 0
     for row in rows:

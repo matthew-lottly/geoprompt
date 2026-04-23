@@ -191,7 +191,29 @@ def service_benchmark_report(
 
 
 def build_app() -> Any:
-    """Create and return a FastAPI application instance."""
+    """Create and return a FastAPI application instance.
+
+    By default, stub-mode behavior is disabled in service deployments.
+    Set GEOPROMPT_DEV_PROFILE=true to enable stubs (development only).
+    """
+    # J2.20 — Block stub-mode behavior in service unless development profile is active
+    is_dev_profile = os.getenv("GEOPROMPT_DEV_PROFILE", "").lower() in {"true", "1", "yes"}
+    allow_stub_fallback = os.getenv("GEOPROMPT_ALLOW_STUB_FALLBACK", "").lower() in {"true", "1", "yes"}
+
+    if not is_dev_profile and allow_stub_fallback:
+        raise RuntimeError(
+            "Stub fallback is enabled but GEOPROMPT_DEV_PROFILE is not set. "
+            "Stub-mode behavior is not allowed in production service deployments. "
+            "Set GEOPROMPT_DEV_PROFILE=true only for development/testing environments."
+        )
+
+    if not is_dev_profile:
+        # Enforce production-safe fallback policy
+        from ._exceptions import FallbackPolicy
+        FallbackPolicy.for_environment()  # Validates and logs fallback policy from env
+        logger.info("Service started in production mode (no stub fallbacks allowed). "
+                   "Set GEOPROMPT_DEV_PROFILE=true to enable stubs for testing.")
+
     fastapi = _load_fastapi()
     from pydantic import BaseModel
 

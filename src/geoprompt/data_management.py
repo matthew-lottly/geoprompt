@@ -16,6 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from .safe_expression import evaluate_safe_expression
+
 # ---------------------------------------------------------------------------
 # Lazy helpers
 # ---------------------------------------------------------------------------
@@ -153,8 +155,7 @@ def field_calculate(
     for r in records:
         ns = dict(_SAFE_BUILTINS) if safe else {}
         ns["row"] = r
-        ns["__builtins__"] = _SAFE_BUILTINS if safe else {}
-        r[target_field] = eval(expression, ns)  # noqa: S307
+        r[target_field] = evaluate_safe_expression(expression, ns)
     return records
 
 
@@ -535,8 +536,7 @@ def read_parquet_filtered(
         rows.append(row)
     if row_filter:
         ns = dict(_SAFE_BUILTINS)
-        ns["__builtins__"] = _SAFE_BUILTINS
-        rows = [r for r in rows if eval(row_filter, ns, {"row": r})]  # noqa: S307
+        rows = [r for r in rows if evaluate_safe_expression(row_filter, {**ns, "row": r})]
     return rows
 
 
@@ -1653,8 +1653,7 @@ def token_based_field_access(
     ns = dict(_SAFE_BUILTINS)
     ns["FEATURE"] = SimpleNamespace(**feature_row)
     ns["MAP"] = SimpleNamespace(**(map_context or {}))
-    ns["__builtins__"] = _SAFE_BUILTINS
-    return eval(py_expr, ns)  # noqa: S307
+    return evaluate_safe_expression(py_expr, ns, allowed_attribute_roots={"FEATURE", "MAP"})
 
 
 def transformer_chain(

@@ -1,0 +1,480 @@
+{
+  "refactoring_mapping": [
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 62,
+      "function": "_validate_url",
+      "exceptions": ["ValueError"],
+      "reason": "urlparse() defensive error",
+      "use_chaining": true,
+      "status": "ALREADY_CORRECT",
+      "note": "Has 'from exc' - no change needed"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 111,
+      "function": "_fetch_json_with_retries",
+      "exceptions": ["urllib.error.URLError", "urllib.error.HTTPError", "json.JSONDecodeError", "UnicodeDecodeError"],
+      "reason": "Network request, JSON parsing, encoding errors",
+      "use_chaining": true,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception as exc:",
+      "suggested": "except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, UnicodeDecodeError) as exc:"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 1926,
+      "function": "write_geopackage",
+      "exceptions": ["ImportError", "sqlite3.Error"],
+      "reason": "Optional dependency and database errors",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, sqlite3.Error):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2393,
+      "function": "read_stac",
+      "exceptions": ["ImportError"],
+      "reason": "Optional pystac dependency import",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except ImportError:"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2417,
+      "function": "read_stac",
+      "exceptions": ["ImportError", "ValueError", "KeyError", "AttributeError"],
+      "reason": "Import, invalid STAC URL, unexpected catalog structure",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, KeyError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2444,
+      "function": "read_stac",
+      "exceptions": ["FileNotFoundError", "ValueError", "AttributeError"],
+      "reason": "File not found, invalid STAC format, unexpected structure",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (FileNotFoundError, ValueError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2467,
+      "function": "read_stac",
+      "exceptions": ["ValueError", "OSError", "json.JSONDecodeError"],
+      "reason": "Invalid URL, file I/O failures, malformed JSON",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, OSError, json.JSONDecodeError):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2655,
+      "function": "_read_flatgeobuf_with_fiona",
+      "exceptions": ["ImportError"],
+      "reason": "Optional pyogrio import",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except ImportError:"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2662,
+      "function": "_read_flatgeobuf_with_fiona",
+      "exceptions": ["ImportError", "OSError", "ValueError"],
+      "reason": "Optional fiona import, file I/O, invalid format",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, OSError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2685,
+      "function": "write_flatgeobuf",
+      "exceptions": ["ImportError", "AttributeError", "OSError", "ValueError"],
+      "reason": "Missing geopandas, unexpected frame, file write, invalid driver",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError, OSError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/io.py",
+      "line": 2730,
+      "function": "read_dxf",
+      "exceptions": ["ValueError", "AttributeError", "IndexError"],
+      "reason": "Invalid coords, missing DXF attributes, unexpected dimensions",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, AttributeError, IndexError):"
+    },
+    {
+      "file": "src/geoprompt/db.py",
+      "line": 377,
+      "function": "_parse_wkb",
+      "exceptions": ["ImportError", "ValueError", "AttributeError", "json.JSONDecodeError"],
+      "reason": "Optional shapely, invalid hex/WKB, unexpected object, malformed JSON",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, AttributeError, json.JSONDecodeError):"
+    },
+    {
+      "file": "src/geoprompt/db.py",
+      "line": 420,
+      "function": "_parse_wkt_or_geojson",
+      "exceptions": ["ImportError", "ValueError", "AttributeError"],
+      "reason": "Optional shapely, invalid WKT, unexpected object structure",
+      "use_chaining": true,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, AttributeError) as exc:\n    raise ValueError(f\"cannot parse WKT: {wkt[:100]}\") from exc"
+    },
+    {
+      "file": "src/geoprompt/temporal.py",
+      "line": 391,
+      "function": "get_duration",
+      "exceptions": ["ValueError", "TypeError", "AttributeError"],
+      "reason": "Invalid timestamp format, type mismatch, unexpected object",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, TypeError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/temporal.py",
+      "line": 618,
+      "function": "apply_time_window",
+      "exceptions": ["ValueError"],
+      "reason": "Invalid datetime format",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except ValueError:"
+    },
+    {
+      "file": "src/geoprompt/temporal.py",
+      "line": 621,
+      "function": "apply_time_window",
+      "exceptions": ["ValueError"],
+      "reason": "Invalid datetime format in strptime fallback",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except ValueError:"
+    },
+    {
+      "file": "src/geoprompt/temporal.py",
+      "line": 673,
+      "function": "fit_temporal_trend",
+      "exceptions": ["ValueError"],
+      "reason": "Invalid datetime or float conversion",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except ValueError:"
+    },
+    {
+      "file": "src/geoprompt/stats.py",
+      "line": 852,
+      "function": "spatial_autocorrelation",
+      "exceptions": ["ValueError", "TypeError", "KeyError", "RuntimeError"],
+      "reason": "Invalid input, type mismatch, missing result key, scipy failures",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, TypeError, KeyError, RuntimeError):"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 253,
+      "function": "_run_tool",
+      "exceptions": ["Exception"],
+      "reason": "Intentional broad catch for tool execution safety",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Fault tolerance wrapper - should remain broad"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 300,
+      "function": "_run_tool_async",
+      "exceptions": ["Exception"],
+      "reason": "Intentional broad catch for async tool execution safety",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Fault tolerance wrapper - should remain broad"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 394,
+      "function": "transaction",
+      "exceptions": ["Exception"],
+      "reason": "Context manager must rollback on any exception",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Proper exception handling - any exception must trigger rollback"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 952,
+      "function": "PipelineExecution.run",
+      "exceptions": ["Exception"],
+      "reason": "Intentional broad catch for pipeline resilience",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Step failure should not crash pipeline - broad catch is correct"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 1822,
+      "function": "async_tool_runner",
+      "exceptions": ["Exception"],
+      "reason": "Async wrapper must not crash event loop",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Event loop protection - broad catch is correct"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 1847,
+      "function": "Observable.emit",
+      "exceptions": ["Exception"],
+      "reason": "Observer callback failure must not crash event stream",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Event stream protection - broad catch is correct"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 1872,
+      "function": "post_http_notification",
+      "exceptions": ["urllib.error.HTTPError", "urllib.error.URLError", "OSError", "socket.timeout"],
+      "reason": "HTTP protocol, URL, OS-level I/O, timeout failures",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception as exc:",
+      "suggested": "except (urllib.error.HTTPError, urllib.error.URLError, OSError, socket.timeout) as exc:"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 2310,
+      "function": "bounds",
+      "exceptions": ["ImportError", "ValueError", "TypeError", "AttributeError"],
+      "reason": "Import, invalid geometry, type mismatch, missing attributes",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, TypeError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 2381,
+      "function": "to_dict",
+      "exceptions": ["TypeError", "ValueError", "AttributeError"],
+      "reason": "Named tuple construction errors",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (TypeError, ValueError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/geoprocessing.py",
+      "line": 2452,
+      "function": "to_csv",
+      "exceptions": ["ImportError", "AttributeError", "ValueError"],
+      "reason": "Optional geometry module, missing function, invalid geometry",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 49,
+      "function": "normalize_crs",
+      "exceptions": ["ImportError", "ValueError", "AttributeError"],
+      "reason": "Optional pyproj, invalid CRS, unexpected object",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 824,
+      "function": "describe",
+      "exceptions": ["ValueError", "AttributeError", "TypeError"],
+      "reason": "Empty frame, missing bounds fields, type mismatch",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, AttributeError, TypeError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 1047,
+      "function": "applymap",
+      "exceptions": ["Exception"],
+      "reason": "User-provided functions - keep broad for safety",
+      "use_chaining": false,
+      "status": "OPTIONAL_REFACTOR",
+      "note": "User functions can raise anything. Consider documenting behavior or narrowing to (TypeError, ValueError, AttributeError) if appropriate"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 1069,
+      "function": "bounds_rows",
+      "exceptions": ["ImportError", "ValueError", "TypeError", "AttributeError"],
+      "reason": "Import, invalid geometry, type mismatch, missing attributes",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, ValueError, TypeError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4300,
+      "function": "namedtuple_iterator",
+      "exceptions": ["TypeError", "ValueError", "AttributeError"],
+      "reason": "Named tuple construction errors",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (TypeError, ValueError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4348,
+      "function": "to_csv",
+      "exceptions": ["ImportError", "AttributeError", "ValueError"],
+      "reason": "Optional geometry module, missing function, invalid geometry",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4378,
+      "function": "to_excel",
+      "exceptions": ["ImportError", "AttributeError", "ValueError"],
+      "reason": "Optional geometry module, missing function, invalid geometry",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4414,
+      "function": "to_clipboard",
+      "exceptions": ["FileNotFoundError", "subprocess.CalledProcessError", "OSError"],
+      "reason": "clip command not found, command failure, OS error",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (FileNotFoundError, subprocess.CalledProcessError, OSError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4418,
+      "function": "to_clipboard",
+      "exceptions": ["ImportError", "AttributeError"],
+      "reason": "Optional pyperclip import, missing copy method",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError):"
+    },
+    {
+      "file": "src/geoprompt/frame.py",
+      "line": 4444,
+      "function": "to_sql",
+      "exceptions": ["ImportError", "AttributeError", "ValueError"],
+      "reason": "Optional geometry module, missing function, invalid geometry",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ImportError, AttributeError, ValueError):"
+    },
+    {
+      "file": "src/geoprompt/security.py",
+      "line": 400,
+      "function": "readiness",
+      "exceptions": ["Exception"],
+      "reason": "Health check callables - any exception means check failed",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Broad catch is correct - checks can be arbitrary user callables"
+    },
+    {
+      "file": "src/geoprompt/security.py",
+      "line": 431,
+      "function": "initiate",
+      "exceptions": ["Exception"],
+      "reason": "Shutdown callbacks must not crash shutdown",
+      "use_chaining": false,
+      "status": "KEEP_AS_IS",
+      "note": "Broad catch is correct - must not fail during shutdown"
+    },
+    {
+      "file": "src/geoprompt/security.py",
+      "line": 883,
+      "function": "describe_cached_data",
+      "exceptions": ["ValueError", "TypeError", "OSError", "RuntimeError"],
+      "reason": "Invalid key/data, type mismatch, I/O errors, crypto failures",
+      "use_chaining": false,
+      "status": "NEEDS_REFACTOR",
+      "current": "except Exception:",
+      "suggested": "except (ValueError, TypeError, OSError, RuntimeError):"
+    }
+  ],
+  "statistics": {
+    "total_blocks": 43,
+    "keep_as_is": 8,
+    "needs_refactor": 34,
+    "optional_refactor": 1,
+    "already_correct": 1
+  },
+  "implementation_priority": [
+    {
+      "phase": 1,
+      "description": "Single exception replacements (easiest)",
+      "count": 10,
+      "examples": [
+        "io.py:2393 (ImportError only)",
+        "temporal.py:618,621,673 (ValueError only)"
+      ]
+    },
+    {
+      "phase": 2,
+      "description": "Multiple exception tuples",
+      "count": 24,
+      "examples": [
+        "io.py:111 (4 exceptions)",
+        "geoprocessing.py:2310 (4 exceptions)"
+      ]
+    },
+    {
+      "phase": 3,
+      "description": "Exception chaining additions",
+      "count": 1,
+      "examples": [
+        "db.py:420 (add 'from exc')"
+      ]
+    }
+  ]
+}

@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+import urllib.error
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_intersects, geometry_type, normalize_geometry
+from .safe_expression import ExpressionExecutionError, ExpressionValidationError, evaluate_safe_expression
 
 
 WORKLOAD_PRESETS: dict[str, dict[str, int | None]] = {
@@ -38,10 +40,43 @@ def _is_url_source(path: str | Path) -> bool:
     return parsed.scheme in {"http", "https", "file"}
 
 
+# Allowed URL schemes for remote fetches (J6.64)
+_REMOTE_FETCH_SCHEMES: frozenset[str] = frozenset({"http", "https"})
+_MAX_REMOTE_PAYLOAD_BYTES: int = 100 * 1024 * 1024  # 100 MiB default
+
+
+def _validate_remote_url(url: str, *, allowed_schemes: frozenset[str] | None = None) -> None:
+    """Validate that *url* uses an allowed scheme before making a remote fetch.
+
+    Args:
+        url: URL to validate.
+        allowed_schemes: Frozenset of accepted schemes. Defaults to
+            ``{"http", "https"}``.
+
+    Raises:
+        ValueError: When the URL scheme is not in the allowed set or the URL
+            cannot be parsed.
+    """
+    schemes = allowed_schemes if allowed_schemes is not None else _REMOTE_FETCH_SCHEMES
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:
+        raise ValueError(f"Malformed URL: {url!r}") from exc
+    if not parsed.scheme:
+        raise ValueError(f"URL {url!r} has no scheme. Only {sorted(schemes)} are allowed.")
+    if parsed.scheme not in schemes:
+        raise ValueError(
+            f"URL scheme {parsed.scheme!r} is not allowed. "
+            f"Permitted schemes: {sorted(schemes)}."
+        )
+
+
 def _resolve_service_url(url: str, *, query_params: dict[str, Any] | None = None) -> str:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"}:
         return url
+
+    _validate_remote_url(url)
 
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
     if any(token in parsed.path for token in ("FeatureServer", "MapServer")):
@@ -74,7 +109,7 @@ def _read_json_source(
             try:
                 with urlopen(request, timeout=timeout) as response:  # noqa: S310
                     return json.loads(response.read().decode("utf-8"))
-            except Exception as exc:  # pragma: no cover - network failures are environment-specific
+            except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, UnicodeDecodeError) as exc:  # pragma: no cover - network failures are environment-specific
                 last_error = exc
                 if attempt >= max_retries:
                     raise
@@ -650,8 +685,8 @@ def _row_matches_filter(row: dict[str, Any], where: Any | None) -> bool:
         return all(row.get(key) == value for key, value in where.items())
     if isinstance(where, str):
         try:
-            return bool(eval(where, {"__builtins__": {}}, dict(row)))
-        except Exception as exc:  # pragma: no cover - invalid expressions are user input issues
+            return bool(evaluate_safe_expression(where, dict(row)))
+        except (ExpressionValidationError, ExpressionExecutionError) as exc:
             raise ValueError(f"invalid where expression: {where}") from exc
     raise TypeError("where must be a mapping, callable, or expression string")
 
@@ -1889,7 +1924,7 @@ def write_geopackage(
 
             with sqlite3.connect(str(out)) as conn:
                 conn.execute(f"SELECT gpkgAddSpatialIndex('{layer}', '{gdf.geometry.name}')")
-        except Exception:
+        except (ImportError, sqlite3.Error):
             # Spatial indexing is best-effort and optional.
             pass
     return str(out)
@@ -2231,12 +2266,20 @@ def read_cloud_json(
         with fsspec.open(target, "r", encoding="utf-8") as handle:
             payload = _json.load(handle)
     else:
+        _validate_remote_url(target)
         req = Request(target)
         if headers:
             for key, val in headers.items():
                 req.add_header(key, val)
         with urlopen(req, timeout=60) as resp:  # noqa: S310
-            raw = resp.read()
+            raw = resp.read(
+                _MAX_REMOTE_PAYLOAD_BYTES + 1
+            )
+        if len(raw) > _MAX_REMOTE_PAYLOAD_BYTES:
+            raise ValueError(
+                f"Remote payload from {target!r} exceeds the maximum allowed size "
+                f"of {_MAX_REMOTE_PAYLOAD_BYTES // (1024 * 1024)} MiB."
+            )
         payload = _json.loads(raw)
 
     if isinstance(payload, dict) and payload.get("type") == "FeatureCollection":
@@ -2348,7 +2391,7 @@ def read_stac_catalog(path: str | Path, *, recursive: bool = True,
     try:
         import pystac
         from pystac import Catalog, Collection, Item
-    except Exception:  # pragma: no cover - optional dependency path
+    except ImportError:  # pragma: no cover - optional dependency path
         pystac = None
         Catalog = Collection = Item = None  # type: ignore[assignment]
 
@@ -2372,7 +2415,7 @@ def read_stac_catalog(path: str | Path, *, recursive: bool = True,
                 "collections": collections,
                 "items": items,
             }
-        except Exception:
+        except (ImportError, ValueError, KeyError, AttributeError):
             pass
 
     if pystac is not None:
@@ -2399,7 +2442,7 @@ def read_stac_catalog(path: str | Path, *, recursive: bool = True,
                 )
             payload["resolved_links"] = resolved_links
             return payload
-        except Exception:
+        except (FileNotFoundError, ValueError, AttributeError):
             pass
 
     root = read_cloud_json(path, headers=headers)
@@ -2422,7 +2465,7 @@ def read_stac_catalog(path: str | Path, *, recursive: bool = True,
         child_target = href if urlparse(str(href)).scheme else str((Path(base).parent / str(href)).resolve())
         try:
             child_payload = read_cloud_json(child_target, headers=headers)
-        except Exception:
+        except (ValueError, OSError, json.JSONDecodeError):
             continue
         if isinstance(child_payload, dict):
             resolved_children.append({"rel": rel, "href": href, "payload": child_payload})
@@ -2610,14 +2653,14 @@ def read_flatgeobuf(path: str | Path) -> GeoPromptFrame:
             limit_rows=None,
             sample_step=1,
         )
-    except Exception:
+    except (ImportError, OSError, ValueError):
         pass
     try:
         import fiona  # type: ignore[import]
         with fiona.open(str(p)) as src:
             records = [dict(feat["properties"]) | {"geometry": dict(feat["geometry"])} for feat in src]
         return GeoPromptFrame.from_records(records)
-    except Exception:
+    except (ImportError, OSError, ValueError):
         pass
     # Final fallback: treat as GeoJSON
     return read_geojson(path)  # type: ignore[attr-defined]
@@ -2640,7 +2683,7 @@ def write_flatgeobuf(frame: GeoPromptFrame, path: str | Path) -> None:
         gdf = to_geopandas(frame)
         gdf.to_file(str(p), driver="FlatGeobuf")
         return
-    except Exception:
+    except (ImportError, AttributeError, OSError, ValueError):
         pass
     # Fallback: write as GeoJSON with .fgb extension
     write_geojson(p, frame)
@@ -2650,8 +2693,7 @@ def read_dxf(path: str | Path, layer: str | None = None) -> GeoPromptFrame:
     """Read geometry entities from a DXF (CAD) file.
 
     Extracts LINE, LWPOLYLINE, CIRCLE, ARC, and INSERT (block reference)
-    entities.  Requires ``ezdxf`` for full support; falls back to stub
-    output for basic metadata only.
+    entities. Requires ``ezdxf`` for support.
 
     Args:
         path: Path to the ``.dxf`` file.
@@ -2686,12 +2728,11 @@ def read_dxf(path: str | Path, layer: str | None = None) -> GeoPromptFrame:
                 else:
                     continue
                 records.append({"entity_type": etype, "layer": entity.dxf.layer, "geometry": geom})
-            except Exception:
+            except (ValueError, AttributeError, IndexError):
                 continue
-        return GeoPromptFrame.from_records(records) if records else GeoPromptFrame.from_records([{"entity_type": "empty", "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
-    except ImportError:
-        # Return a stub frame if ezdxf not available
-        return GeoPromptFrame.from_records([{"entity_type": "dxf_stub", "source": str(path), "geometry": {"type": "Point", "coordinates": (0.0, 0.0)}}])
+        return GeoPromptFrame.from_records(records)
+    except ImportError as exc:
+        raise ImportError("ezdxf is required to read DXF files. Install with: pip install ezdxf") from exc
 
 
 def read_mapinfo_tab(path: str | Path) -> GeoPromptFrame:
@@ -2770,11 +2811,16 @@ def read_wfs(url: str, type_name: str, *, max_features: int = 1000,
     return GeoPromptFrame.from_records(rows, crs=crs_info)
 
 
-def read_osm_pbf(path: str | Path, *, element_types: list[str] | None = None) -> GeoPromptFrame:
+def read_osm_pbf(
+    path: str | Path,
+    *,
+    element_types: list[str] | None = None,
+    allow_stub_fallback: bool = False,
+) -> GeoPromptFrame:
     """Read an OpenStreetMap PBF file into a :class:`~geoprompt.GeoPromptFrame`.
 
-    Requires ``osmium`` (``osmium-tool`` Python bindings) or falls back to
-    ``pyosmium`` if available.  Returns a stub frame if neither is installed.
+    Requires ``osmium`` (``osmium-tool`` Python bindings). If unavailable,
+    this function raises ``ImportError`` by default.
 
     Args:
         path: Path to the ``.osm.pbf`` file.
@@ -2808,8 +2854,12 @@ def read_osm_pbf(path: str | Path, *, element_types: list[str] | None = None) ->
         handler = _Handler()
         handler.apply_file(str(path))
         return GeoPromptFrame.from_records(handler.records) if handler.records else GeoPromptFrame.from_records([])
-    except ImportError:
-        return GeoPromptFrame.from_records([])
+    except ImportError as exc:
+        if allow_stub_fallback:
+            return GeoPromptFrame.from_records([])
+        raise ImportError(
+            "osmium is required to read OSM PBF files. Install with: pip install osmium"
+        ) from exc
 
 
 _FORMAT_READERS: dict[str, Any] = {
