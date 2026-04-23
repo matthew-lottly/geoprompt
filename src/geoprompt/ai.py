@@ -752,4 +752,513 @@ __all__ = [
     "topology_validation_narrative",
     "with_retry",
     "WorkspaceMemory",
+    # I6 — Hybrid Orchestration
+    "inference_routing_policy",
+    "data_residency_policy",
+    "auto_fallback_chain",
+    "split_execution_plan",
+    "connector_health_score",
+    "workload_scheduler",
+    "quota_manager",
+    "raster_tile_trace_span",
+    "inference_lineage_report",
+    "job_replay_mode",
+    # I10 — Developer UX
+    "raster_ai_pipeline",
+    "runtime_doctor",
+    "feature_tier_labels",
 ]
+
+
+# ── I6. Hybrid Orchestration: Local + Hosted + Fallback ──────────────────────
+
+def inference_routing_policy(
+    request: dict[str, Any],
+    *,
+    connectors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Choose local vs hosted inference by cost, latency, and data sensitivity.
+
+    Args:
+        request: Dict with keys ``data_class`` (str), ``latency_budget_ms``
+            (int), ``cost_budget_usd`` (float).
+        connectors: List of connector dicts, each with ``name``, ``type``
+            (``'local'``/``'hosted'``), ``latency_ms``, ``cost_per_call``,
+            ``health_score`` (0–1).
+
+    Returns:
+        Dict with ``selected_connector``, ``reason``, and ``fallback`` chain.
+    """
+    connectors = connectors or []
+    data_class = request.get("data_class", "public")
+    latency_budget = request.get("latency_budget_ms", 5000)
+    cost_budget = request.get("cost_budget_usd", 1.0)
+
+    # Restricted data must stay local
+    if data_class in ("restricted", "classified", "pii"):
+        local = [c for c in connectors if c.get("type") == "local"]
+        selected = local[0] if local else None
+        return {
+            "selected_connector": selected.get("name") if selected else "local_fallback",
+            "reason": f"Data class '{data_class}' requires local execution",
+            "fallback": [],
+        }
+
+    # Score connectors: health * (latency fit) * (cost fit)
+    candidates: list[tuple[float, dict[str, Any]]] = []
+    for c in connectors:
+        if c.get("latency_ms", 9999) > latency_budget:
+            continue
+        if c.get("cost_per_call", 99) > cost_budget:
+            continue
+        score = c.get("health_score", 1.0)
+        candidates.append((score, c))
+    candidates.sort(key=lambda x: x[0], reverse=True)
+
+    if not candidates:
+        return {"selected_connector": None, "reason": "No connector meets budget constraints", "fallback": []}
+
+    best = candidates[0][1]
+    fallback = [c.get("name") for _, c in candidates[1:3]]
+    return {
+        "selected_connector": best.get("name"),
+        "reason": f"Best health score {candidates[0][0]:.2f} within budget",
+        "fallback": fallback,
+    }
+
+
+def data_residency_policy(
+    connector_name: str,
+    data_class: str,
+    *,
+    approved_regions: list[str] | None = None,
+    connector_region: str = "unknown",
+) -> dict[str, Any]:
+    """Prevent restricted rasters from leaving approved boundaries.
+
+    Returns ``allowed`` (bool) and ``reason``.
+    """
+    approved_regions = approved_regions or ["local"]
+    if data_class in ("restricted", "classified", "pii", "sensitive"):
+        if connector_region not in approved_regions:
+            return {
+                "allowed": False,
+                "reason": f"Data class '{data_class}' cannot be sent to region '{connector_region}'",
+                "connector": connector_name,
+            }
+    return {"allowed": True, "reason": "Data residency check passed", "connector": connector_name}
+
+
+def auto_fallback_chain(
+    primary: str,
+    secondary: str | None = None,
+    emergency_local: str | None = None,
+    *,
+    health_scores: dict[str, float] | None = None,
+) -> list[dict[str, Any]]:
+    """Build a prioritized fallback chain from primary to emergency local model.
+
+    Returns ordered list of ``{'connector': name, 'health': score}`` dicts.
+    """
+    health_scores = health_scores or {}
+    chain = []
+    for name in [primary, secondary, emergency_local]:
+        if name is not None:
+            chain.append({"connector": name, "health": health_scores.get(name, 1.0)})
+    # Sort by health descending but keep primary first
+    if len(chain) > 1:
+        head, tail = chain[:1], sorted(chain[1:], key=lambda x: x["health"], reverse=True)
+        chain = head + tail
+    return chain
+
+
+def split_execution_plan(
+    workflow: dict[str, Any],
+    *,
+    local_connector: str = "local",
+    hosted_connector: str = "hosted",
+) -> dict[str, Any]:
+    """Plan split execution: local preprocessing + hosted inference + local postprocessing.
+
+    Returns dict with ``preprocessing``, ``inference``, and ``postprocessing`` stages.
+    """
+    return {
+        "preprocessing": {
+            "connector": local_connector,
+            "steps": workflow.get("preprocessing_steps", ["normalize", "tile"]),
+        },
+        "inference": {
+            "connector": hosted_connector,
+            "steps": workflow.get("inference_steps", ["predict"]),
+        },
+        "postprocessing": {
+            "connector": local_connector,
+            "steps": workflow.get("postprocessing_steps", ["merge", "vectorize"]),
+        },
+        "rationale": "Sensitive preprocessing and postprocessing stay local; only inference payload crosses boundary.",
+    }
+
+
+def connector_health_score(
+    connector_name: str,
+    *,
+    recent_errors: int = 0,
+    recent_requests: int = 10,
+    avg_latency_ms: float = 200.0,
+    latency_threshold_ms: float = 2000.0,
+) -> dict[str, Any]:
+    """Score a connector's health to guide routing decisions.
+
+    Returns ``score`` (0–1), ``grade``, and ``recommendation``.
+    """
+    if recent_requests == 0:
+        error_rate = 0.0
+    else:
+        error_rate = recent_errors / recent_requests
+    latency_penalty = min(1.0, avg_latency_ms / latency_threshold_ms)
+    score = round((1.0 - error_rate) * (1.0 - latency_penalty * 0.5), 3)
+    grade = "A" if score >= 0.9 else "B" if score >= 0.75 else "C" if score >= 0.5 else "D"
+    recommendation = "healthy" if score >= 0.75 else "degraded — consider fallback" if score >= 0.4 else "unhealthy — avoid"
+    return {"connector": connector_name, "score": score, "grade": grade, "recommendation": recommendation}
+
+
+def workload_scheduler(
+    jobs: list[dict[str, Any]],
+    *,
+    max_concurrent: int = 4,
+    checkpoint_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Schedule large raster jobs with priority, concurrency limits, and checkpoints.
+
+    Returns a schedule plan with ``batches`` and ``checkpoint_paths``.
+    """
+    from pathlib import Path as _Path
+
+    jobs_sorted = sorted(jobs, key=lambda j: j.get("priority", 5))
+    batches: list[list[dict[str, Any]]] = []
+    for i in range(0, len(jobs_sorted), max_concurrent):
+        batches.append(jobs_sorted[i: i + max_concurrent])
+
+    checkpoints: list[str] = []
+    if checkpoint_dir is not None:
+        cp = _Path(str(checkpoint_dir))
+        for idx, batch in enumerate(batches):
+            cp_path = str(cp / f"batch_{idx:04d}.checkpoint.json")
+            checkpoints.append(cp_path)
+
+    return {
+        "total_jobs": len(jobs),
+        "batch_count": len(batches),
+        "max_concurrent": max_concurrent,
+        "batches": [[j.get("id", i) for i, j in enumerate(b)] for b in batches],
+        "checkpoint_paths": checkpoints,
+    }
+
+
+def quota_manager(
+    usage_store: dict[str, Any],
+    *,
+    team_limits: dict[str, int] | None = None,
+    workflow_limits: dict[str, int] | None = None,
+    connector_limits: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Manage per-team, per-workflow, and per-connector usage quotas.
+
+    Returns ``quotas`` summary and list of ``violations``.
+    """
+    team_limits = team_limits or {}
+    workflow_limits = workflow_limits or {}
+    connector_limits = connector_limits or {}
+    violations: list[str] = []
+
+    def _check(scope: str, limits: dict[str, int], usage_key: str) -> None:
+        for key, limit in limits.items():
+            used = usage_store.get(f"{usage_key}:{key}", 0)
+            if used > limit:
+                violations.append(f"{scope} '{key}': used {used}, limit {limit}")
+
+    _check("team", team_limits, "team")
+    _check("workflow", workflow_limits, "workflow")
+    _check("connector", connector_limits, "connector")
+
+    return {
+        "quotas": {
+            "teams": team_limits,
+            "workflows": workflow_limits,
+            "connectors": connector_limits,
+        },
+        "violations": violations,
+        "compliant": len(violations) == 0,
+    }
+
+
+def raster_tile_trace_span(
+    tile_id: str,
+    model_call_id: str,
+    *,
+    connector: str = "unknown",
+    latency_ms: float = 0.0,
+    status: str = "ok",
+) -> dict[str, Any]:
+    """Create a tracing span linking a raster tile output to its model call.
+
+    Returns a structured span dict for lineage and audit logs.
+    """
+    return {
+        "span_type": "raster_tile_inference",
+        "tile_id": tile_id,
+        "model_call_id": model_call_id,
+        "connector": connector,
+        "latency_ms": latency_ms,
+        "status": status,
+        "timestamp": time.time(),
+    }
+
+
+def inference_lineage_report(
+    spans: list[dict[str, Any]],
+    *,
+    model_id: str = "unknown",
+    model_version: str = "unknown",
+    connector: str = "unknown",
+    prompt_config: dict[str, Any] | None = None,
+    thresholds: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Capture a lineage report for a batch of inference spans.
+
+    Records model id/version, connector, prompt/config, and thresholds.
+    """
+    return {
+        "model_id": model_id,
+        "model_version": model_version,
+        "connector": connector,
+        "prompt_config": prompt_config or {},
+        "thresholds": thresholds or {},
+        "total_tiles": len(spans),
+        "successful_tiles": sum(1 for s in spans if s.get("status") == "ok"),
+        "failed_tiles": sum(1 for s in spans if s.get("status") != "ok"),
+        "total_latency_ms": sum(s.get("latency_ms", 0) for s in spans),
+        "generated_at": time.time(),
+    }
+
+
+def job_replay_mode(
+    job_id: str,
+    lineage: dict[str, Any],
+    *,
+    override_connector: str | None = None,
+) -> dict[str, Any]:
+    """Produce a replay spec for deterministic audit rerun of a completed job.
+
+    Returns a replay plan with connector, model, thresholds, and config.
+    """
+    return {
+        "job_id": job_id,
+        "replay_mode": True,
+        "connector": override_connector or lineage.get("connector", "original"),
+        "model_id": lineage.get("model_id"),
+        "model_version": lineage.get("model_version"),
+        "prompt_config": lineage.get("prompt_config", {}),
+        "thresholds": lineage.get("thresholds", {}),
+        "note": "Replay will use locked model version and config for deterministic audit.",
+    }
+
+
+# ── I10. Developer Experience and Product Surfaces ────────────────────────────
+
+def raster_ai_pipeline(
+    steps: list[dict[str, Any]],
+    *,
+    backend: str = "auto",
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Unified raster AI pipeline with declarative steps and backend-agnostic config.
+
+    Args:
+        steps: Ordered list of step dicts, each with ``type`` (one of
+            ``'load'``, ``'preprocess'``, ``'infer'``, ``'postprocess'``,
+            ``'export'``) and ``config`` dict.
+        backend: Execution backend (``'auto'``, ``'local'``, ``'hosted'``).
+        dry_run: If True, validate and plan without executing.
+
+    Returns:
+        Dict with ``plan``, ``backend``, ``dry_run`` flag, and ``status``.
+    """
+    valid_types = {"load", "preprocess", "infer", "postprocess", "export"}
+    issues: list[str] = []
+    for i, step in enumerate(steps):
+        if step.get("type") not in valid_types:
+            issues.append(f"Step {i}: unknown type '{step.get('type')}'")
+
+    if backend == "auto":
+        backend = "local"  # default to local for safety
+
+    return {
+        "plan": [{"index": i, "type": s.get("type"), "config": s.get("config", {})} for i, s in enumerate(steps)],
+        "backend": backend,
+        "dry_run": dry_run,
+        "step_count": len(steps),
+        "validation_issues": issues,
+        "status": "planned" if dry_run or issues else "ready",
+    }
+
+
+def runtime_doctor(
+    *,
+    check_onnx: bool = True,
+    check_torch: bool = True,
+    check_tf: bool = True,
+    check_gpu: bool = True,
+    check_auth: bool = True,
+) -> dict[str, Any]:
+    """Run diagnostic checks for missing model runtimes, GPU visibility, and auth config.
+
+    Returns a structured report with ``checks`` and ``recommendations``.
+    """
+    checks: dict[str, Any] = {}
+    recommendations: list[str] = []
+
+    if check_onnx:
+        try:
+            import importlib
+            importlib.import_module("onnxruntime")
+            checks["onnxruntime"] = {"available": True}
+        except ImportError:
+            checks["onnxruntime"] = {"available": False}
+            recommendations.append("Install onnxruntime for local ONNX inference: pip install onnxruntime")
+
+    if check_torch:
+        try:
+            import importlib
+            torch = importlib.import_module("torch")
+            checks["torch"] = {"available": True, "version": getattr(torch, "__version__", "unknown")}
+        except ImportError:
+            checks["torch"] = {"available": False}
+            recommendations.append("Install PyTorch for local neural network inference: pip install torch")
+
+    if check_tf:
+        try:
+            import importlib
+            tf = importlib.import_module("tensorflow")
+            checks["tensorflow"] = {"available": True, "version": getattr(tf, "__version__", "unknown")}
+        except ImportError:
+            checks["tensorflow"] = {"available": False}
+            recommendations.append("Install TensorFlow for SavedModel inference: pip install tensorflow")
+
+    if check_gpu:
+        try:
+            import importlib
+            torch = importlib.import_module("torch")
+            gpu_available = bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
+            checks["gpu_cuda"] = {"available": gpu_available}
+            if not gpu_available:
+                recommendations.append("No CUDA GPU detected — inference will run on CPU.")
+        except Exception:
+            checks["gpu_cuda"] = {"available": False, "note": "torch not installed"}
+
+    if check_auth:
+        has_openai = bool(os.environ.get("OPENAI_API_KEY"))
+        has_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
+        has_azure = bool(os.environ.get("AZURE_OPENAI_API_KEY"))
+        checks["api_auth"] = {
+            "openai": has_openai,
+            "anthropic": has_anthropic,
+            "azure_openai": has_azure,
+        }
+        if not any([has_openai, has_anthropic, has_azure]):
+            recommendations.append("No hosted API keys found — set OPENAI_API_KEY, ANTHROPIC_API_KEY, or AZURE_OPENAI_API_KEY.")
+
+    healthy = all(
+        v.get("available", True) for v in checks.values() if isinstance(v, dict)
+    )
+    return {
+        "checks": checks,
+        "recommendations": recommendations,
+        "overall": "healthy" if healthy else "issues_found",
+    }
+
+
+def feature_tier_labels(symbols: list[str] | None = None) -> dict[str, str]:
+    """Return stable/beta/experimental tier labels for raster AI surfaces.
+
+    Covers all new surfaces added in the I-series backlog.
+    """
+    raster_ai_tiers: dict[str, str] = {
+        # I1 - Raster Core Engine
+        "RasterDataset": "beta",
+        "RasterWindow": "beta",
+        "raster_algebra_plan": "stable",
+        "neighborhood_operation": "stable",
+        "raster_io_telemetry": "beta",
+        # I2 - Remote Sensing
+        "orthorectification_pipeline": "experimental",
+        "pan_sharpening_suite": "beta",
+        "atmospheric_correction": "experimental",
+        "temporal_datacube": "beta",
+        # I3 - Raster AI Runtime
+        "RasterModelContract": "beta",
+        "RasterInferenceSession": "beta",
+        "patch_extraction_service": "beta",
+        "model_capability_descriptor": "beta",
+        # I4 - BYOM Connectors
+        "onnx_connector": "beta",
+        "torch_connector": "experimental",
+        "sklearn_connector": "stable",
+        "connector_plugin_api": "experimental",
+        # I5 - Hosted Connectors
+        "HostedInferenceConnector": "beta",
+        "openai_connector": "experimental",
+        "azure_openai_connector": "experimental",
+        "anthropic_connector": "experimental",
+        # I6 - Hybrid Orchestration
+        "inference_routing_policy": "beta",
+        "data_residency_policy": "stable",
+        "auto_fallback_chain": "beta",
+        "split_execution_plan": "beta",
+        "connector_health_score": "stable",
+        "workload_scheduler": "beta",
+        "quota_manager": "beta",
+        "raster_tile_trace_span": "beta",
+        "inference_lineage_report": "stable",
+        "job_replay_mode": "beta",
+        # I7 - Training Data
+        "training_patch_export": "beta",
+        "annotation_package_schema": "stable",
+        "active_learning_suggestions": "experimental",
+        "weak_label_pipeline": "experimental",
+        "spatial_leakage_aware_split": "stable",
+        "imagery_augmentation_pipeline": "beta",
+        "model_eval_harness": "beta",
+        "reviewer_workflow": "experimental",
+        "model_drift_detection": "experimental",
+        "retraining_trigger_policy": "experimental",
+        # I8 - Quality Gates
+        "raster_ai_golden_benchmark": "beta",
+        "throughput_benchmark_matrix": "beta",
+        "numerical_stability_audit": "beta",
+        "edge_artifact_tests": "beta",
+        "calibration_curve_report": "beta",
+        "model_failure_catalog": "stable",
+        "benchmark_release_gate": "stable",
+        "reproducibility_bundle_export": "stable",
+        "raster_ml_baseline_comparison": "beta",
+        "evidence_pack_generator": "stable",
+        # I9 - Security/Governance
+        "model_usage_policy_engine": "stable",
+        "sensitive_geodata_detector": "beta",
+        "geodata_redaction_hooks": "stable",
+        "connector_audit_log": "stable",
+        "model_registry_manifest": "beta",
+        "per_request_cost_estimate": "beta",
+        "model_governance_dashboard": "experimental",
+        "inference_cache_encryption": "beta",
+        "inference_artifact_retention_policy": "stable",
+        "compliance_profile_templates": "stable",
+        # I10 - Developer UX
+        "raster_ai_pipeline": "beta",
+        "runtime_doctor": "stable",
+        "feature_tier_labels": "stable",
+    }
+    if symbols is not None:
+        return {k: v for k, v in raster_ai_tiers.items() if k in symbols}
+    return raster_ai_tiers

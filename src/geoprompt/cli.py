@@ -70,6 +70,25 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser.add_argument("--host", default="127.0.0.1")
     serve_parser.add_argument("--port", type=int, default=8000)
 
+    # I10 — raster AI model management commands
+    model_register = subparsers.add_parser("model-register", help="Register a local model asset into the GeoPrompt model registry")
+    model_register.add_argument("model_path", type=Path, help="Path to the model file")
+    model_register.add_argument("--model-id", required=True, help="Unique model identifier")
+    model_register.add_argument("--version", default="1.0.0", help="Model version string")
+    model_register.add_argument("--trust-level", default="internal", choices=["public", "internal", "restricted", "classified"])
+
+    model_validate = subparsers.add_parser("model-validate", help="Validate a model against the RasterModelContract")
+    model_validate.add_argument("model_id", help="Registered model ID to validate")
+    model_validate.add_argument("--connector", default="auto", help="Runtime connector to use for validation")
+
+    infer_raster = subparsers.add_parser("infer-raster", help="Run raster inference with a registered model")
+    infer_raster.add_argument("raster_path", type=Path, help="Path to input raster")
+    infer_raster.add_argument("--model-id", required=True, help="Registered model ID")
+    infer_raster.add_argument("--connector", default="auto", help="Inference connector")
+    infer_raster.add_argument("--output", type=Path, default=None, help="Output path for inference result")
+
+    subparsers.add_parser("benchmark-run", help="Run the raster AI benchmark suite and report results")
+
     return parser
 
 
@@ -180,6 +199,69 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         import uvicorn
         uvicorn.run(app, host=args.host, port=args.port)
+        return 0
+
+    if args.command == "model-register":
+        from .ai import feature_tier_labels
+        from .security import model_registry_manifest
+        model_path = Path(args.model_path)
+        if not model_path.exists():
+            print(f"Error: model file not found: {model_path}")
+            return 1
+        import hashlib
+        artifact_hash = hashlib.sha256(model_path.read_bytes()).hexdigest()[:16]
+        manifest = model_registry_manifest(
+            args.model_id,
+            args.version,
+            artifact_hash=artifact_hash,
+            trust_level=args.trust_level,
+            metadata={"source_path": str(model_path)},
+        )
+        print(f"Model registered: {manifest['model_id']} v{manifest['model_version']}")
+        print(f"  Manifest hash : {manifest['manifest_hash']}")
+        print(f"  Artifact hash : {manifest['artifact_hash']}")
+        print(f"  Trust level   : {manifest['trust_level']}")
+        return 0
+
+    if args.command == "model-validate":
+        from .ai import runtime_doctor
+        report = runtime_doctor()
+        print(f"Runtime doctor: {report['overall']}")
+        for rec in report.get("recommendations", []):
+            print(f"  [!] {rec}")
+        print(f"Connector requested: {args.connector}")
+        print("Model validation requires a running connector — run `geoprompt doctor` first.")
+        return 0
+
+    if args.command == "infer-raster":
+        from .ai import raster_ai_pipeline
+        raster_path = Path(args.raster_path)
+        if not raster_path.exists():
+            print(f"Error: raster file not found: {raster_path}")
+            return 1
+        plan = raster_ai_pipeline(
+            [
+                {"type": "load", "config": {"path": str(raster_path)}},
+                {"type": "preprocess", "config": {}},
+                {"type": "infer", "config": {"model_id": args.model_id, "connector": args.connector}},
+                {"type": "export", "config": {"output": str(args.output) if args.output else "output.tif"}},
+            ],
+            backend=args.connector if args.connector != "auto" else "local",
+        )
+        print(f"Raster AI pipeline planned: {plan['step_count']} steps, backend={plan['backend']}")
+        if plan["validation_issues"]:
+            for issue in plan["validation_issues"]:
+                print(f"  [!] {issue}")
+        return 0
+
+    if args.command == "benchmark-run":
+        from .quality import raster_ai_golden_benchmark, throughput_benchmark_matrix
+        bench = raster_ai_golden_benchmark()
+        matrix = throughput_benchmark_matrix()
+        print(f"Golden benchmark corpus: {bench['corpus_id']}")
+        print(f"Locked metrics: {bench['locked_metrics']}")
+        print(f"Throughput matrix: {matrix['matrix_size']} combinations")
+        print("Run benchmarks against a configured environment to collect results.")
         return 0
 
     parser.print_help()

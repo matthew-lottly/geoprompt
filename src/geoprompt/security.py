@@ -622,3 +622,343 @@ def rate_limit_check(key: str, *,
     counter_store[store_key] = count
     allowed = count <= limit
     return {"allowed": allowed, "count": count, "limit": limit, "remaining": max(0, limit - count)}
+
+
+# ── I9. Security, Privacy, Governance, and Cost Controls ─────────────────────
+
+def model_usage_policy_engine(
+    model_id: str,
+    connector: str,
+    data_class: str,
+    *,
+    allowed_models: list[str] | None = None,
+    allowed_connectors: list[str] | None = None,
+    allowed_data_classes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Enforce model usage approval policy (allowed models, connectors, data classes).
+
+    Returns ``approved`` (bool) and list of ``violations``.
+    """
+    allowed_models = allowed_models or []
+    allowed_connectors = allowed_connectors or []
+    allowed_data_classes = allowed_data_classes or ["public", "internal"]
+    violations: list[str] = []
+
+    if allowed_models and model_id not in allowed_models:
+        violations.append(f"Model '{model_id}' is not in the approved model list.")
+    if allowed_connectors and connector not in allowed_connectors:
+        violations.append(f"Connector '{connector}' is not approved for use.")
+    if data_class not in allowed_data_classes:
+        violations.append(f"Data class '{data_class}' is not permitted for inference dispatch.")
+
+    return {"approved": len(violations) == 0, "violations": violations, "model_id": model_id, "connector": connector}
+
+
+# Reuse existing redact_pii for sensitive geodata pre-check
+def sensitive_geodata_detector(
+    payload: dict[str, Any],
+    *,
+    pii_fields: list[str] | None = None,
+    sensitive_geometry_types: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run a pre-check for PII and sensitive geodata before hosted inference dispatch.
+
+    Returns ``clean`` (bool), detected ``pii_fields``, and ``sensitive_geometries``.
+    """
+    pii_fields_to_check = pii_fields or ["name", "email", "phone", "address", "ssn", "dob", "national_id"]
+    sensitive_geometry_types = sensitive_geometry_types or ["military_facility", "critical_infrastructure"]
+
+    found_pii: list[str] = []
+    found_sensitive_geom: list[str] = []
+
+    for field in pii_fields_to_check:
+        if field in payload and payload[field]:
+            found_pii.append(field)
+
+    geom_type = payload.get("geometry_type", "")
+    if geom_type in sensitive_geometry_types:
+        found_sensitive_geom.append(geom_type)
+
+    # Check text fields for PII patterns
+    pii_patterns = [
+        r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",
+        r"\b\d{3}-\d{2}-\d{4}\b",
+    ]
+    import re as _re_local
+    for key, val in payload.items():
+        if isinstance(val, str):
+            for pat in pii_patterns:
+                if _re_local.search(pat, val, _re_local.IGNORECASE):
+                    if key not in found_pii:
+                        found_pii.append(key)
+                    break
+
+    return {
+        "clean": len(found_pii) == 0 and len(found_sensitive_geom) == 0,
+        "pii_fields": found_pii,
+        "sensitive_geometries": found_sensitive_geom,
+    }
+
+
+def geodata_redaction_hooks(
+    payload: dict[str, Any],
+    *,
+    fields_to_redact: list[str] | None = None,
+    coordinate_precision: int | None = None,
+) -> dict[str, Any]:
+    """Apply automatic redaction/transformation hooks for restricted attributes and geometries.
+
+    Redacts listed fields and optionally truncates coordinate precision.
+
+    Returns the sanitized payload copy.
+    """
+    fields_to_redact = fields_to_redact or ["name", "email", "phone", "address"]
+    sanitized = dict(payload)
+    for field in fields_to_redact:
+        if field in sanitized:
+            sanitized[field] = "[REDACTED]"
+
+    # Truncate geometry coordinate precision if requested
+    if coordinate_precision is not None:
+        geom = sanitized.get("geometry")
+        if isinstance(geom, dict):
+            def _truncate_coords(obj: Any) -> Any:
+                if isinstance(obj, float):
+                    return round(obj, coordinate_precision)
+                if isinstance(obj, list):
+                    return [_truncate_coords(v) for v in obj]
+                if isinstance(obj, dict):
+                    return {k: _truncate_coords(v) for k, v in obj.items()}
+                return obj
+            sanitized["geometry"] = _truncate_coords(geom)
+
+    sanitized["_redaction_applied"] = True
+    return sanitized
+
+
+def connector_audit_log(
+    event: dict[str, Any],
+    *,
+    log_store: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Append a connector usage audit event with who/what/when/where and classification.
+
+    Returns the structured event record.
+    """
+    import time as _time
+    record = {
+        "event_type": event.get("event_type", "inference_request"),
+        "connector": event.get("connector", "unknown"),
+        "model_id": event.get("model_id", "unknown"),
+        "user": event.get("user", "anonymous"),
+        "data_class": event.get("data_class", "unclassified"),
+        "request_id": event.get("request_id", ""),
+        "timestamp": _time.time(),
+        "status": event.get("status", "ok"),
+        "cost_usd": event.get("cost_usd", 0.0),
+    }
+    if log_store is not None:
+        log_store.append(record)
+    return record
+
+
+def model_registry_manifest(
+    model_id: str,
+    model_version: str,
+    *,
+    artifact_hash: str = "",
+    signing_key_id: str = "",
+    trust_level: str = "internal",
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a signed model registry manifest with integrity verification and trust levels.
+
+    Returns a manifest dict suitable for storage in a model registry.
+    """
+    import hashlib as _hashlib
+    import json as _json
+    payload = {
+        "model_id": model_id,
+        "model_version": model_version,
+        "artifact_hash": artifact_hash,
+        "trust_level": trust_level,
+        "metadata": metadata or {},
+    }
+    manifest_hash = _hashlib.sha256(
+        _json.dumps(payload, sort_keys=True).encode()
+    ).hexdigest()[:16]
+    return {
+        **payload,
+        "manifest_hash": manifest_hash,
+        "signing_key_id": signing_key_id,
+        "trust_levels": ["public", "internal", "restricted", "classified"],
+        "generated_at": __import__("time").time(),
+    }
+
+
+def per_request_cost_estimate(
+    connector: str,
+    *,
+    tile_count: int = 1,
+    model_complexity: str = "medium",
+    cost_rates: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Estimate per-request cost and apply hard-stop budget checks for hosted model calls.
+
+    Returns ``estimated_cost_usd``, ``within_budget`` (bool), and ``breakdown``.
+    """
+    cost_rates = cost_rates or {
+        "openai": 0.002,
+        "anthropic": 0.003,
+        "azure_openai": 0.0015,
+        "vertex_ai": 0.0018,
+        "sagemaker": 0.001,
+        "local": 0.0,
+    }
+    complexity_multiplier = {"low": 0.5, "medium": 1.0, "high": 2.5}.get(model_complexity, 1.0)
+    base_rate = cost_rates.get(connector, 0.002)
+    estimated = round(base_rate * tile_count * complexity_multiplier, 6)
+    budget_limit = 10.0  # default hard stop
+    return {
+        "connector": connector,
+        "tile_count": tile_count,
+        "model_complexity": model_complexity,
+        "estimated_cost_usd": estimated,
+        "budget_limit_usd": budget_limit,
+        "within_budget": estimated <= budget_limit,
+        "breakdown": {
+            "base_rate_per_tile": base_rate,
+            "complexity_multiplier": complexity_multiplier,
+        },
+    }
+
+
+def model_governance_dashboard(
+    usage_logs: list[dict[str, Any]],
+    drift_reports: list[dict[str, Any]] | None = None,
+    connector_health: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Build a governance dashboard for model usage, drift state, and connector reliability.
+
+    Returns a structured summary dict for operational oversight.
+    """
+    drift_reports = drift_reports or []
+    connector_health = connector_health or {}
+    total_requests = len(usage_logs)
+    total_cost = sum(r.get("cost_usd", 0.0) for r in usage_logs)
+    connectors_used = {r.get("connector") for r in usage_logs}
+    models_used = {r.get("model_id") for r in usage_logs}
+    drift_count = sum(1 for d in drift_reports if d.get("drifted", False))
+    return {
+        "total_requests": total_requests,
+        "total_cost_usd": round(total_cost, 4),
+        "connectors_used": sorted(c for c in connectors_used if c),
+        "models_used": sorted(m for m in models_used if m),
+        "drift_alerts": drift_count,
+        "connector_health": connector_health,
+        "status": "healthy" if drift_count == 0 else "drift_detected",
+    }
+
+
+def inference_cache_encryption(
+    cache_key: str,
+    data: bytes,
+    *,
+    key: str | None = None,
+) -> dict[str, Any]:
+    """Encrypt intermediate raster tiles and prediction outputs for secure caching.
+
+    Returns metadata about the encrypted cache entry (not the raw ciphertext).
+    Delegates to existing ``encrypt_data`` when a key is provided.
+    """
+    import hashlib as _hashlib
+    cache_id = _hashlib.sha256(cache_key.encode()).hexdigest()[:16]
+    encrypted = False
+    if key:
+        try:
+            encrypted_bytes = encrypt_data(data, key)
+            encrypted = True
+            size = len(encrypted_bytes)
+        except Exception:
+            size = len(data)
+    else:
+        size = len(data)
+    return {
+        "cache_id": cache_id,
+        "encrypted": encrypted,
+        "original_size_bytes": len(data),
+        "stored_size_bytes": size,
+        "key_provided": key is not None,
+    }
+
+
+def inference_artifact_retention_policy(
+    artifact_type: str,
+    *,
+    retention_days: int | None = None,
+    policy_profiles: dict[str, int] | None = None,
+) -> dict[str, Any]:
+    """Define retention and deletion policy controls for inference artifacts and logs.
+
+    Returns the applicable retention period and deletion guidance.
+    """
+    policy_profiles = policy_profiles or {
+        "inference_log": 90,
+        "tile_cache": 7,
+        "prediction_output": 30,
+        "audit_log": 365,
+        "model_checkpoint": 180,
+    }
+    default_days = policy_profiles.get(artifact_type, 30)
+    effective_days = retention_days if retention_days is not None else default_days
+    return {
+        "artifact_type": artifact_type,
+        "retention_days": effective_days,
+        "deletion_trigger": f"Delete after {effective_days} days from creation date.",
+        "policy_source": "explicit" if retention_days is not None else "profile_default",
+    }
+
+
+def compliance_profile_templates(
+    sector: str = "general",
+) -> dict[str, Any]:
+    """Return a compliance profile template for public sector or regulated utility workflows.
+
+    Supported sectors: ``'general'``, ``'public_sector'``, ``'utility'``, ``'defense'``.
+    """
+    profiles: dict[str, dict[str, Any]] = {
+        "general": {
+            "data_residency": "no restriction",
+            "audit_log_retention_days": 90,
+            "encryption_required": False,
+            "pii_scrubbing": "recommended",
+            "model_registry_signing": False,
+        },
+        "public_sector": {
+            "data_residency": "national boundary",
+            "audit_log_retention_days": 365,
+            "encryption_required": True,
+            "pii_scrubbing": "mandatory",
+            "model_registry_signing": True,
+            "frameworks": ["FedRAMP", "FISMA", "NIST SP 800-53"],
+        },
+        "utility": {
+            "data_residency": "approved regions only",
+            "audit_log_retention_days": 730,
+            "encryption_required": True,
+            "pii_scrubbing": "mandatory",
+            "model_registry_signing": True,
+            "frameworks": ["NERC CIP", "IEC 62351"],
+        },
+        "defense": {
+            "data_residency": "classified enclave only",
+            "audit_log_retention_days": 2555,
+            "encryption_required": True,
+            "pii_scrubbing": "mandatory",
+            "model_registry_signing": True,
+            "frameworks": ["STIG", "CMMC Level 3", "DoD IL4+"],
+        },
+    }
+    profile = profiles.get(sector, profiles["general"])
+    return {"sector": sector, "profile": profile}

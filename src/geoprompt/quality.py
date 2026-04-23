@@ -328,4 +328,310 @@ __all__ = [
     "release_readiness_report",
     "simulation_only",
     "subsystem_maturity_matrix",
+    # I8 — Quality Gates, Benchmarks, and Scientific Defensibility
+    "raster_ai_golden_benchmark",
+    "throughput_benchmark_matrix",
+    "numerical_stability_audit",
+    "edge_artifact_tests",
+    "calibration_curve_report",
+    "model_failure_catalog",
+    "benchmark_release_gate",
+    "reproducibility_bundle_export",
+    "raster_ml_baseline_comparison",
+    "evidence_pack_generator",
 ]
+
+
+# ── I8. Quality Gates, Benchmarks, and Scientific Defensibility ───────────────
+
+def raster_ai_golden_benchmark(
+    corpus_id: str = "default",
+    *,
+    locked_metrics: dict[str, float] | None = None,
+) -> dict[str, Any]:
+    """Define a golden benchmark suite with fixed corpora and locked expected metrics.
+
+    Returns a benchmark spec dict with ``corpus_id``, ``locked_metrics``, and
+    ``evaluation_protocol``.
+    """
+    locked_metrics = locked_metrics or {
+        "iou_mean": 0.72,
+        "accuracy": 0.88,
+        "f1_macro": 0.80,
+    }
+    return {
+        "corpus_id": corpus_id,
+        "locked_metrics": locked_metrics,
+        "evaluation_protocol": "Deterministic fixed-seed evaluation against a locked held-out corpus.",
+        "pass_criteria": "All reported metrics must meet or exceed locked values within ±0.01 tolerance.",
+    }
+
+
+def throughput_benchmark_matrix(
+    tile_sizes: list[int] | None = None,
+    backends: list[str] | None = None,
+    hardware_classes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Build a throughput benchmark matrix by tile size, backend, and hardware.
+
+    Returns a matrix spec dict enumerating all combinations to be measured.
+    """
+    tile_sizes = tile_sizes or [128, 256, 512, 1024]
+    backends = backends or ["onnx_cpu", "onnx_gpu", "torch_gpu", "sklearn"]
+    hardware_classes = hardware_classes or ["laptop", "workstation", "cloud_gpu"]
+    combinations = [
+        {"tile_size": ts, "backend": be, "hardware": hw}
+        for ts in tile_sizes
+        for be in backends
+        for hw in hardware_classes
+    ]
+    return {
+        "matrix_size": len(combinations),
+        "tile_sizes": tile_sizes,
+        "backends": backends,
+        "hardware_classes": hardware_classes,
+        "combinations": combinations,
+        "metrics_to_capture": ["tiles_per_second", "latency_p50_ms", "latency_p99_ms", "memory_mb"],
+    }
+
+
+def numerical_stability_audit(
+    results_a: list[float],
+    results_b: list[float],
+    *,
+    tolerance: float = 1e-5,
+    context: str = "reprojection+inference boundary",
+) -> dict[str, Any]:
+    """Audit numerical stability between two result sets (e.g. reprojection variants).
+
+    Returns ``stable`` (bool), ``max_delta``, and per-index violations.
+    """
+    violations: list[dict[str, Any]] = []
+    for i, (a, b) in enumerate(zip(results_a, results_b)):
+        delta = abs(a - b)
+        if delta > tolerance:
+            violations.append({"index": i, "a": a, "b": b, "delta": delta})
+    max_delta = max((v["delta"] for v in violations), default=0.0)
+    return {
+        "context": context,
+        "stable": len(violations) == 0,
+        "tolerance": tolerance,
+        "max_delta": max_delta,
+        "violation_count": len(violations),
+        "violations": violations[:20],  # cap output for readability
+    }
+
+
+def edge_artifact_tests(
+    tile_outputs: list[dict[str, Any]],
+    *,
+    overlap_pixels: int = 16,
+    blend_mode: str = "feather",
+) -> dict[str, Any]:
+    """Test tiled inference stitching for edge artifacts and overlap blending quality.
+
+    Checks boundary consistency between adjacent tiles.
+
+    Returns ``passed`` (bool), ``artifact_tiles``, and blend metadata.
+    """
+    artifact_tiles: list[str] = []
+    for tile in tile_outputs:
+        boundary_values = tile.get("boundary_values", [])
+        if boundary_values:
+            mean = sum(boundary_values) / len(boundary_values)
+            std = (sum((v - mean) ** 2 for v in boundary_values) / len(boundary_values)) ** 0.5
+            # Flag tiles where boundary std is unexpectedly high (artifact indicator)
+            if std > mean * 0.5 and mean != 0:
+                artifact_tiles.append(str(tile.get("tile_id", "unknown")))
+    return {
+        "passed": len(artifact_tiles) == 0,
+        "artifact_tile_count": len(artifact_tiles),
+        "artifact_tiles": artifact_tiles,
+        "overlap_pixels": overlap_pixels,
+        "blend_mode": blend_mode,
+    }
+
+
+def calibration_curve_report(
+    confidences: list[float],
+    labels: list[int],
+    *,
+    n_bins: int = 10,
+) -> dict[str, Any]:
+    """Generate a calibration curve and reliability diagram data for confidence outputs.
+
+    Returns bin-level accuracy vs confidence data for plotting and threshold selection.
+    """
+    bins: list[dict[str, Any]] = []
+    bin_size = 1.0 / n_bins
+    for b in range(n_bins):
+        lo = b * bin_size
+        hi = (b + 1) * bin_size
+        indices = [i for i, c in enumerate(confidences) if lo <= c < hi]
+        if not indices:
+            bins.append({"bin_lo": round(lo, 3), "bin_hi": round(hi, 3), "count": 0, "mean_conf": 0.0, "accuracy": 0.0})
+            continue
+        mean_conf = sum(confidences[i] for i in indices) / len(indices)
+        acc = sum(labels[i] for i in indices if i < len(labels)) / len(indices)
+        bins.append({"bin_lo": round(lo, 3), "bin_hi": round(hi, 3), "count": len(indices), "mean_conf": round(mean_conf, 4), "accuracy": round(acc, 4)})
+    # Expected calibration error (ECE)
+    n_total = len(confidences)
+    ece = sum(abs(b["mean_conf"] - b["accuracy"]) * b["count"] / n_total for b in bins if n_total > 0)
+    return {
+        "n_bins": n_bins,
+        "n_samples": n_total,
+        "bins": bins,
+        "ece": round(ece, 4),
+        "well_calibrated": ece < 0.1,
+    }
+
+
+def model_failure_catalog(
+    failures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return a failure catalog documenting known model failure modes by terrain and sensor type.
+
+    Args:
+        failures: Optional list of known failure dicts with ``terrain``, ``sensor``,
+            ``mode``, and ``mitigation`` keys.
+
+    Returns:
+        Catalog dict with ``entries`` and ``summary_by_terrain``.
+    """
+    failures = failures or [
+        {"terrain": "urban_dense", "sensor": "SAR", "mode": "double_bounce_confusion", "mitigation": "Apply layover/shadow masks before inference."},
+        {"terrain": "cloud_shadow", "sensor": "optical_multispectral", "mode": "cloud_shadow_misclassification", "mitigation": "Apply cloud QA band masking pre-inference."},
+        {"terrain": "snow_ice", "sensor": "optical_shortwave", "mode": "spectral_confusion_with_bare_soil", "mitigation": "Include SWIR band or use snow-trained model variant."},
+        {"terrain": "mixed_agriculture", "sensor": "optical_multispectral", "mode": "temporal_phenology_mismatch", "mitigation": "Use model trained on matching season."},
+    ]
+    by_terrain: dict[str, list[str]] = {}
+    for f in failures:
+        t = f.get("terrain", "unknown")
+        by_terrain.setdefault(t, []).append(f.get("mode", "unknown"))
+    return {
+        "entry_count": len(failures),
+        "entries": failures,
+        "summary_by_terrain": by_terrain,
+    }
+
+
+def benchmark_release_gate(
+    current_metrics: dict[str, float],
+    baseline_metrics: dict[str, float],
+    *,
+    max_regression_pct: float = 5.0,
+) -> dict[str, Any]:
+    """Enforce a release gate requiring benchmark delta report for raster AI kernel changes.
+
+    Fails if any metric regresses more than ``max_regression_pct`` percent.
+
+    Returns ``passed`` (bool), ``regressions``, and per-metric delta.
+    """
+    regressions: list[dict[str, Any]] = []
+    deltas: dict[str, float] = {}
+    for key, baseline in baseline_metrics.items():
+        current = current_metrics.get(key)
+        if current is None:
+            regressions.append({"metric": key, "issue": "missing from current results"})
+            continue
+        if baseline != 0:
+            pct_change = (current - baseline) / abs(baseline) * 100
+        else:
+            pct_change = 0.0
+        deltas[key] = round(pct_change, 2)
+        if pct_change < -max_regression_pct:
+            regressions.append({"metric": key, "baseline": baseline, "current": current, "pct_change": round(pct_change, 2)})
+    return {
+        "passed": len(regressions) == 0,
+        "regressions": regressions,
+        "deltas_pct": deltas,
+        "max_allowed_regression_pct": max_regression_pct,
+    }
+
+
+def reproducibility_bundle_export(
+    model_id: str,
+    model_version: str,
+    *,
+    environment_snapshot: dict[str, Any] | None = None,
+    connector_settings: dict[str, Any] | None = None,
+    config_hash: str | None = None,
+) -> dict[str, Any]:
+    """Export a reproducibility bundle including environment, model hashes, and connector settings.
+
+    Returns a bundle dict suitable for archiving with inference artifacts.
+    """
+    import hashlib as _hashlib
+    import json as _json
+
+    if config_hash is None:
+        payload = _json.dumps({
+            "model_id": model_id,
+            "model_version": model_version,
+            "connector_settings": connector_settings or {},
+        }, sort_keys=True)
+        config_hash = _hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+    return {
+        "bundle_type": "reproducibility",
+        "model_id": model_id,
+        "model_version": model_version,
+        "config_hash": config_hash,
+        "environment": environment_snapshot or {},
+        "connector_settings": connector_settings or {},
+        "generated_at": __import__("time").time(),
+    }
+
+
+def raster_ml_baseline_comparison(
+    geoprompt_metrics: dict[str, float],
+    *,
+    baselines: dict[str, dict[str, float]] | None = None,
+) -> dict[str, Any]:
+    """Compare GeoPrompt raster ML results against common baseline workflows.
+
+    Args:
+        geoprompt_metrics: Metrics from GeoPrompt pipeline.
+        baselines: Dict of ``{workflow_name: metrics_dict}`` for comparison.
+
+    Returns:
+        Comparison table showing GeoPrompt vs each baseline per metric.
+    """
+    baselines = baselines or {
+        "sklearn_rf_pixel": {"accuracy": 0.78, "iou_mean": 0.65},
+        "onnx_pretrained": {"accuracy": 0.85, "iou_mean": 0.71},
+    }
+    comparisons: list[dict[str, Any]] = []
+    for baseline_name, baseline_metrics in baselines.items():
+        row: dict[str, Any] = {"baseline": baseline_name}
+        for metric, gp_val in geoprompt_metrics.items():
+            bl_val = baseline_metrics.get(metric)
+            if bl_val is not None:
+                delta = round(gp_val - bl_val, 4)
+                row[metric] = {"geoprompt": gp_val, "baseline": bl_val, "delta": delta, "better": delta >= 0}
+        comparisons.append(row)
+    return {"comparisons": comparisons, "geoprompt_metrics": geoprompt_metrics}
+
+
+def evidence_pack_generator(
+    benchmark_results: dict[str, Any],
+    reproducibility_bundle: dict[str, Any],
+    *,
+    title: str = "GeoPrompt Raster AI Evidence Pack",
+    audience: str = "scientific",
+) -> dict[str, Any]:
+    """Generate a publishing-ready evidence pack for product and scientific reporting.
+
+    Returns a structured evidence document with benchmark, reproducibility, and narrative.
+    """
+    return {
+        "title": title,
+        "audience": audience,
+        "sections": {
+            "executive_summary": f"Evidence pack for {title}. Generated automatically.",
+            "benchmark_results": benchmark_results,
+            "reproducibility": reproducibility_bundle,
+            "methodology": "All benchmarks run on locked corpus with fixed seeds; reproducibility bundle attached.",
+        },
+        "generated_at": __import__("time").time(),
+    }

@@ -14,6 +14,13 @@ from .ai import (
     recommend_parameters, register_tool, search_docs,
     suggest_duplicate_resolution, suggest_field_mapping,
     topology_validation_narrative, with_retry,
+    # I6 — Hybrid Orchestration
+    inference_routing_policy, data_residency_policy, auto_fallback_chain,
+    split_execution_plan, connector_health_score, workload_scheduler,
+    quota_manager, raster_tile_trace_span, inference_lineage_report,
+    job_replay_mode,
+    # I10 — Developer UX
+    raster_ai_pipeline, runtime_doctor, feature_tier_labels,
 )
 from .cartography import (
     BookmarkManager, LayerStyle,
@@ -398,6 +405,30 @@ from .ml import (
     vector_database_integration,
     vision_language_model_integration,
     xgboost_lightgbm_integration,
+    # I7 — Training Data, Fine-Tuning, and Human-in-the-Loop QA
+    training_patch_export,
+    annotation_package_schema,
+    active_learning_suggestions,
+    weak_label_pipeline,
+    spatial_leakage_aware_split,
+    imagery_augmentation_pipeline,
+    model_eval_harness,
+    reviewer_workflow,
+    model_drift_detection,
+    retraining_trigger_policy,
+)
+from .security import (
+    # I9 — Security, Privacy, Governance, and Cost Controls
+    model_usage_policy_engine,
+    sensitive_geodata_detector,
+    geodata_redaction_hooks,
+    connector_audit_log,
+    model_registry_manifest,
+    per_request_cost_estimate,
+    model_governance_dashboard,
+    inference_cache_encryption,
+    inference_artifact_retention_policy,
+    compliance_profile_templates,
 )
 from .raster import (inspect_raster, land_cover_summary, polygonize_raster,
                      raster_algebra, raster_build_overviews,
@@ -1812,4 +1843,29 @@ __all__ = [
     "head_tail_breaks", "fisher_jenks",
     "maximum_breaks_classification", "box_plot_classification",
     "pretty_breaks_classification", "percentile_classification",
+    # I6 — Hybrid Orchestration
+    "inference_routing_policy", "data_residency_policy", "auto_fallback_chain",
+    "split_execution_plan", "connector_health_score", "workload_scheduler",
+    "quota_manager", "raster_tile_trace_span", "inference_lineage_report",
+    "job_replay_mode",
+    # I7 — Training Data
+    "training_patch_export", "annotation_package_schema",
+    "active_learning_suggestions", "weak_label_pipeline",
+    "spatial_leakage_aware_split", "imagery_augmentation_pipeline",
+    "model_eval_harness", "reviewer_workflow", "model_drift_detection",
+    "retraining_trigger_policy",
+    # I8 — Quality Gates (via quality.*)
+    "raster_ai_golden_benchmark", "throughput_benchmark_matrix",
+    "numerical_stability_audit", "edge_artifact_tests",
+    "calibration_curve_report", "model_failure_catalog",
+    "benchmark_release_gate", "reproducibility_bundle_export",
+    "raster_ml_baseline_comparison", "evidence_pack_generator",
+    # I9 — Security / Governance
+    "model_usage_policy_engine", "sensitive_geodata_detector",
+    "geodata_redaction_hooks", "connector_audit_log",
+    "model_registry_manifest", "per_request_cost_estimate",
+    "model_governance_dashboard", "inference_cache_encryption",
+    "inference_artifact_retention_policy", "compliance_profile_templates",
+    # I10 — Developer UX
+    "raster_ai_pipeline", "runtime_doctor", "feature_tier_labels",
 ]
