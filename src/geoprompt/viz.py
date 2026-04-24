@@ -6,11 +6,13 @@ matplotlib) are optional and lazily imported.
 """
 from __future__ import annotations
 
+import html as _html
 import importlib
 import re
 from pathlib import Path
 from typing import Any, Sequence
 
+from ._capabilities import check_capability, require_capability
 from .geometry import Geometry, geometry_bounds, geometry_type
 from .tools import compare_scenarios
 
@@ -19,21 +21,13 @@ Record = dict[str, Any]
 
 
 def _load_folium() -> Any:
-    try:
-        return importlib.import_module("folium")
-    except ImportError as exc:
-        raise RuntimeError(
-            "Install visualization support with 'pip install folium' before using map functions."
-        ) from exc
+    require_capability("folium", context="viz map rendering")
+    return importlib.import_module("folium")
 
 
 def _load_plotly() -> Any:
-    try:
-        return importlib.import_module("plotly.graph_objects")
-    except ImportError as exc:
-        raise RuntimeError(
-            "Install visualization support with 'pip install geoprompt[viz]' to use Plotly dashboards."
-        ) from exc
+    require_capability("plotly", context="viz Plotly dashboards")
+    return importlib.import_module("plotly.graph_objects")
 
 
 def _geojson_coords(geometry: Geometry) -> Any:
@@ -137,7 +131,7 @@ def to_folium_map(
         folium.TileLayer(tiles=custom_tile_url, attr="Custom tiles", name="basemap").add_to(m)
 
     if fullscreen or minimap or measure_control:
-        try:
+        if check_capability("folium"):
             plugins = importlib.import_module("folium.plugins")
             if fullscreen:
                 plugins.Fullscreen().add_to(m)
@@ -145,8 +139,6 @@ def to_folium_map(
                 plugins.MiniMap(toggle_display=True).add_to(m)
             if measure_control:
                 plugins.MeasureControl().add_to(m)
-        except ImportError:
-            pass
 
     if zoom_start is not None:
         m.zoom_start = zoom_start
@@ -156,10 +148,10 @@ def to_folium_map(
     feature_group = folium.FeatureGroup(name="features")
     point_group: Any = feature_group
     if cluster_points:
-        try:
+        if check_capability("folium"):
             plugins = importlib.import_module("folium.plugins")
             point_group = plugins.MarkerCluster(name="points")
-        except ImportError:
+        else:
             point_group = feature_group
 
     for row in rows:
@@ -280,10 +272,10 @@ def to_choropleth(
 
     data = {str(row.get(id_column, "")): float(row.get(value_column, 0)) for row in rows}
 
-    try:
+    if check_capability("pandas"):
         import pandas as pd
         series = pd.Series(data, name=value_column)
-    except ImportError:
+    else:
         series = data
 
     folium.Choropleth(
@@ -736,6 +728,115 @@ MAP_STYLE_PACKS: dict[str, dict[str, str]] = {
 }
 
 
+def _html_table(records: Sequence[Record]) -> str:
+    if not records:
+        return "<p>No data.</p>"
+    columns = list(records[0].keys())
+    header = "".join(f"<th>{_html.escape(str(column))}</th>" for column in columns)
+    rows: list[str] = []
+    for record in records:
+        rows.append(
+            "<tr>"
+            + "".join(f"<td>{_html.escape(str(record.get(column, '')))}</td>" for column in columns)
+            + "</tr>"
+        )
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+
+
+def _briefing_chart_svg(data: Any, *, title: str, accent: str) -> str:
+    if isinstance(data, dict):
+        rows = [{"label": str(key), "value": float(value)} for key, value in data.items()]
+    else:
+        rows = []
+        for item in data or []:
+            if isinstance(item, dict):
+                rows.append({
+                    "label": str(item.get("label", item.get("name", ""))),
+                    "value": float(item.get("value", 0.0)),
+                })
+    if not rows:
+        return f"<p>No chart data for {_html.escape(title)}.</p>"
+
+    width = 560
+    height = 260
+    left = 90
+    top = 24
+    bottom = 36
+    chart_width = width - left - 24
+    chart_height = height - top - bottom
+    max_value = max(abs(float(row["value"])) for row in rows) or 1.0
+    band = chart_height / max(len(rows), 1)
+    bars: list[str] = [
+        f"<rect x='0' y='0' width='{width}' height='{height}' rx='12' fill='#ffffff' />",
+        f"<text x='{left}' y='18' font-size='13' font-weight='700' fill='#17324d'>{_html.escape(title)}</text>",
+    ]
+    for index, row in enumerate(rows):
+        y = top + index * band + 8
+        bar_width = (abs(float(row["value"])) / max_value) * chart_width
+        bars.append(f"<text x='12' y='{y + 12:.1f}' font-size='12' fill='#334155'>{_html.escape(str(row['label']))}</text>")
+        bars.append(f"<rect x='{left}' y='{y:.1f}' width='{bar_width:.1f}' height='{max(band - 14, 10):.1f}' rx='5' fill='{accent}' opacity='0.88' />")
+        bars.append(f"<text x='{left + bar_width + 8:.1f}' y='{y + 12:.1f}' font-size='12' fill='#17324d'>{float(row['value']):.2f}</text>")
+    return (
+        f"<svg class='briefing-chart-svg' viewBox='0 0 {width} {height}' width='100%' height='{height}' "
+        f"role='img' aria-label='{_html.escape(title)} chart'>"
+        + "".join(bars)
+        + "</svg>"
+    )
+
+
+def _briefing_map_svg(records: Sequence[Record], *, title: str, accent: str) -> str:
+    geometry_column = "geometry"
+    feature_rows = [record for record in records if isinstance(record.get(geometry_column), dict)]
+    if not feature_rows:
+        return f"<p>No mappable features for {_html.escape(title)}.</p>"
+
+    width = 560
+    height = 280
+    pad = 24.0
+    min_x, min_y, max_x, max_y = _frame_bounds(feature_rows, geometry_column)
+    span_x = max(max_x - min_x, 1e-9)
+    span_y = max(max_y - min_y, 1e-9)
+
+    def _project(coord: Sequence[float]) -> tuple[float, float]:
+        x = pad + ((float(coord[0]) - min_x) / span_x) * (width - (pad * 2))
+        y = height - pad - ((float(coord[1]) - min_y) / span_y) * (height - (pad * 2))
+        return (x, y)
+
+    parts: list[str] = [
+        f"<svg class='briefing-map-svg' viewBox='0 0 {width} {height}' width='100%' height='{height}' role='img' aria-label='{_html.escape(title)} map preview'>",
+        f"<rect x='0' y='0' width='{width}' height='{height}' rx='12' fill='#ffffff' />",
+        f"<rect x='{pad}' y='{pad}' width='{width - (pad * 2)}' height='{height - (pad * 2)}' rx='10' fill='#f8fbff' stroke='#dbe7f3' />",
+        f"<text x='{pad}' y='18' font-size='13' font-weight='700' fill='#17324d'>{_html.escape(title)}</text>",
+    ]
+    for row in feature_rows:
+        geometry = row[geometry_column]
+        geometry_kind = geometry_type(geometry)
+        coords = geometry.get("coordinates")
+        if geometry_kind == "Point":
+            x, y = _project(coords)
+            parts.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='5' fill='{accent}' stroke='#17324d' stroke-width='1.2' />")
+        elif geometry_kind == "LineString":
+            poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in (_project(coord) for coord in coords))
+            parts.append(f"<polyline points='{poly}' fill='none' stroke='{accent}' stroke-width='3' stroke-linecap='round' stroke-linejoin='round' />")
+        elif geometry_kind == "Polygon":
+            poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in (_project(coord) for coord in coords))
+            parts.append(f"<polygon points='{poly}' fill='{accent}' fill-opacity='0.18' stroke='{accent}' stroke-width='2' />")
+        elif geometry_kind == "MultiPoint":
+            for coord in coords:
+                x, y = _project(coord)
+                parts.append(f"<circle cx='{x:.1f}' cy='{y:.1f}' r='4' fill='{accent}' stroke='#17324d' stroke-width='1' />")
+        elif geometry_kind == "MultiLineString":
+            for line in coords:
+                poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in (_project(coord) for coord in line))
+                parts.append(f"<polyline points='{poly}' fill='none' stroke='{accent}' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' />")
+        elif geometry_kind == "MultiPolygon":
+            for polygon in coords:
+                poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in (_project(coord) for coord in polygon))
+                parts.append(f"<polygon points='{poly}' fill='{accent}' fill-opacity='0.16' stroke='{accent}' stroke-width='1.5' />")
+    parts.append("</svg>")
+    return "".join(parts)
+
+
 def portfolio_scorecard(
     records: Sequence[Record],
     *,
@@ -879,16 +980,24 @@ def build_executive_briefing_pack(
         section_type = str(section.get("type", "note"))
         content = section.get("content", section.get("data", ""))
         if section_type == "metric":
-            body = f"<div class='metric' aria-label='{section_title} metric'>{content}</div>"
+            body = f"<div class='metric' aria-label='{_html.escape(section_title)} metric'>{_html.escape(str(content))}</div>"
+        elif section_type == "chart":
+            body = f"<div class='artifact artifact-chart'>{_briefing_chart_svg(content, title=section_title, accent=pack['accent'])}</div>"
+        elif section_type == "map" and isinstance(content, list):
+            body = f"<div class='artifact artifact-map'>{_briefing_map_svg(content, title=section_title, accent=pack['accent'])}</div>"
+        elif section_type == "html":
+            body = f"<div class='artifact artifact-html'>{content}</div>"
+        elif section_type == "table" and isinstance(content, list) and content and isinstance(content[0], dict):
+            body = f"<div class='artifact artifact-table'>{_html_table(content)}</div>"
         elif isinstance(content, list) and content and isinstance(content[0], dict):
-            body = _html_table(content)
+            body = f"<div class='artifact artifact-table'>{_html_table(content)}</div>"
         elif isinstance(content, (list, tuple)):
-            body = "<ul>" + "".join(f"<li>{item}</li>" for item in content) + "</ul>"
+            body = "<ul>" + "".join(f"<li>{_html.escape(str(item))}</li>" for item in content) + "</ul>"
         else:
-            body = f"<p>{content}</p>"
+            body = f"<p>{_html.escape(str(content))}</p>"
         cards.append(
-            f"<section class='card' aria-labelledby='section-{len(cards)}'>"
-            f"<h2 id='section-{len(cards)}'>{section_title}</h2>{body}</section>"
+            f"<section class='card artifact-card' data-artifact-type='{_html.escape(section_type)}' aria-labelledby='section-{len(cards)}'>"
+            f"<h2 id='section-{len(cards)}'>{_html.escape(section_title)}</h2>{body}</section>"
         )
 
     html = (
@@ -902,12 +1011,14 @@ def build_executive_briefing_pack(
         ".sub{opacity:.9;font-size:0.95rem;margin-top:6px;}"
         ".wrap{padding:18px 24px 30px 24px;}"
         f".card{{background:white;border-left:6px solid {pack['accent']};padding:16px 18px;margin:14px 0;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.08);}}"
+        ".artifact{margin-top:0.8rem;}"
+        ".artifact svg{display:block;max-width:100%;height:auto;}"
         f".metric{{font-size:2rem;font-weight:700;color:{pack['accent']};}}"
         f".badge{{display:inline-block;background:{pack['accent_soft']};color:{pack['text']};padding:4px 10px;border-radius:999px;font-weight:600;}}"
         "table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}"
         "th{background:#f6f8fa;}footer{padding:12px 24px 24px 24px;font-size:.9rem;color:#555;}"
-        "</style></head><body>"
-        f"<header><h1>{title}</h1><div class='sub'>{organization} executive briefing · theme: <span class='badge'>{theme}</span></div></header>"
+        f"</style></head><body data-output-contract='executive-briefing-v1' data-theme='{_html.escape(theme)}'>"
+        f"<header><h1>{_html.escape(title)}</h1><div class='sub'>{_html.escape(organization)} executive briefing &#183; theme: <span class='badge'>{_html.escape(theme)}</span></div></header>"
         f"<main class='wrap'>{''.join(cards)}</main>"
         "<footer>Generated from GeoPrompt reporting and scenario outputs.</footer>"
         "</body></html>"

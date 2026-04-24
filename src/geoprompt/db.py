@@ -414,10 +414,16 @@ def _parse_wkt(wkt: str) -> Geometry:
 
     try:
         shapely_wkt = importlib.import_module("shapely.wkt")
+        shapely_errors = importlib.import_module("shapely.errors")
+    except ImportError as exc:
+        raise ValueError(f"cannot parse WKT: {wkt[:100]}") from exc
+
+    geos_exception = getattr(shapely_errors, "GEOSException", ValueError)
+    try:
         shape = shapely_wkt.loads(wkt)
         geojson = shape.__geo_interface__
         return normalize_geometry(geojson)
-    except (ImportError, ValueError, AttributeError) as exc:
+    except (AttributeError, TypeError, ValueError, geos_exception) as exc:
         raise ValueError(f"cannot parse WKT: {wkt[:100]}") from exc
 
 

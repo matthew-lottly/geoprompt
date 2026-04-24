@@ -43,7 +43,7 @@ def _normalize_name(value: object | None) -> str | None:
 def _pyproj_module() -> Any | None:
     try:
         return importlib.import_module("pyproj")
-    except Exception:
+    except ImportError:
         return None
 
 

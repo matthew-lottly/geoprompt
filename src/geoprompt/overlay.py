@@ -10,6 +10,7 @@ import importlib
 from functools import lru_cache
 from typing import Any
 
+from ._capabilities import require_capability
 from .geometry import Geometry, geometry_bounds, geometry_type, normalize_geometry
 
 
@@ -24,12 +25,13 @@ def _bounds_intersect(left: tuple[float, float, float, float], right: tuple[floa
 
 @lru_cache(maxsize=1)
 def _load_shapely() -> tuple[Any, Any, Any, Any]:
+    require_capability("shapely", context="overlay operations")
     try:
         shapely_geometry = importlib.import_module("shapely.geometry")
         shapely_ops = importlib.import_module("shapely.ops")
         shapely_prepared = importlib.import_module("shapely.prepared")
-    except ImportError as exc:
-        raise RuntimeError("Install overlay support with 'pip install -e .[overlay]' before using clip or overlay operations.") from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        raise AssertionError("Capability guard failed for shapely") from exc
 
     return shapely_geometry, shapely_geometry.shape, shapely_ops.unary_union, shapely_prepared.prep
 

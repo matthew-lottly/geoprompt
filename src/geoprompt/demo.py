@@ -4,6 +4,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from ._capabilities import require_capability
 from .geometry import geometry_centroid, geometry_type, geometry_vertices
 from .io import read_features, write_geojson, write_json
 
@@ -17,10 +18,11 @@ logger = logging.getLogger("geoprompt")
 
 
 def export_pressure_plot(records: list[dict[str, object]], output_path: Path) -> Path:
+    require_capability("matplotlib", context="export_pressure_plot")
     try:
         import matplotlib.pyplot as plt
-    except ImportError as exc:  # pragma: no cover - optional dependency path
-        raise RuntimeError("matplotlib is required for demo chart export; install geoprompt[viz] or geoprompt[analyst]") from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        raise AssertionError("Capability guard failed for matplotlib") from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure, axis = plt.subplots(figsize=(10, 6))

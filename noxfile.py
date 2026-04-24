@@ -17,6 +17,32 @@ def docs(session: nox.Session) -> None:
     session.run("python", "-m", "compileall", "src", "docs")
 
 
+@nox.session(python="3.12", name="docs-gate")
+def docs_gate(session: nox.Session) -> None:
+    """Run README flowchart and markdown formatting gates."""
+    session.install("-e", ".[dev]")
+    session.run(
+        "pytest",
+        "tests/test_docs_readme_flowchart_gate.py",
+        "tests/test_docs_markdown_gate.py",
+        "tests/test_simulation_only_docs.py",
+        "-q",
+    )
+
+
+@nox.session(python="3.12", name="trust-gate")
+def trust_gate(session: nox.Session) -> None:
+    """Run explicit trust and artifact contract gates."""
+    session.install("-e", ".[dev,compare,overlay,projection]")
+    session.run(
+        "pytest",
+        "tests/test_release_evidence.py",
+        "tests/test_failure_transparency.py",
+        "tests/test_output_quality_gates.py",
+        "-q",
+    )
+
+
 @nox.session(python="3.12", name="tests-core-only")
 def tests_core_only(session: nox.Session) -> None:
     """Validate degraded-mode guarantees with no optional extras installed.

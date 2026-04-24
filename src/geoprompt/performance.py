@@ -14,6 +14,7 @@ import logging
 import math
 import socket
 import time
+import warnings
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -176,14 +177,22 @@ def gpu_accelerated_point_in_polygon(
 
 @simulation_only("Use CuPy + cuSpatial or RAPIDS for real GPU-accelerated spatial operations.")
 def gpu_accelerated_distance_matrix(points: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Build a distance matrix for a set of points."""
+    """Simulation-only GPU distance-matrix placeholder.
+
+    This implementation runs on CPU and mimics GPU output shape. For real GPU
+    acceleration, install RAPIDS/cuSpatial or CuPy-backed kernels.
+    """
     matrix = [[_distance(a, b) for b in points] for a in points]
     return {"backend": "gpu", "matrix": matrix, "count": len(points)}
 
 
 @simulation_only("Use CuPy for real GPU raster algebra.")
 def gpu_accelerated_raster_algebra(left: Sequence[Sequence[float]], right: Sequence[Sequence[float]], *, operator: str = "add") -> dict[str, Any]:
-    """Apply a tiny raster algebra operation using nested lists."""
+    """Simulation-only GPU raster algebra placeholder.
+
+    This implementation runs in pure Python. For production GPU raster algebra,
+    install CuPy or a RAPIDS-compatible raster backend.
+    """
     out: list[list[float]] = []
     for row_a, row_b in zip(left, right):
         row: list[float] = []
@@ -215,7 +224,11 @@ def out_of_core_processing(chunks: Iterable[Sequence[Any]], operation: Callable[
 
 @simulation_only("Replace with a workload-specific scaling profiler and benchmark pipeline.")
 def scale_analysis() -> dict[str, Any]:
-    """Backward-compatible alias for historical experimental scaling helper."""
+    """Simulation-only scaling-analysis placeholder.
+
+    This helper provides advisory text only. For production scaling analysis,
+    implement benchmarked workload profiling with real telemetry.
+    """
     return {
         "status": "experimental",
         "message": "Use profile_top_hot_functions and out_of_core_processing for concrete workflows.",
@@ -270,7 +283,12 @@ def spatial_partitioning_quadtree(records: Sequence[dict[str, Any]], *, max_dept
 
 @simulation_only("Use Dask-GeoDataFrame for real distributed spatial joins.")
 def distributed_spatial_join(left: Sequence[dict[str, Any]], right: Sequence[dict[str, Any]], *, key: str = "id") -> dict[str, Any]:
-    """Perform a dictionary-based distributed join simulation."""
+    """Simulation-only distributed spatial join placeholder.
+
+    This helper does not execute real distributed geometry joins. For
+    production workloads, use Dask-GeoDataFrame, Spark, or a distributed SQL
+    engine with spatial extensions.
+    """
     right_lookup = {row.get(key): row for row in right}
     joined = [{**row, **right_lookup.get(row.get(key), {})} for row in left]
     return {"strategy": "distributed-join", "rows": joined, "count": len(joined)}
@@ -1189,7 +1207,8 @@ class lazy_spatial_index:
         import math
         if self._index is None:
             self._build()
-        assert self._index is not None
+        if self._index is None:
+            raise RuntimeError("Spatial index not initialized; call _build() before query().")
         cs = self._cell_size
         seen: set[_Any] = set()
         result = []
@@ -1224,7 +1243,14 @@ def parallel_map_apply(frame: _Any, fn: _Callable, *,
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=n_workers) as pool:
             return list(pool.map(fn, rows))
-    except Exception:
+    except Exception as exc:
+        # Intentional: executor failures degrade to a deterministic sequential
+        # map so callers still get results instead of a partial thread error.
+        warnings.warn(
+            f"parallel_map_apply fell back to sequential execution: {exc}",
+            UserWarning,
+            stacklevel=2,
+        )
         return [fn(r) for r in rows]
 
 

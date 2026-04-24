@@ -395,6 +395,12 @@ class DegradedModePolicy:
 
     def enforce(self) -> None:
         """Raise :class:`DependencyError` if the capability is unavailable."""
+        if self.available:
+            return
+        if self._spec is None:
+            raise DependencyError(
+                f"Unknown optional dependency capability: {self._capability!r}"
+            )
         if not self.available:
             require_capability(self._capability, context=self._context)
 

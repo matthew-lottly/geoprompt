@@ -11,12 +11,14 @@ import copy
 import csv
 import hashlib
 import importlib
+import importlib.util
 import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
+from ._capabilities import check_capability
 from .safe_expression import evaluate_safe_expression
 
 _logger = logging.getLogger(__name__)
@@ -26,10 +28,9 @@ _logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def _try_import(name: str) -> Any:
-    try:
-        return importlib.import_module(name)
-    except ImportError:
+    if importlib.util.find_spec(name) is None:
         return None
+    return importlib.import_module(name)
 
 
 # ── 1. Geodatabase schema inspection and export ──────────────────────────────
@@ -1890,7 +1891,7 @@ def topology_validate(frame: _Any, *, rule: str = "no_self_intersections") -> li
                         exc_info=True,
                     )
                     errors.append({"feature_index": i, "rule": rule, "message": str(exc)})
-        except ImportError:
+        except ModuleNotFoundError:
             # Fallback: no shapely available — skip validation
             pass
 
@@ -1928,7 +1929,7 @@ def topology_validate(frame: _Any, *, rule: str = "no_self_intersections") -> li
                     if shapes[i] is not None and shapes[j] is not None:
                         if shapes[i].overlaps(shapes[j]):
                             errors.append({"feature_index": i, "rule": rule, "message": f"overlaps feature {j}"})
-        except ImportError:
+        except ModuleNotFoundError:
             pass
 
     return errors
@@ -2248,21 +2249,27 @@ def repair_geometry_full(records: Sequence[dict[str, Any]], *,
         if not geom or not isinstance(geom, dict):
             out.append(dict(r))
             continue
+        if not check_capability("shapely"):
+            new_row = dict(r)
+            new_row["_repair_note"] = "geometry unchanged: shapely unavailable"
+            out.append(new_row)
+            continue
+
         try:
             import shapely.geometry as sg  # type: ignore[import]
-            try:
+            if importlib.util.find_spec("shapely.validation") is not None:
                 from shapely.validation import make_valid  # type: ignore[import]
                 shp = make_valid(sg.shape(geom))
-            except ImportError:
+            else:
                 shp = sg.shape(geom).buffer(0)
-            import json
             new_row = dict(r)
             new_row[geometry_column] = sg.mapping(shp)
             new_row.pop("_repair_note", None)
             out.append(new_row)
-        except Exception:
+        except Exception as exc:
             new_row = dict(r)
-            new_row["_repair_note"] = "geometry unchanged: shapely unavailable or parse error"
+            new_row["_repair_note"] = f"geometry unchanged: parse/repair error ({exc})"
             out.append(new_row)
+
     return out
 

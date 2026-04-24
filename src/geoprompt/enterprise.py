@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import datetime
 import importlib
+import importlib.util
 import json as _json
 import time
 from pathlib import Path
 from typing import Any, Sequence
+
+from ._exceptions import DependencyError
 
 
 Record = dict[str, Any]
@@ -21,7 +24,7 @@ def _get_requests() -> Any:
     try:
         return importlib.import_module("requests")
     except ImportError as exc:
-        raise RuntimeError(
+        raise DependencyError(
             "Install requests ('pip install requests') for enterprise features."
         ) from exc
 
@@ -280,6 +283,8 @@ def paginated_request(
                 last_error = None
                 break
             except Exception as e:
+                # Intentional: transport, HTTP, and payload errors all share the
+                # same retry boundary; the final error is re-raised below.
                 last_error = e
                 if attempt < retry_count - 1:
                     time.sleep(retry_delay * (attempt + 1))  # noqa: ASYNC251
@@ -501,6 +506,8 @@ def run_job_batch(jobs: Sequence[ScheduledJob]) -> list[dict[str, Any]]:
             job.run()
             results.append({**job.status(), "success": True})
         except Exception as e:
+            # Intentional: batch execution reports per-job failures in-band so
+            # one failing task does not suppress the rest of the batch.
             results.append({**job.status(), "success": False, "error": str(e)})
     return results
 
@@ -600,11 +607,11 @@ def project_health_dashboard(
     deps = ["numpy", "scipy", "shapely", "rasterio", "geopandas", "matplotlib", "folium", "requests"]
     dep_status: dict[str, str] = {}
     for dep in deps:
-        try:
-            mod = importlib.import_module(dep)
-            dep_status[dep] = getattr(mod, "__version__", "installed")
-        except ImportError:
+        if importlib.util.find_spec(dep) is None:
             dep_status[dep] = "not installed"
+            continue
+        mod = importlib.import_module(dep)
+        dep_status[dep] = getattr(mod, "__version__", "installed")
     health["dependencies"] = dep_status
 
     health["environment"] = environment_info or {}

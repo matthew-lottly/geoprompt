@@ -43,6 +43,42 @@ def _count_pattern_in_files(pattern: str, root: Path, glob: str = "*.py") -> int
     return total
 
 
+def _is_import_error_handler_type(node: ast.expr | None) -> bool:
+    if isinstance(node, ast.Name):
+        return node.id == "ImportError"
+    if isinstance(node, ast.Tuple):
+        return any(_is_import_error_handler_type(elt) for elt in node.elts)
+    return False
+
+
+def _handler_uses_migrated_dependency_pattern(handler: ast.ExceptHandler) -> bool:
+    for stmt in handler.body:
+        for inner in ast.walk(stmt):
+            if isinstance(inner, ast.Name) and inner.id in {"require_capability", "DependencyError", "FallbackWarning"}:
+                return True
+    return False
+
+
+def _count_raw_import_error_handlers(root: Path, glob: str = "*.py") -> int:
+    total = 0
+    for path in root.rglob(glob):
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            tree = ast.parse(text)
+        except (OSError, SyntaxError):
+            continue
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ExceptHandler):
+                continue
+            if not _is_import_error_handler_type(node.type):
+                continue
+            if _handler_uses_migrated_dependency_pattern(node):
+                continue
+            total += 1
+    return total
+
+
 def collect_trust_metrics(src_root: Path = _SRC_ROOT, tests_root: Path = _TESTS_ROOT) -> dict[str, Any]:
     """Scan the codebase and return a structured trust-metrics snapshot.
 
@@ -57,9 +93,7 @@ def collect_trust_metrics(src_root: Path = _SRC_ROOT, tests_root: Path = _TESTS_
     """
     return {
         "broad_except_count": _count_pattern_in_files(r"except Exception", src_root),
-        "raw_import_error_count": _count_pattern_in_files(
-            r"except ImportError", src_root
-        ),
+        "raw_import_error_count": _count_raw_import_error_handlers(src_root),
         "eval_pattern_count": _count_pattern_in_files(r"\beval\(", src_root),
         "pass_only_count": _count_pattern_in_files(r"^\s+pass\s*$", src_root),
         "skip_budget": _count_pattern_in_files(r"pytest\.skip\(", tests_root),
@@ -109,8 +143,8 @@ def compare_trust_metrics(
 # ---------------------------------------------------------------------------
 
 _RATCHET_THRESHOLDS: dict[str, int] = {
-    "broad_except_count": 70,     # Session 3 baseline: 57; some growth allowed
-    "raw_import_error_count": 80, # Session 3 baseline: 69; room for migration
+    "broad_except_count": 55,     # Tightened after J12.2 broad-except audit pass
+    "raw_import_error_count": 40, # Tightened after J12.1 residual ImportError migration sweep
     "eval_pattern_count": 10,     # Session 3 baseline: 9; tight ratchet
     "pass_only_count": 65,        # Session 3 baseline: 56
     "skip_budget": 20,            # Session 3 baseline: 9; measured at 18 in session 4

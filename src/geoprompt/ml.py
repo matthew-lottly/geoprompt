@@ -8,10 +8,12 @@ support analyst workflows without requiring heavyweight runtimes.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import math
 import random
 import re
 import statistics
+import warnings
 from collections import Counter, defaultdict
 from typing import Any, Iterable, Sequence
 
@@ -20,9 +22,8 @@ from .quality import simulation_only
 
 def _try_import(name: str) -> bool:
     try:
-        __import__(name)
-        return True
-    except Exception:
+        return importlib.util.find_spec(name) is not None
+    except (ImportError, AttributeError, ValueError):
         return False
 
 
@@ -184,7 +185,12 @@ def random_forest_spatial_prediction(
 def gradient_boosted_spatial_prediction(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Gradient-boosted style scoring using weighted features."""
+    """Simulation-only gradient-boosted style scoring using weighted features.
+
+    This helper is a placeholder and does not run a real gradient boosting
+    backend. For production, install and use sklearn GradientBoosting or
+    XGBoost.
+    """
     weights = [i + 1 for i, _ in enumerate(feature_keys)] or [1]
     scores = [sum(float(r.get(k, 0)) * w for k, w in zip(feature_keys, weights)) for r in rows]
     cutoff = _mean(scores)
@@ -195,7 +201,11 @@ def gradient_boosted_spatial_prediction(
 def svm_spatial_classification(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Linear-margin classifier fallback for spatial features."""
+    """Simulation-only linear-margin classifier fallback for spatial features.
+
+    This is a lightweight placeholder. For production classification, install
+    sklearn and use ``sklearn.svm.SVC``.
+    """
     center = _mean([_simple_score(r, feature_keys) for r in rows])
     return [{**r, "prediction": 1 if _simple_score(r, feature_keys) >= center else 0} for r in rows]
 
@@ -232,7 +242,11 @@ def logistic_regression_spatial_features(
 
 @simulation_only("Use PyTorch (torch.nn) or TensorFlow for real neural network integration.")
 def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Describe the available neural-network backend and simple sequence embedding."""
+    """Simulation-only neural-network integration and sequence embedding preview.
+
+    This does not execute a real neural backend. For production, install and
+    configure PyTorch or TensorFlow.
+    """
     backend = "heuristic"
     if _try_import("torch"):
         backend = "pytorch"
@@ -243,7 +257,11 @@ def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str
 
 @simulation_only("Use PyG (torch_geometric) or DGL for a real Graph Neural Network.")
 def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
-    """Compute simple node centrality scores as a GNN-like placeholder."""
+    """Simulation-only GNN placeholder using centrality-style node scores.
+
+    For production graph learning, install and use PyTorch Geometric (PyG) or
+    DGL with a trained model.
+    """
     nodes = list(graph.get("nodes", []))
     edges = list(graph.get("edges", []))
     degrees = Counter(n for e in edges for n in e)
@@ -252,21 +270,33 @@ def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
 
 @simulation_only("Use PyTorch torchvision or TensorFlow Keras for a real CNN on rasters.")
 def convolutional_neural_network_on_rasters(raster: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Return lightweight raster feature embeddings."""
+    """Simulation-only raster embedding helper.
+
+    This placeholder does not run a real CNN. For production raster inference,
+    install TensorFlow/Keras or PyTorch vision models.
+    """
     vals = _flatten_grid(raster)
     return {"embedding_dim": 4, "embedding": [min(vals or [0]), max(vals or [0]), round(_mean(vals), 4), len(vals)]}
 
 
 @simulation_only("Use PyTorch LSTM/GRU or TensorFlow Keras for a real RNN time-series model.")
 def recurrent_neural_network_spatial_time_series(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Summarise temporal trends across multiple sequences."""
+    """Simulation-only temporal trend summary for sequence inputs.
+
+    This does not execute an actual RNN. For production forecasting, install
+    and use LSTM/GRU models in PyTorch or TensorFlow.
+    """
     trends = [round(seq[-1] - seq[0], 4) if len(seq) >= 2 else 0.0 for seq in sequences]
     return {"sequence_count": len(sequences), "trend": trends}
 
 
 @simulation_only("Use PyTorch transformers or Hugging Face for a real attention/transformer model.")
 def transformer_model_spatial_sequences(sequences: Sequence[Sequence[float]], *, attention_heads: int = 4) -> dict[str, Any]:
-    """Summarise sequence attention statistics."""
+    """Simulation-only transformer-style sequence summary.
+
+    This helper is a placeholder and not a real transformer backend. For
+    production sequence modeling, install PyTorch transformers or Hugging Face.
+    """
     return {"sequence_count": len(sequences), "attention_heads": attention_heads, "token_count": sum(len(s) for s in sequences)}
 
 
@@ -1213,7 +1243,9 @@ def spatial_leakage_aware_split(
     if temporal_column is not None:
         try:
             sorted_idx = sorted(range(n), key=lambda i: records[i].get(temporal_column, ""))
-        except Exception:
+        except TypeError:
+            # Intentional: mixed temporal value types cannot be sorted reliably,
+            # so preserve the original order instead of failing the split.
             sorted_idx = list(range(n))
         test_idx = sorted_idx[-n_test:]
         val_idx = sorted_idx[-(n_test + n_val): -n_test]
@@ -1596,7 +1628,14 @@ def spatial_cross_validation(frame: _Any, model_fn: _Any, *,
         cls = type(frame)
         try:
             score = model_fn(cls.from_records(train_rows), cls.from_records(test_rows))
-        except Exception:
+        except Exception as exc:
+            # Intentional: a failing fold should surface as NaN so the caller still
+            # gets a usable cross-validation summary instead of a partial abort.
+            warnings.warn(
+                f"spatial_cross_validation fold {k + 1} failed: {exc}",
+                UserWarning,
+                stacklevel=2,
+            )
             score = float("nan")
         scores.append(score)
     valid = [s for s in scores if not math.isnan(s)]
@@ -1642,19 +1681,17 @@ def random_forest_wrapper(train_frame: _Any, test_frame: _Any, *,
     X_test = [_row_to_vec(r) for r in test_rows]
     y_test = [r.get(label_column) for r in test_rows]
 
-    try:
+    if _try_import("sklearn.ensemble"):
         from sklearn.ensemble import RandomForestClassifier  # type: ignore[import]
         clf = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
         clf.fit(X_train, y_train)
         preds = clf.predict(X_test)
         acc = sum(p == t for p, t in zip(preds, y_test)) / max(len(y_test), 1)
         return {"accuracy": acc, "n_train": len(X_train), "n_test": len(X_test), "model": clf}
-    except ImportError:
-        # Majority vote fallback
-        from collections import Counter
-        majority = Counter(y_train).most_common(1)[0][0] if y_train else None
-        acc = sum(majority == t for t in y_test) / max(len(y_test), 1)
-        return {"accuracy": acc, "n_train": len(X_train), "n_test": len(X_test), "model": "majority_vote"}
+    # Majority vote fallback
+    majority = Counter(y_train).most_common(1)[0][0] if y_train else None
+    acc = sum(majority == t for t in y_test) / max(len(y_test), 1)
+    return {"accuracy": acc, "n_train": len(X_train), "n_test": len(X_test), "model": "majority_vote"}
 
 
 def kmeans_wrapper(frame: _Any, k: int = 5, *,
@@ -1688,12 +1725,12 @@ def kmeans_wrapper(frame: _Any, k: int = 5, *,
 
     X = [_vec(r) for r in rows]
 
-    try:
+    if _try_import("sklearn.cluster") and _try_import("numpy"):
         from sklearn.cluster import KMeans  # type: ignore[import]
         import numpy as np  # type: ignore[import]
         km = KMeans(n_clusters=k, random_state=42, n_init="auto")
         labels = km.fit_predict(np.array(X)).tolist()
-    except ImportError:
+    else:
         # Simple Lloyd's k-means
         n_feat = len(X[0]) if X else 0
         centres = random.sample(X, min(k, len(X)))

@@ -13,6 +13,7 @@ from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Callable
 
+from ._capabilities import require_capability
 from .frame import GeoPromptFrame
 from .geometry import geometry_centroid
 from .overlay import geometry_from_shapely, geometry_to_shapely
@@ -444,11 +445,13 @@ def _join_frame_from_case(case: CorpusCase) -> GeoPromptFrame | None:
 
 
 def _load_compare_dependencies() -> tuple[Any, Callable[[dict[str, Any]], Any], Callable[..., Any]]:
+    require_capability("geopandas", context="geoprompt-compare")
+    require_capability("shapely", context="geoprompt-compare")
     try:
         geopandas = importlib.import_module("geopandas")
         shapely_geometry = importlib.import_module("shapely.geometry")
-    except ImportError as exc:
-        raise RuntimeError("Install comparison extras with 'pip install -e .[compare]' before running geoprompt-compare.") from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        raise AssertionError("Capability guard failed for comparison dependencies") from exc
 
     return geopandas, shapely_geometry.shape, shapely_geometry.box
 

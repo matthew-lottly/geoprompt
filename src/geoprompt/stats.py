@@ -4,6 +4,7 @@ All heavy dependencies (scipy, numpy) are lazily imported and optional.
 """
 from __future__ import annotations
 
+import importlib.util
 import math
 from typing import Any, Sequence
 
@@ -739,7 +740,7 @@ def spline_interpolation(
     Uses thin-plate spline (radial basis function) by default.
     Falls back to IDW if scipy is unavailable.
     """
-    try:
+    if importlib.util.find_spec("scipy") is not None:
         import numpy as np
         from scipy.interpolate import RBFInterpolator
 
@@ -749,9 +750,8 @@ def spline_interpolation(
         kernel = "thin_plate_spline" if spline_type == "thin_plate" else spline_type
         interp = RBFInterpolator(pts, vals, kernel=kernel, smoothing=smoothing)
         return interp(q).tolist()
-    except ImportError:
-        return [v if v is not None else 0.0
-                for v in idw_interpolation(known_points, known_values, query_points)]
+    return [v if v is not None else 0.0
+            for v in idw_interpolation(known_points, known_values, query_points)]
 
 
 def trend_surface(
@@ -2756,11 +2756,9 @@ def fisher_jenks(values: list[float], k: int = 5) -> list[float]:
         A sorted list of ``k + 1`` break points (including min and max).
     """
     # Try jenkspy first for speed
-    try:
+    if importlib.util.find_spec("jenkspy") is not None:
         import jenkspy  # type: ignore[import]
         return jenkspy.jenks_breaks(values, nb_class=k)
-    except ImportError:
-        pass
 
     arr = sorted(float(v) for v in values)
     n = len(arr)

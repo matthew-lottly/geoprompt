@@ -9,7 +9,10 @@ from __future__ import annotations
 import math
 import re
 import string
+import warnings
 from typing import Any
+
+from ._capabilities import check_capability
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -716,39 +719,60 @@ def validate_crs_chain(
 
     residuals: list[dict[str, float]] = []
 
-    try:
-        from .crs import reproject_geometry, _project_xy  # noqa: F811
+    if not check_capability("pyproj"):
+        warnings.warn(
+            "validate_crs_chain requires pyproj for CRS roundtrip validation; install geoprompt[projection].",
+            UserWarning,
+            stacklevel=2,
+        )
+        return {
+            "source_crs": source_crs,
+            "target_crs": target_crs,
+            "test_points": len(test_points),
+            "residuals": residuals,
+            "max_residual_m": float("nan"),
+            "acceptable": False,
+        }
 
-        for lon, lat in test_points:
-            try:
-                fwd_x, fwd_y = _project_xy(lon, lat, source_crs, target_crs)
-                inv_lon, inv_lat = _project_xy(fwd_x, fwd_y, target_crs, source_crs)
-                residuals.append({
-                    "original_lon": lon,
-                    "original_lat": lat,
-                    "residual_lon": abs(inv_lon - lon),
-                    "residual_lat": abs(inv_lat - lat),
-                    "residual_m": math.sqrt((inv_lon - lon) ** 2 + (inv_lat - lat) ** 2) * 111_320,
-                })
-            except Exception:
-                residuals.append({
-                    "original_lon": lon,
-                    "original_lat": lat,
-                    "residual_lon": float("nan"),
-                    "residual_lat": float("nan"),
-                    "residual_m": float("nan"),
-                })
-    except ImportError:
-        pass
+    from .crs import _project_xy  # noqa: F811
 
-    max_residual = max((r["residual_m"] for r in residuals if not math.isnan(r["residual_m"])), default=0.0)
+    projection_failures = 0
+    for lon, lat in test_points:
+        try:
+            fwd_x, fwd_y = _project_xy(lon, lat, source_crs, target_crs)
+            inv_lon, inv_lat = _project_xy(fwd_x, fwd_y, target_crs, source_crs)
+            residuals.append({
+                "original_lon": lon,
+                "original_lat": lat,
+                "residual_lon": abs(inv_lon - lon),
+                "residual_lat": abs(inv_lat - lat),
+                "residual_m": math.sqrt((inv_lon - lon) ** 2 + (inv_lat - lat) ** 2) * 111_320,
+            })
+        except Exception as exc:
+            # Intentional: individual projection failures should degrade to NaN rows
+            # so the audit can report partial coverage instead of aborting outright.
+            projection_failures += 1
+            residuals.append({
+                "original_lon": lon,
+                "original_lat": lat,
+                "residual_lon": float("nan"),
+                "residual_lat": float("nan"),
+                "residual_m": float("nan"),
+            })
+            warnings.warn(
+                f"validate_crs_chain failed for point ({lon}, {lat}): {exc}",
+                UserWarning,
+                stacklevel=2,
+            )
+
+    max_residual = max((r["residual_m"] for r in residuals if not math.isnan(r["residual_m"])), default=float("nan"))
     return {
         "source_crs": source_crs,
         "target_crs": target_crs,
         "test_points": len(test_points),
         "residuals": residuals,
         "max_residual_m": max_residual,
-        "acceptable": max_residual < 1.0,
+        "acceptable": projection_failures == 0 and not math.isnan(max_residual) and max_residual < 1.0,
     }
 
 

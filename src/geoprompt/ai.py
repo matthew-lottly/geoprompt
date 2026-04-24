@@ -9,6 +9,7 @@ lightweight when only pure-Python paths are needed.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import os
 import platform
@@ -21,10 +22,9 @@ from typing import Any, Callable, Sequence
 # ---------------------------------------------------------------------------
 
 def _try_import(name: str) -> Any:
-    try:
-        return importlib.import_module(name)
-    except ImportError:
+    if importlib.util.find_spec(name) is None:
         return None
+    return importlib.import_module(name)
 
 
 # ── 1. Natural-language tool runner ──────────────────────────────────────────
@@ -1119,29 +1119,26 @@ def runtime_doctor(
     recommendations: list[str] = []
 
     if check_onnx:
-        try:
-            import importlib
+        if importlib.util.find_spec("onnxruntime") is not None:
             importlib.import_module("onnxruntime")
             checks["onnxruntime"] = {"available": True}
-        except ImportError:
+        else:
             checks["onnxruntime"] = {"available": False}
             recommendations.append("Install onnxruntime for local ONNX inference: pip install onnxruntime")
 
     if check_torch:
-        try:
-            import importlib
+        if importlib.util.find_spec("torch") is not None:
             torch = importlib.import_module("torch")
             checks["torch"] = {"available": True, "version": getattr(torch, "__version__", "unknown")}
-        except ImportError:
+        else:
             checks["torch"] = {"available": False}
             recommendations.append("Install PyTorch for local neural network inference: pip install torch")
 
     if check_tf:
-        try:
-            import importlib
+        if importlib.util.find_spec("tensorflow") is not None:
             tf = importlib.import_module("tensorflow")
             checks["tensorflow"] = {"available": True, "version": getattr(tf, "__version__", "unknown")}
-        except ImportError:
+        else:
             checks["tensorflow"] = {"available": False}
             recommendations.append("Install TensorFlow for SavedModel inference: pip install tensorflow")
 

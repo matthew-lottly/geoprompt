@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from geoprompt import io
+from geoprompt._exceptions import failure_payload
 from geoprompt.db import _parse_wkt
 from geoprompt.geoprocessing import notify_webhook
 from geoprompt.safe_expression import ExpressionValidationError, evaluate_safe_expression
@@ -46,9 +47,31 @@ def test_notify_webhook_emits_structured_failure_log(caplog: pytest.LogCaptureFi
     with caplog.at_level("WARNING"):
         notify_webhook("http://127.0.0.1:1/webhook", {"event": "unit-test"}, timeout=0.05)
 
-    assert any(record.message == "webhook_notification_failed" for record in caplog.records)
+    record = next(record for record in caplog.records if record.message == "webhook_notification_failed")
+    assert getattr(record, "event", None) == "webhook_notification_failed"
+    assert getattr(record, "url", None) == "http://127.0.0.1:1/webhook"
+    assert isinstance(getattr(record, "error_type", None), str)
+    assert getattr(record, "error", None)
+
+
+def test_failure_payload_helper_preserves_standard_error_contract() -> None:
+    payload = failure_payload(
+        code="EXAMPLE_FAILURE",
+        category="validation",
+        remediation="Retry with a supported input value.",
+        error="invalid field",
+        status=400,
+    )
+
+    assert payload == {
+        "code": "EXAMPLE_FAILURE",
+        "category": "validation",
+        "remediation": "Retry with a supported input value.",
+        "error": "invalid field",
+        "status": 400,
+    }
 
 
 def test_parse_wkt_invalid_input_raises_explicit_exception() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="cannot parse WKT"):
         _parse_wkt("NOT_A_WKT")

@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 from typing import Any
 
+from ._capabilities import require_capability
 from .frame import GeoPromptFrame
 from .overlay import geometry_to_shapely
 
 
 def _module_available(name: str) -> bool:
     try:
-        importlib.import_module(name)
-    except ImportError:
+        return importlib.util.find_spec(name) is not None
+    except Exception:
         return False
-    return True
 
 
 def geopandas_available() -> bool:
@@ -37,31 +38,23 @@ def arrow_available() -> bool:
 
 
 def _load_geopandas() -> Any:
-    try:
-        return importlib.import_module("geopandas")
-    except ImportError as exc:  # pragma: no cover - exercised by error path tests
-        raise RuntimeError("Install GeoPandas support with 'pip install -e .[io]' or 'pip install geoprompt[all]'.") from exc
+    require_capability("geopandas", context="interop.to_geopandas()/from_geopandas()")
+    return importlib.import_module("geopandas")
 
 
 def _load_pandas() -> Any:
-    try:
-        return importlib.import_module("pandas")
-    except ImportError as exc:  # pragma: no cover - exercised by error path tests
-        raise RuntimeError("Install Pandas support with 'pip install -e .[io]' or 'pip install geoprompt[all]'.") from exc
+    require_capability("pandas", context="interop tabular conversion")
+    return importlib.import_module("pandas")
 
 
 def _load_polars() -> Any:
-    try:
-        return importlib.import_module("polars")
-    except ImportError as exc:  # pragma: no cover - exercised by error path tests
-        raise RuntimeError("Install Polars support with 'pip install polars'.") from exc
+    require_capability("polars", context="interop Polars conversion")
+    return importlib.import_module("polars")
 
 
 def _load_pyarrow() -> Any:
-    try:
-        return importlib.import_module("pyarrow")
-    except ImportError as exc:  # pragma: no cover - exercised by error path tests
-        raise RuntimeError("Install PyArrow support with 'pip install -e .[io]' or 'pip install geoprompt[all]'.") from exc
+    require_capability("pyarrow", context="interop Arrow conversion")
+    return importlib.import_module("pyarrow")
 
 
 def _coerce_geometry(value: Any) -> Any:

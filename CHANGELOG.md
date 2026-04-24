@@ -7,6 +7,12 @@
 - Expanded notebook and docs quality work to support a full audit pass across examples, markdown guides, and publishable proof artifacts.
 - Added a timed notebook execution helper and a Windows event-loop startup fix to avoid notebook kernels hanging indefinitely in the project venv.
 
+### Trust-Risk Mitigations
+
+- Added documentation and CI gates for capability signaling, fallback-policy troubleshooting, and README flowchart integrity.
+- Added trust governance docs covering SLOs, release blockers, incident handling, reproducibility verification, and rollback-ready hotfix requirements.
+- Added markdown and docs gate tests to reduce formatting drift and documentation contract regressions.
+
 ## 0.1.7
 
 - Added workload preset APIs for IO and network batch workflows, including `read_data_with_preset(...)`, `iter_data_with_preset(...)`, `od_cost_matrix_with_preset(...)`, and `utility_bottlenecks_with_preset(...)`.

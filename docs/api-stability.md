@@ -4,11 +4,17 @@ This page distinguishes stable APIs from advanced/experimental APIs.
 
 ## Support matrix
 
-| Surface | Status | Guidance |
-| --- | --- | --- |
-| Core frame, geometry, IO, reporting, network routing | Stable | Safe default for long-lived analyst workflows |
-| Raster, database, service, and interop extras | Optional but supported | Use when the dependency stack is available |
-| AI, ML, and fast-evolving enterprise helpers | Experimental | Pin versions and expect faster iteration |
+| Surface | Status | Capability Flags | Guidance |
+| --- | --- | --- | --- |
+| Core frame, geometry, IO, reporting, network routing | Stable | Base package | Safe default for long-lived analyst workflows |
+| Raster, database, service, and interop extras | Optional but supported | `rasterio`, `sqlalchemy`, `fastapi`, `geopandas`, `pyarrow` | Use when the dependency stack is available |
+| AI, ML, and fast-evolving enterprise helpers | Experimental | Module-specific optional backends | Pin versions and expect faster iteration |
+| Simulation-only helpers | Simulation-only | Explicit placeholder markers in docstrings | Not production backends without replacement implementation |
+
+## Profile guidance
+
+- Production-safe profile: stable core + explicitly installed optional capabilities + strict fallback policy for critical paths.
+- Development profile: permissive experimentation with warning visibility and explicit remediation plans before release.
 
 ## Stable APIs
 
@@ -59,11 +65,13 @@ These APIs are powerful but may evolve faster.
 ## Release quality bar
 
 ### Alpha to Beta
+
 - stable core workflows must stay green across the full regression suite
 - flagship docs and examples must describe real data and real workflow intent
 - experimental helpers must be clearly labeled instead of implied as equivalent to hardened enterprise platforms
 
 ### Beta to 1.0
+
 - public core APIs should have stable signatures and migration notes
 - major docs, gallery, and comparison outputs should be evidence-backed and reproducible
 - release candidates should ship with repeatable benchmark and smoke-run proof

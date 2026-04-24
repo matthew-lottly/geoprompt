@@ -7,11 +7,13 @@ plotly) are lazily imported and optional.
 from __future__ import annotations
 
 import html as _html
+import importlib.util
 import json as _json
 import math as _math
 from pathlib import Path
 from typing import Any, Sequence
 
+from ._capabilities import check_capability
 
 Record = dict[str, Any]
 
@@ -727,7 +729,7 @@ def export_map_image(
     if format.lower() == "svg" or format.lower() == "html":
         return _export_svg_map(features, p, width, height, st, title, geometry_field)
 
-    try:
+    if check_capability("matplotlib"):
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
@@ -746,8 +748,7 @@ def export_map_image(
         fig.savefig(str(p), format=format, dpi=150, bbox_inches="tight")
         plt.close(fig)
         return str(p)
-    except ImportError:
-        return _export_svg_map(features, p.with_suffix(".svg"), width, height, st, title, geometry_field)
+    return _export_svg_map(features, p.with_suffix(".svg"), width, height, st, title, geometry_field)
 
 
 def _export_svg_map(
@@ -924,7 +925,7 @@ def export_pdf(html_content: str, output_path: str, *,
     """
     from pathlib import Path
     out = Path(output_path)
-    try:
+    if importlib.util.find_spec("weasyprint") is not None:
         import weasyprint  # type: ignore[import]
         if layout and layout.get("title"):
             title_tag = f"<title>{layout['title']}</title>"
@@ -932,10 +933,9 @@ def export_pdf(html_content: str, output_path: str, *,
                 html_content = html_content.replace("<head>", f"<head>{title_tag}", 1)
         weasyprint.HTML(string=html_content).write_pdf(str(out))
         return str(out)
-    except ImportError:
-        html_path = out.with_suffix(".html")
-        html_path.write_text(html_content, encoding="utf-8")
-        return str(html_path)
+    html_path = out.with_suffix(".html")
+    html_path.write_text(html_content, encoding="utf-8")
+    return str(html_path)
 
 
 def folium_layer_control(map_obj: _Any, *, collapsed: bool = False) -> _Any:
@@ -948,11 +948,9 @@ def folium_layer_control(map_obj: _Any, *, collapsed: bool = False) -> _Any:
     Returns:
         The *map_obj* with the ``LayerControl`` added.
     """
-    try:
+    if check_capability("folium"):
         import folium  # type: ignore[import]
         folium.LayerControl(collapsed=collapsed).add_to(map_obj)
-    except ImportError:
-        pass
     return map_obj
 
 
@@ -973,10 +971,9 @@ def folium_time_slider(map_obj: _Any, frame: _Any, *,
         The *map_obj* with the time slider plugin added.
     """
     import json
-    try:
-        from folium.plugins import TimestampedGeoJson  # type: ignore[import]
-    except ImportError:
+    if importlib.util.find_spec("folium.plugins") is None:
         return map_obj
+    from folium.plugins import TimestampedGeoJson  # type: ignore[import]
 
     geom_col = getattr(frame, "geometry_column", "geometry")
     features = []

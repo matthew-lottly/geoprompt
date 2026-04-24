@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 import math
 import random
@@ -21,9 +22,9 @@ from .equations import (
 )
 from .table import PromptTable
 
-try:
+if importlib.util.find_spec("numpy") is not None:
     import numpy as _np
-except ImportError:  # pragma: no cover - optional dependency
+else:  # pragma: no cover - optional dependency
     _np = None
 
 
@@ -1125,21 +1126,29 @@ def export_resilience_summary_report(
     .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
   </style>
 </head>
-<body>
-  <h1>Resilience Summary Report</h1>
+<body data-output-contract=\"resilience-summary-v1\">
+    <main>
+    <h1>Resilience Summary Report</h1>
   <p><span class=\"pill\">nodes: {int(summary.get('node_count', 0))}</span>
   <span class=\"pill\">single-source: {int(summary.get('single_source_nodes', 0))}</span>
   <span class=\"pill\">critical single-source: {int(summary.get('critical_single_source_nodes', 0))}</span>
   <span class=\"pill\">severity: {escape(str(summary.get('severity_tier', 'unknown')))}</span></p>
-  <h2>Risk Overview</h2>
+    <section class=\"artifact artifact-chart\" data-artifact-type=\"chart\">
+    <h2>Risk Overview</h2>
   {summary_svg}
-  <h2>Restoration Progression</h2>
+    </section>
+    <section class=\"artifact artifact-chart\" data-artifact-type=\"chart\">
+    <h2>Restoration Progression</h2>
   {restoration_svg}
-  <h2>Node Detail</h2>
+    </section>
+    <section class=\"artifact artifact-table\" data-artifact-type=\"table\">
+    <h2>Node Detail</h2>
   <table>
     <thead><tr><th>Node</th><th>Single Source</th><th>Critical</th><th>Tier</th></tr></thead>
     <tbody>{row_html}</tbody>
   </table>
+    </section>
+    </main>
 </body>
 </html>
 """

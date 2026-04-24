@@ -7,6 +7,7 @@ interpolation, and advanced routing/allocation models.
 from __future__ import annotations
 
 import math
+import warnings
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -602,8 +603,10 @@ def exploratory_regression(
     p = len(x_matrix[0]) if x_matrix else 0
     y_mean = sum(y) / n
     ss_tot = sum((yi - y_mean) ** 2 for yi in y)
+    failed_models = 0
 
     def _ols_r2(cols: Sequence[int]) -> float:
+        nonlocal failed_models
         k = len(cols)
         X = [[1.0] + [x_matrix[i][c] for c in cols] for i in range(n)]
         XtX = [[sum(X[r][i] * X[r][j] for r in range(n)) for j in range(k + 1)] for i in range(k + 1)]
@@ -626,7 +629,8 @@ def exploratory_regression(
             predictions = [sum(beta[j] * X[r][j] for j in range(dim)) for r in range(n)]
             ss_res = sum((y[r] - predictions[r]) ** 2 for r in range(n))
             return 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-        except Exception:
+        except (OverflowError, TypeError, ValueError, ZeroDivisionError):
+            failed_models += 1
             return 0.0
 
     results: List[Dict[str, Any]] = []
@@ -635,6 +639,12 @@ def exploratory_regression(
             r2 = _ols_r2(combo)
             adj_r2 = 1.0 - (1.0 - r2) * (n - 1) / max(1, n - k - 1)
             results.append({"variables": list(combo), "r2": r2, "adj_r2": adj_r2})
+    if failed_models:
+        warnings.warn(
+            f"exploratory_regression skipped {failed_models} unstable model combination(s).",
+            UserWarning,
+            stacklevel=2,
+        )
     results.sort(key=lambda x: -x["adj_r2"])
     return results
 
@@ -879,7 +889,7 @@ def temporal_aggregation(
                 doy = (m - 1) * 30 + d
                 week = (doy - 1) // 7
                 return f"{y}-W{week:02d}"
-            except Exception:
+            except (IndexError, TypeError, ValueError):
                 return s[:7]
         if period == "month":
             return s[:7]

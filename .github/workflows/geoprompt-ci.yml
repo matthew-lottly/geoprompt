@@ -45,6 +45,18 @@ jobs:
       - name: Install Geoprompt with validation extras
         run: python -m pip install -e ".[dev,compare,overlay,projection]"
 
+      - name: Run docs gates (flowchart, markdown, simulation docstrings)
+        run: |
+          python -m pytest tests/test_docs_readme_flowchart_gate.py -q
+          python -m pytest tests/test_docs_markdown_gate.py -q
+          python -m pytest tests/test_simulation_only_docs.py -q
+
+      - name: Run trust and artifact contract gates
+        run: |
+          python -m pytest tests/test_release_evidence.py -q
+          python -m pytest tests/test_failure_transparency.py -q
+          python -m pytest tests/test_output_quality_gates.py -q
+
       - name: Run tests
         run: python -m pytest
 

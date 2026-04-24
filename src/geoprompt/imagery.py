@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import math
 from pathlib import Path
@@ -618,21 +619,22 @@ def object_detection_yolo(image_path: str, *,
         A list of detection dicts with ``class``, ``confidence``,
         ``bbox`` (``[x1, y1, x2, y2]`` in pixels), and ``area`` keys.
     """
-    try:
-        from ultralytics import YOLO  # type: ignore[import]
-        model = YOLO(model_path or "yolov8n.pt")
-        results = model(image_path, conf=confidence_threshold)
-        detections = []
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
-                detections.append({
-                    "class": r.names[int(box.cls)],
-                    "confidence": float(box.conf),
-                    "bbox": [x1, y1, x2, y2],
-                    "area": (x2 - x1) * (y2 - y1),
-                })
-        return detections
-    except ImportError:
+    if importlib.util.find_spec("ultralytics") is None:
         return [{"class": "stub", "confidence": 0.0, "bbox": [0, 0, 0, 0], "area": 0,
                  "note": "ultralytics not installed — install with: pip install ultralytics"}]
+
+    from ultralytics import YOLO  # type: ignore[import]
+
+    model = YOLO(model_path or "yolov8n.pt")
+    results = model(image_path, conf=confidence_threshold)
+    detections = []
+    for r in results:
+        for box in r.boxes:
+            x1, y1, x2, y2 = [float(v) for v in box.xyxy[0]]
+            detections.append({
+                "class": r.names[int(box.cls)],
+                "confidence": float(box.conf),
+                "bbox": [x1, y1, x2, y2],
+                "area": (x2 - x1) * (y2 - y1),
+            })
+    return detections

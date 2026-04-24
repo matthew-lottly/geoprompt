@@ -10,11 +10,13 @@ rather than trying to recreate a full raster platform. They support either:
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import logging
 import math as _math
 from pathlib import Path
 from typing import Any, Sequence, Union
 
+from ._capabilities import require_capability
 from .frame import GeoPromptFrame
 from .geometry import geometry_type, geometry_within
 from .safe_expression import ExpressionExecutionError, ExpressionValidationError, evaluate_safe_expression
@@ -27,12 +29,11 @@ _logger = logging.getLogger(__name__)
 
 
 def _load_rasterio() -> Any:
+    require_capability("rasterio", context="raster file reads")
     try:
         return importlib.import_module("rasterio")
-    except ImportError as exc:
-        raise RuntimeError(
-            "Install raster support with 'pip install geoprompt[raster]' to read raster files."
-        ) from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        raise AssertionError("Capability guard failed for rasterio") from exc
 
 
 def _coerce_raster(raster: RasterLike) -> dict[str, Any]:
@@ -2171,7 +2172,7 @@ def pca_raster(bands: list[list[list[float]]], n_components: int = 3) -> list[li
     n_bands = len(bands)
     n_components = min(n_components, n_bands)
 
-    try:
+    if importlib.util.find_spec("numpy") is not None and importlib.util.find_spec("sklearn.decomposition") is not None:
         import numpy as np  # type: ignore[import]
         from sklearn.decomposition import PCA  # type: ignore[import]
         X = np.array([[bands[b][r][c] for b in range(n_bands)] for r in range(rows) for c in range(cols)], dtype=float)
@@ -2182,8 +2183,6 @@ def pca_raster(bands: list[list[list[float]]], n_components: int = 3) -> list[li
             comp = transformed[:, k].reshape(rows, cols).tolist()
             result.append(comp)
         return result
-    except ImportError:
-        pass
 
     # Fallback: return the first n_components bands unchanged as placeholders
     return [bands[k] for k in range(n_components)]

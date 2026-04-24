@@ -3,6 +3,8 @@ site_description: Lightweight spatial analysis workflows and parity documentatio
 nav:
   - Home: README.md
   - Start Here: docs/start-here.md
+  - Trust Profiles and Migration: docs/trust-profiles-and-migration.md
+  - Trust Governance and SLOs: docs/trust-governance-slos.md
   - ArcPy Migration: docs/migration-from-arcpy.md
   - Environment and Optional Dependencies: docs/environment-and-optional-dependencies.md
   - Troubleshooting: docs/troubleshooting.md

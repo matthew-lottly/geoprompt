@@ -25,7 +25,7 @@
 4. Keep the committed pressure plot in `assets/neighborhood-pressure-review-live.png` and regenerate it with `geoprompt-demo` if the package behavior changes.
 5. Preserve the GitHub Actions workflows in `.github/workflows/geoprompt-ci.yml` and `.github/workflows/publish-pypi.yml` so validation and publishing follow the package.
 6. Reference [docs/architecture.md](docs/architecture.md) and [docs/demo-storyboard.md](docs/demo-storyboard.md) from the README when polishing the public pitch.
-7. Verify the README presentation strategy still works for both GitHub and PyPI before release; if GitHub-only Mermaid content is used, provide a PyPI-safe fallback or accept reduced PyPI rendering.
+7. Verify README rendering strategy: keep Mermaid flow chart for GitHub and ensure PUBLISHING/release notes acknowledge reduced Mermaid rendering on PyPI (text fallback guidance required in release notes).
 
 ## Release Checklist
 
@@ -47,7 +47,9 @@
 16. If the PyPI publisher entry expects an environment, set it to `pypi` so the OIDC claim matches the workflow.
 17. Confirm `pyproject.toml` has the intended release version and that `README.md` still renders acceptably on the intended publish targets.
 18. **Degraded-mode gate**: run `geoprompt capability-report` and confirm output is coherent (no unexpected hard-fail caps). Confirm `tests/test_optional_dep_hardening.py` and `tests/test_io_db_safety.py` are fully green. Verify no new `except ImportError: return None/[]` patterns were introduced since the last release (run `git diff HEAD~1 -- src/ | grep -E "except ImportError.*return"`).
-19. Push a version tag such as `geoprompt-v0.1.7` to trigger the monorepo publish workflow, or run the workflow manually from GitHub Actions.
+19. **Trust-evidence gate**: include trust scorecard, secrets scan results, unsafe-configuration review results, and reproducibility verification output in the release evidence bundle.
+20. **Hotfix rollback gate**: for critical fixes, attach rollback steps, previous-known-good image/version reference, and changelog-ready mitigation note.
+21. Push a version tag such as `geoprompt-v0.1.7` to trigger the monorepo publish workflow, or run the workflow manually from GitHub Actions.
 
 ## PyPI Commands
 

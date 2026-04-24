@@ -18,6 +18,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from ._capabilities import require_capability
+
 logger = logging.getLogger("geoprompt.service")
 
 _FASTAPI_MISSING = (
@@ -27,10 +29,11 @@ _FASTAPI_MISSING = (
 
 
 def _load_fastapi() -> Any:
+    require_capability("fastapi", context="service module")
     try:
         return importlib.import_module("fastapi")
-    except ImportError as exc:
-        raise RuntimeError(_FASTAPI_MISSING) from exc
+    except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        raise AssertionError("Capability guard failed for fastapi") from exc
 
 
 class ServiceJobManager:

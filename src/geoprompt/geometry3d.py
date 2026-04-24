@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import math
 from typing import Any, Sequence
 
@@ -300,14 +301,12 @@ def tin_surface(points: list[tuple[float, float, float]]) -> dict:
         A TIN dict with ``vertices`` (list of 3-D points) and ``triangles``
         (list of ``[i, j, k]`` index triples into vertices).
     """
-    try:
+    if importlib.util.find_spec("numpy") is not None and importlib.util.find_spec("scipy.spatial") is not None:
         import numpy as np  # type: ignore[import]
         from scipy.spatial import Delaunay  # type: ignore[import]
         pts = np.array([(p[0], p[1]) for p in points])
         tri = Delaunay(pts)
         return {"vertices": list(points), "triangles": tri.simplices.tolist()}
-    except ImportError:
-        pass
 
     # Fallback: very simple 2-D Delaunay via ear-clipping on convex hull triangles
     n = len(points)

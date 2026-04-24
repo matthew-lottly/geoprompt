@@ -5,9 +5,13 @@ from __future__ import annotations
 import json
 import math
 import re
+import warnings
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Sequence
+
+from ._capabilities import check_capability
+from ._exceptions import DataError
 
 
 RecordList = list[dict[str, Any]]
@@ -22,8 +26,13 @@ def _ensure_records(data: Any) -> RecordList:
             text = path.read_text(encoding="utf-8")
             try:
                 parsed = json.loads(text)
-            except Exception:
-                return []
+            except Exception as exc:
+                warnings.warn(
+                    f"Malformed JSON in {path}; raising DataError instead of silently returning [].",
+                    UserWarning,
+                    stacklevel=2,
+                )
+                raise DataError(f"Invalid JSON payload in {path}: {exc}") from exc
             return _ensure_records(parsed)
     if isinstance(data, dict):
         if "features" in data and isinstance(data["features"], list):
@@ -645,7 +654,7 @@ def from_wkt_batch(wkt_strings: list[str]) -> list[dict | None]:
     Returns:
         A list of GeoJSON geometry dicts (or ``None`` for parse failures).
     """
-    try:
+    if check_capability("shapely"):
         import shapely.wkt as _sw  # type: ignore[import]
         results = []
         for wkt in wkt_strings:
@@ -655,17 +664,15 @@ def from_wkt_batch(wkt_strings: list[str]) -> list[dict | None]:
             except Exception:
                 results.append(None)
         return results
-    except ImportError:
-        # Minimal fallback for POINT only
-        import re
-        results = []
-        for wkt in wkt_strings:
-            m = re.match(r"POINT\s*\(\s*([\d.\-]+)\s+([\d.\-]+)\s*\)", wkt.strip(), re.IGNORECASE)
-            if m:
-                results.append({"type": "Point", "coordinates": (float(m.group(1)), float(m.group(2)))})
-            else:
-                results.append(None)
-        return results
+    # Minimal fallback for POINT only
+    results = []
+    for wkt in wkt_strings:
+        m = re.match(r"POINT\s*\(\s*([\d.\-]+)\s+([\d.\-]+)\s*\)", wkt.strip(), re.IGNORECASE)
+        if m:
+            results.append({"type": "Point", "coordinates": (float(m.group(1)), float(m.group(2)))})
+        else:
+            results.append(None)
+    return results
 
 
 def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
@@ -677,7 +684,7 @@ def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
     Returns:
         A list of WKT strings (``"GEOMETRYCOLLECTION EMPTY"`` for ``None``).
     """
-    try:
+    if check_capability("shapely"):
         import shapely.geometry as _sg  # type: ignore[import]
         results = []
         for geom in geometries:
@@ -689,25 +696,25 @@ def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
             except Exception:
                 results.append("GEOMETRYCOLLECTION EMPTY")
         return results
-    except ImportError:
-        # Minimal fallback for Point/LineString/Polygon
-        results = []
-        for geom in geometries:
-            if geom is None:
-                results.append("GEOMETRYCOLLECTION EMPTY"); continue
-            t = geom.get("type", "")
-            c = geom.get("coordinates")
-            try:
-                if t == "Point":
-                    results.append(f"POINT ({c[0]} {c[1]})")
-                elif t == "LineString":
-                    pts = ", ".join(f"{p[0]} {p[1]}" for p in c)
-                    results.append(f"LINESTRING ({pts})")
-                elif t == "Polygon":
-                    ring = ", ".join(f"{p[0]} {p[1]}" for p in c[0])
-                    results.append(f"POLYGON (({ring}))")
-                else:
-                    results.append("GEOMETRYCOLLECTION EMPTY")
-            except Exception:
+    # Minimal fallback for Point/LineString/Polygon
+    results = []
+    for geom in geometries:
+        if geom is None:
+            results.append("GEOMETRYCOLLECTION EMPTY")
+            continue
+        t = geom.get("type", "")
+        c = geom.get("coordinates")
+        try:
+            if t == "Point":
+                results.append(f"POINT ({c[0]} {c[1]})")
+            elif t == "LineString":
+                pts = ", ".join(f"{p[0]} {p[1]}" for p in c)
+                results.append(f"LINESTRING ({pts})")
+            elif t == "Polygon":
+                ring = ", ".join(f"{p[0]} {p[1]}" for p in c[0])
+                results.append(f"POLYGON (({ring}))")
+            else:
                 results.append("GEOMETRYCOLLECTION EMPTY")
-        return results
+        except Exception:
+            results.append("GEOMETRYCOLLECTION EMPTY")
+    return results

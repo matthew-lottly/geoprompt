@@ -33,3 +33,19 @@ This project models Geoprompt as a reusable package rather than a single spatial
 - External libraries are used only as optional validation and bridge layers while Geoprompt continues expanding its own native surface
 
 Those constraints are intentional. They keep the package easy to reason about while leaving room for later expansion into richer geometry and table behavior.
+
+## Trust Boundaries and Threat Assumptions
+
+GeoPrompt trust boundaries are explicit:
+
+- Input boundary: file, network, and service payloads are untrusted and must pass schema/size/URL validation.
+- Expression boundary: user expressions are constrained by AST allowlists and execution limits.
+- Optional dependency boundary: advanced capabilities must be explicitly available, otherwise behavior is gated via capability checks and typed errors/warnings.
+- Service boundary: auth, PII scanning, payload complexity, and request-signature checks protect service-facing routes.
+- Output boundary: generated artifacts are treated as evidence-bearing outputs and must satisfy accessibility and integrity checks.
+
+Assumptions:
+
+- Production users pin dependency versions and enable strict trust policies for critical workflows.
+- Simulation-only helpers are never treated as equivalent to production backends.
+- Release decisions require reproducible evidence, not prose-only assertions.

@@ -11,6 +11,8 @@ import math
 import re
 from typing import Any, Sequence
 
+from ._exceptions import DependencyError
+
 
 Record = dict[str, Any]
 
@@ -23,7 +25,7 @@ def _get_requests() -> Any:
     try:
         return importlib.import_module("requests")
     except ImportError as exc:
-        raise RuntimeError(
+        raise DependencyError(
             "Install requests ('pip install requests') to use geocoding features."
         ) from exc
 
@@ -114,6 +116,8 @@ def batch_forward_geocode(
             hits = forward_geocode(addr, provider=provider, api_key=api_key, limit=1)
             results.append(hits[0] if hits else {"lat": None, "lon": None, "display_name": addr, "score": 0})
         except Exception as e:
+            # Intentional: batch geocoding captures per-address failures in-band
+            # so one bad request does not abort the remaining addresses.
             results.append({"lat": None, "lon": None, "display_name": addr, "error": str(e)})
     return results
 
@@ -599,7 +603,10 @@ def batch_geocode(addresses: list[str], *,
                         hit.setdefault("score", geocode_quality_score(hit))
                         resolved = hit
                         break
-                except Exception:
+                except Exception as exc:
+                    # Intentional: provider-level failures should fall through to
+                    # retries or the next provider while preserving the last error.
+                    resolved["error"] = str(exc)
                     continue
             if resolved.get("lat") is not None:
                 break

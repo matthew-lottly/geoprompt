@@ -13,9 +13,9 @@
 ## End-to-End Flow
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Inputs<br/>GeoJSON, CSV, WKT, optional cloud/db] --> B[Ingestion Layer<br/>read_data, read_table, iter_data]
-    B --> C[Policy and Safety Gates<br/>URL validation, expression safety, fallback policy]
+    B --> C[Policy and Safety Gates<br/>URL validation, safe expression evaluation, fallback policy]
     C --> D[Processing Modules<br/>Frame, Geometry, Network, Raster, Stats]
     D --> E[Scenario and Reporting<br/>compare, summary, resilience, benchmark]
     E --> F[Outputs<br/>GeoJSON, CSV, JSON, HTML, Markdown]
@@ -28,28 +28,19 @@ This flow chart is intentionally kept in Mermaid so it renders directly on GitHu
 
 ---
 
-## Neighborhood Pressure — Live Output
-
-<p align="center">
-  <img src="assets/neighborhood-pressure-review-live.png" alt="GeoPrompt neighborhood pressure chart showing scored point, line, and polygon features across a geographic study area" width="720">
-</p>
-
-<p align="center"><em>Neighborhood pressure scores computed on mixed-geometry features — points sized and colored by score, service-zone polygons shown as bounding extents, corridor line geometry overlaid. Generated from <code>geoprompt-demo</code> against the built-in sample corpus.</em></p>
-
----
-
 ## Documentation
 
 | Category | Link |
-|---|---|
+| --- | --- |
 | Getting started | [Start here](docs/start-here.md) · [Quickstart cookbook](docs/quickstart-cookbook.md) |
 | API | [API stability](docs/api-stability.md) · [Reference guide](docs/reference-api.md) |
 | Workflows | [Flagship workflows](docs/flagship-workflows.md) · [Network recipes](docs/network-scenario-recipes.md) · [Connectors and recipes](docs/connectors-and-recipes.md) |
 | Outputs and reporting | [Notebook gallery](docs/notebook-gallery.md) · [Benchmarks and proof](docs/benchmarks.md) · [Output columns](docs/output-columns.md) |
 | Interop | [GeoPandas interop](docs/geopandas-interop-and-reporting.md) · [Migration from GeoPandas](docs/migration-from-geopandas.md) · [Migration from ArcPy](docs/migration-from-arcpy.md) |
 | Environment | [Optional dependencies](docs/environment-and-optional-dependencies.md) · [Deployment guide](docs/deployment-guide.md) |
-| Trust and security | [Threat model](docs/threat-model.md) · [Exception taxonomy](docs/exception-taxonomy.md) · [API architecture](docs/API_ARCHITECTURE.md) |
+| Trust and security | [Threat model](docs/threat-model.md) · [Exception taxonomy](docs/exception-taxonomy.md) · [API architecture](docs/API_ARCHITECTURE.md) · [Trust profiles and migration](docs/trust-profiles-and-migration.md) |
 | Extension and governance | [Extending GeoPrompt](docs/extending-geoprompt.md) · [Governance and support](docs/governance-and-support.md) |
+| Release governance | [Trust governance and SLOs](docs/trust-governance-slos.md) |
 | Help | [Troubleshooting](docs/troubleshooting.md) · [When to use GeoPrompt](docs/when-to-use-geoprompt.md) |
 
 ---
@@ -59,7 +50,7 @@ This flow chart is intentionally kept in Mermaid so it renders directly on GitHu
 GeoPrompt uses runtime tier labels to distinguish hardened workflows from exploratory ones.
 
 | Tier | Status | Examples |
-|---|---|---|
+| --- | --- | --- |
 | **Stable** | Verified and recommended for production analyst workflows | `frame`, `geometry`, `network`, scenario reporting |
 | **Beta** | Supported when relevant extras are installed | `viz`, `db`, `raster`, `service`, `compare` |
 | **Experimental** | Useful but still evolving | Advanced domain, ML, and imagery helpers |
@@ -74,6 +65,7 @@ Use stable and beta tiers for stakeholder-facing work. Treat simulation-only hel
 GeoPrompt is built for the full analyst-to-decision-support workflow: scenario comparison, resilience screening, routing, report generation, and stakeholder-ready outputs from a single package surface. It does not require GeoPandas or matplotlib for core workflows — plotting, mapping, and richer interop stay in optional extras.
 
 Choose GeoPrompt when you need:
+
 - Mixed-geometry workflows (points, lines, polygons, multi-part) without a GIS desktop dependency
 - Scenario comparison and resilience reporting as first-class outputs, not post-processing steps
 - Transparent trust semantics — capability guards, fallback warnings, and degraded-mode detection built in
@@ -677,7 +669,7 @@ The default demo command writes `outputs/geoprompt_demo_report.json` and `output
 - top area-similarity rows ranked across polygon-like features
 - a bounding-box query count for the default valley review window
 - a GeoJSON export in `outputs/geoprompt_demo_features.geojson`
-- a committed pressure plot in `assets/neighborhood-pressure-review-live.png`
+- chart-ready output artifacts designed for report inclusion (PNG/HTML/Markdown/JSON)
 
 CI validation is defined in `.github/workflows/geoprompt-ci.yml` and runs tests, demo generation, comparison validation, and package builds.
 It also runs `python -m twine check dist/*` so distribution metadata is validated before release.
@@ -784,6 +776,7 @@ geoprompt capability-report
 ```
 
 Key trust properties:
+
 - Optional dependency absence emits `FallbackWarning` — never silently returns wrong results
 - `FallbackPolicy.ERROR` mode raises `DependencyError` on any degraded-path call
 - Expression evaluation uses an AST allowlist — no `eval()` on user-supplied strings in production paths
