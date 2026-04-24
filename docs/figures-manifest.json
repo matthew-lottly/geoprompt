@@ -1,13 +1,13 @@
 {
   "figures": [
     {
-      "path": "assets/neighborhood-pressure-review-live.png",
+      "path": "assets/neighborhood-pressure-review-live.svg",
       "caption": "Neighborhood pressure review generated from the package demo.",
-      "alt_text": "Map-style neighborhood pressure review screenshot highlighting zones under stress.",
+      "alt_text": "Map-style neighborhood pressure review graphic showing stress gradients across a utility network.",
       "data_source": "Representative synthetic utility sample data from the repository fixtures.",
       "generation_script": "geoprompt-demo",
-      "last_verified": "2026-04-20",
-      "representative_note": "Synthetic but shaped to reflect operational screening workflows."
+      "last_verified": "2026-04-24",
+      "representative_note": "Regenerated as SVG for publication-quality documentation and clearer labels."
     },
     {
       "path": "assets/portfolio-scorecard-example.svg",
@@ -62,6 +62,24 @@
       "generation_script": "generate_assets.py",
       "last_verified": "2026-04-24",
       "representative_note": "Planning visual for sequencing migration work by impact and complexity."
+    },
+    {
+      "path": "assets/formula-parity-audit.svg",
+      "caption": "Formula parity audit chart for decay and interaction equations.",
+      "alt_text": "Equation audit chart with multiple decay curves, tolerance references, and pass indicators.",
+      "data_source": "Deterministic equation fixtures and analytic references in test suite.",
+      "generation_script": "generate_assets.py",
+      "last_verified": "2026-04-24",
+      "representative_note": "Trust-facing visual showing equation behavior and tolerance boundaries."
+    },
+    {
+      "path": "assets/tool-reliability-audit.svg",
+      "caption": "Tool reliability audit scorecard.",
+      "alt_text": "Scorecard table summarizing pass and optional parity outcomes for reporting and conversion tools.",
+      "data_source": "Scenario report fixtures and format bridge checks in the test suite.",
+      "generation_script": "generate_assets.py",
+      "last_verified": "2026-04-24",
+      "representative_note": "High-level publication visual for tool reliability posture and validation policy."
     }
   ]
 }

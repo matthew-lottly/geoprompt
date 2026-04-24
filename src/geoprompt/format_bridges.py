@@ -26,7 +26,7 @@ def _ensure_records(data: Any) -> RecordList:
             text = path.read_text(encoding="utf-8")
             try:
                 parsed = json.loads(text)
-            except Exception as exc:
+            except (json.JSONDecodeError, OSError, TypeError, ValueError) as exc:
                 warnings.warn(
                     f"Malformed JSON in {path}; raising DataError instead of silently returning [].",
                     UserWarning,
@@ -661,7 +661,7 @@ def from_wkt_batch(wkt_strings: list[str]) -> list[dict | None]:
             try:
                 geom = _sw.loads(wkt)
                 results.append(geom.__geo_interface__)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 results.append(None)
         return results
     # Minimal fallback for POINT only
@@ -693,7 +693,7 @@ def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
                 continue
             try:
                 results.append(_sg.shape(geom).wkt)
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 results.append("GEOMETRYCOLLECTION EMPTY")
         return results
     # Minimal fallback for Point/LineString/Polygon
@@ -715,6 +715,6 @@ def to_wkt_batch(geometries: list[dict | None]) -> list[str]:
                 results.append(f"POLYGON (({ring}))")
             else:
                 results.append("GEOMETRYCOLLECTION EMPTY")
-        except Exception:
+        except (TypeError, ValueError, IndexError, KeyError):
             results.append("GEOMETRYCOLLECTION EMPTY")
     return results

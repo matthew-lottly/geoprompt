@@ -42,6 +42,18 @@ Business context: use this to prioritize high-risk assets and demonstrate mitiga
 
 Business context: use this to sequence migration workstreams with fast wins first and high-effort investments staged.
 
+### Formula parity audit
+
+![Formula parity audit chart with decay curves and tolerance notes](../assets/formula-parity-audit.svg)
+
+Business context: use this to explain equation-level trust and deterministic tolerance checks to technical reviewers.
+
+### Tool reliability audit
+
+![Tool reliability audit scorecard for scenario reports and geometry bridges](../assets/tool-reliability-audit.svg)
+
+Business context: use this to summarize reliability checks for scenario exports, geometry conversion bridges, and optional ecosystem parity.
+
 ## Scored gallery
 
 | Notebook or output lane | Purpose | Typical runtime | Dependencies | Primary output files | Trust profile |

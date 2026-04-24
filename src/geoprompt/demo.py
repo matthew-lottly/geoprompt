@@ -12,7 +12,7 @@ from .io import read_features, write_geojson, write_json
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "sample_features.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "outputs"
-DEFAULT_ASSET_PATH = PROJECT_ROOT / "assets" / "neighborhood-pressure-review-live.png"
+DEFAULT_ASSET_PATH = PROJECT_ROOT / "assets" / "neighborhood-pressure-review-live.svg"
 
 logger = logging.getLogger("geoprompt")
 

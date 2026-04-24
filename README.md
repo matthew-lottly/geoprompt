@@ -584,8 +584,13 @@ geoprompt/
 |   `-- sample_points.json
 |-- assets/
 |   |-- before-after-scenario-example.svg
-|   |-- neighborhood-pressure-review-live.png
+|   |-- formula-parity-audit.svg
+|   |-- migration-effort-benefit-quadrant.svg
+|   |-- neighborhood-pressure-review-live.svg
+|   |-- network-restoration-unmet-demand.svg
 |   |-- portfolio-scorecard-example.svg
+|   |-- resilience-risk-heatmap-mitigation.svg
+|   |-- tool-reliability-audit.svg
 |   `-- restoration-storyboard-example.svg
 |-- docs/
 |   |-- api-stability.md

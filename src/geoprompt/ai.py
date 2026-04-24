@@ -153,7 +153,7 @@ def adaptive_chunk_size(
         try:
             import psutil  # type: ignore[import-untyped]
             available_memory_mb = int(psutil.virtual_memory().available / (1024 * 1024))
-        except Exception:
+        except (ImportError, AttributeError, OSError, ValueError):
             available_memory_mb = 2048
     target_bytes = int(available_memory_mb * 1024 * 1024 * 0.25)
     chunk = max(100, target_bytes // max(avg_row_bytes, 1))
@@ -576,7 +576,7 @@ def search_docs(
     for md in sorted(docs_path.rglob("*.md")):
         try:
             text = md.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
+        except OSError:
             continue
         text_lower = text.lower()
         score = sum(text_lower.count(t) for t in tokens)
@@ -599,7 +599,7 @@ class WorkspaceMemory:
         if self._path.exists():
             try:
                 self._data = json.loads(self._path.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, json.JSONDecodeError):
                 self._data = {}
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -632,7 +632,7 @@ def with_retry(
     for attempt in range(max_attempts):
         try:
             return func(*args, **kwargs)
-        except Exception as exc:
+        except (RuntimeError, OSError, ValueError, TypeError, KeyError, LookupError, AssertionError) as exc:
             last_exc = exc
             if attempt < max_attempts - 1:
                 wait = backoff_factor * (2 ** attempt)
@@ -646,12 +646,12 @@ def detect_hardware_profile() -> dict[str, Any]:
     """Return a hardware profile dict for execution tuning."""
     try:
         cpu_count = os.cpu_count() or 1
-    except Exception:
+    except (AttributeError, OSError, TypeError):
         cpu_count = 1
     try:
         import psutil  # type: ignore[import-untyped]
         mem_mb = int(psutil.virtual_memory().total / (1024 * 1024))
-    except Exception:
+    except (ImportError, AttributeError, OSError, ValueError):
         mem_mb = 4096  # conservative default
     return {
         "platform": platform.system(),
@@ -1150,7 +1150,7 @@ def runtime_doctor(
             checks["gpu_cuda"] = {"available": gpu_available}
             if not gpu_available:
                 recommendations.append("No CUDA GPU detected — inference will run on CPU.")
-        except Exception:
+        except (ImportError, AttributeError, RuntimeError, OSError, ValueError):
             checks["gpu_cuda"] = {"available": False, "note": "torch not installed"}
 
     if check_auth:

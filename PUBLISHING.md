@@ -22,7 +22,7 @@
 1. Create a new empty repository named `geoprompt`.
 2. Copy this project folder into the new repository root.
 3. Preserve `data/`, `src/`, `tests/`, `docs/`, and `pyproject.toml`.
-4. Keep the committed pressure plot in `assets/neighborhood-pressure-review-live.png` and regenerate it with `geoprompt-demo` if the package behavior changes.
+4. Keep the committed pressure plot in `assets/neighborhood-pressure-review-live.svg` and regenerate it with `geoprompt-demo` if the package behavior changes.
 5. Preserve the GitHub Actions workflows in `.github/workflows/geoprompt-ci.yml` and `.github/workflows/publish-pypi.yml` so validation and publishing follow the package.
 6. Reference [docs/architecture.md](docs/architecture.md) and [docs/demo-storyboard.md](docs/demo-storyboard.md) from the README when polishing the public pitch.
 7. Verify README rendering strategy: keep Mermaid flow chart for GitHub and ensure PUBLISHING/release notes acknowledge reduced Mermaid rendering on PyPI (text fallback guidance required in release notes).
