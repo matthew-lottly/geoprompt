@@ -222,11 +222,44 @@ def build_app() -> Any:
         version="0.1.0",
         description="Lightweight API for GeoPrompt spatial analysis workflows.",
     )
+    # J7 – load service-hardening utilities
+    from ._service_hardening import (
+        PayloadTooLargeError,
+        PolicySimulator,
+        audit_secret_sources,
+        check_auth,
+        check_data_residency,
+        classify_operation,
+        redact_payload,
+        run_deployment_smoke_checks,
+        scan_for_pii,
+        validate_compliance_profile,
+        validate_dashboard_integrity,
+        validate_geometry_payload,
+        validate_payload_complexity,
+        verify_request_signature,
+    )
+
     expected_api_key = os.getenv("GEOPROMPT_API_KEY")
     required_roles = {role.strip().lower() for role in os.getenv("GEOPROMPT_REQUIRED_ROLES", "").split(",") if role.strip()}
     rate_limit_per_minute = int(os.getenv("GEOPROMPT_RATE_LIMIT_PER_MINUTE", "0") or "0")
+    # J7.4 – redact sensitive fields from audit logs
+    _redact_fields: frozenset[str] = frozenset(os.getenv("GEOPROMPT_REDACT_FIELDS", "").split(",")) - {""}
+    # J7.3 – enable PII-blocking middleware (default off; set GEOPROMPT_PII_BLOCKING=true)
+    _pii_blocking: bool = os.getenv("GEOPROMPT_PII_BLOCKING", "false").lower() in {"1", "true", "yes"}
+    # J7.5 – payload complexity limit (default 10 MiB)
+    _max_payload_bytes: int = int(os.getenv("GEOPROMPT_MAX_PAYLOAD_BYTES", str(10 * 1024 * 1024)))
+    # J7.6 – optional HMAC request signing
+    _signing_secret: str | None = os.getenv("GEOPROMPT_HMAC_SECRET") or None
     request_windows: dict[str, list[float]] = {}
     job_manager = ServiceJobManager(os.getenv("GEOPROMPT_JOB_STORE"))
+
+    # J7.7 – audit secret sources on startup (logs weak/missing secrets)
+    _secret_audit = audit_secret_sources()
+    if _secret_audit["weak"]:
+        logger.warning("J7.7 secret-source audit: weak secrets detected: %s", _secret_audit["weak"])
+    if _secret_audit["missing"]:
+        logger.info("J7.7 secret-source audit: missing (optional) secrets: %s", _secret_audit["missing"])
 
     @app.middleware("http")
     async def audit_requests(request, call_next):
@@ -234,12 +267,19 @@ def build_app() -> Any:
         request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
         actor = request.headers.get("x-api-key") or getattr(getattr(request, "client", None), "host", "anonymous")
         actor_roles = {role.strip().lower() for role in request.headers.get("x-roles", "").split(",") if role.strip()}
+
+        # J7.2 – tag every request with its operation class for structured audit logging
+        operation_class = classify_operation(request.url.path)
+
         if expected_api_key and request.url.path != "/health":
             provided = request.headers.get("x-api-key")
             if provided != expected_api_key:
                 response = fastapi.responses.JSONResponse({"detail": "unauthorized", "request_id": request_id}, status_code=401)
                 response.headers["x-request-id"] = request_id
-                logger.warning("request_id=%s unauthorized path=%s", request_id, request.url.path)
+                logger.warning(
+                    "request_id=%s op=%s unauthorized path=%s",
+                    request_id, operation_class, request.url.path,
+                )
                 return response
         if required_roles and request.url.path not in {"/health", "/ops/metrics"} and not actor_roles.intersection(required_roles):
             response = fastapi.responses.JSONResponse({"detail": "forbidden", "request_id": request_id}, status_code=403)
@@ -254,10 +294,55 @@ def build_app() -> Any:
                 return response
             recent.append(now)
             request_windows[actor] = recent
+
+        # J7.6 – optional HMAC signature verification
+        if _signing_secret and request.url.path not in {"/health"}:
+            sig = request.headers.get("x-geoprompt-signature")
+            ts = request.headers.get("x-geoprompt-timestamp")
+            if sig is None or ts is None:
+                response = fastapi.responses.JSONResponse(
+                    {"detail": "missing signature headers (x-geoprompt-signature, x-geoprompt-timestamp)", "request_id": request_id},
+                    status_code=401,
+                )
+                response.headers["x-request-id"] = request_id
+                return response
+            body = await request.body()
+            try:
+                verify_request_signature(body, provided_signature=sig, secret=_signing_secret, timestamp=ts)
+            except ValueError as exc:
+                response = fastapi.responses.JSONResponse(
+                    {"detail": str(exc), "request_id": request_id}, status_code=401
+                )
+                response.headers["x-request-id"] = request_id
+                return response
+
+        # J7.5 – payload complexity guardrails for mutating requests
+        if request.method in {"POST", "PUT", "PATCH"} and request.url.path not in {"/health"}:
+            try:
+                raw = await request.body()
+                if raw:
+                    try:
+                        parsed = json.loads(raw)
+                        validate_payload_complexity(parsed, max_bytes=_max_payload_bytes)
+                    except PayloadTooLargeError as exc:
+                        response = fastapi.responses.JSONResponse(
+                            {"detail": str(exc), "request_id": request_id}, status_code=413
+                        )
+                        response.headers["x-request-id"] = request_id
+                        return response
+                    except (json.JSONDecodeError, ValueError):
+                        pass  # non-JSON bodies are not validated here
+            except Exception:
+                pass  # body already consumed by signature check above; skip silently
+
         response = await call_next(request)
         duration_ms = (time.perf_counter() - start) * 1000.0
         response.headers["x-request-id"] = request_id
-        logger.info("request_id=%s method=%s path=%s status=%s duration_ms=%.2f", request_id, request.method, request.url.path, response.status_code, duration_ms)
+        logger.info(
+            "request_id=%s op=%s method=%s path=%s status=%s duration_ms=%.2f",
+            request_id, operation_class, request.method, request.url.path,
+            response.status_code, duration_ms,
+        )
         return response
 
     # --- Request / Response models ---
@@ -373,6 +458,67 @@ def build_app() -> Any:
         )
 
     return app
+    # J7.8 – Policy simulation endpoint (dry-run governance preview)
+    class PolicySimulateRequest(BaseModel):
+        path: str
+        payload: Any = None
+        actor_roles: list[str] = []
+        pii_blocking: bool = True
+        max_payload_bytes: int = 10 * 1024 * 1024
+        signature_required: bool = False
+
+    @app.post("/ops/policy-simulate")
+    def policy_simulate(req: PolicySimulateRequest) -> dict[str, Any]:
+        simulator = PolicySimulator(
+            required_roles=set(required_roles),
+            max_payload_bytes=req.max_payload_bytes,
+            pii_blocking=req.pii_blocking,
+            signature_required=req.signature_required,
+        )
+        return simulator.simulate(
+            req.path,
+            req.payload,
+            actor_roles=set(req.actor_roles),
+        )
+
+    # J7.10 – Compliance profile validation endpoint
+    class ComplianceCheckRequest(BaseModel):
+        profile: str
+        config: dict[str, Any]
+
+    @app.post("/ops/compliance-check")
+    def compliance_check(req: ComplianceCheckRequest) -> dict[str, Any]:
+        try:
+            gaps = validate_compliance_profile(req.profile, req.config)
+        except KeyError:
+            raise fastapi.HTTPException(status_code=400, detail=f"Unknown compliance profile: {req.profile!r}")
+        return {"profile": req.profile, "compliant": len(gaps) == 0, "gaps": gaps}
+
+    # J7.13 – Deployment readiness smoke-check endpoint
+    @app.get("/ops/readiness")
+    def readiness_check() -> dict[str, Any]:
+        result = run_deployment_smoke_checks()
+        status_code = 200 if result.ready else 503
+        summary = result.summary()
+        if not result.ready:
+            raise fastapi.HTTPException(status_code=status_code, detail=summary)
+        return summary
+
+    # J7.7 – Secret source audit endpoint (returns redacted report)
+    @app.get("/ops/secret-audit")
+    def secret_audit() -> dict[str, Any]:
+        report = audit_secret_sources()
+        # Never return actual values — only the status report
+        return {"report": report["report"], "weak_count": len(report["weak"]), "missing_count": len(report["missing"])}
+
+    # J7.9 – Governance dashboard integrity endpoint
+    @app.get("/ops/dashboard-integrity")
+    def dashboard_integrity() -> dict[str, Any]:
+        metrics = job_manager.metrics()
+        violations = validate_dashboard_integrity(metrics)
+        return {"metrics": metrics, "violations": violations, "integrity_ok": len(violations) == 0}
+
+    return app
 
 
 # Convenience: create the app at module level for ``uvicorn geoprompt.service:app``
@@ -381,4 +527,8 @@ try:
 except RuntimeError:
     app = None  # FastAPI not installed â€” module can still be imported
 
-__all__ = ["ServiceJobManager", "build_app", "service_benchmark_report"]
+__all__ = [
+    "ServiceJobManager",
+    "build_app",
+    "service_benchmark_report",
+]

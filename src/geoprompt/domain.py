@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from ._exceptions import failure_payload
 from .quality import simulation_only
 
 # ---------------------------------------------------------------------------
@@ -528,9 +529,21 @@ def traffic_microsim_bridge(
         return {"returncode": result.returncode, "stdout": result.stdout[:4000],
                 "stderr": result.stderr[:2000]}
     except FileNotFoundError:
-        return {"returncode": -1, "error": f"{simulator} not found on PATH"}
+        return failure_payload(
+            code="MICROSIM_EXECUTABLE_NOT_FOUND",
+            category="dependency",
+            remediation="Install the configured simulator or provide a valid command path in config['command'].",
+            error=f"{simulator} not found on PATH",
+            returncode=-1,
+        )
     except subprocess.TimeoutExpired:
-        return {"returncode": -2, "error": "simulation timed out"}
+        return failure_payload(
+            code="MICROSIM_TIMEOUT",
+            category="timeout",
+            remediation="Increase config['timeout'] or simplify the simulation scenario inputs.",
+            error="simulation timed out",
+            returncode=-2,
+        )
 
 
 def traffic_signal_timing(
@@ -542,7 +555,13 @@ def traffic_signal_timing(
     n = len(phases)
     L = lost_time_s * n
     if Y >= 1:
-        return {"error": "oversaturated", "sum_critical_ratios": Y}
+        return failure_payload(
+            code="SIGNAL_OVERSATURATED",
+            category="validation",
+            remediation="Reduce critical ratios so their sum is below 1.0 before computing timing.",
+            error="oversaturated",
+            sum_critical_ratios=Y,
+        )
     Co = (1.5 * L + 5) / (1 - Y)
     Co = max(cycle_range[0], min(cycle_range[1], Co))
     green_total = Co - L
@@ -805,9 +824,21 @@ def groundwater_flow_bridge(config: Dict[str, Any]) -> Dict[str, Any]:
                            capture_output=True, text=True, timeout=600)
         return {"returncode": r.returncode, "stdout": r.stdout[:4000]}
     except FileNotFoundError:
-        return {"returncode": -1, "error": f"{exe} not found"}
+        return failure_payload(
+            code="MODFLOW_EXECUTABLE_NOT_FOUND",
+            category="dependency",
+            remediation="Install MODFLOW or set config['modflow_exe'] to a valid executable path.",
+            error=f"{exe} not found",
+            returncode=-1,
+        )
     except subprocess.TimeoutExpired:
-        return {"returncode": -2, "error": "MODFLOW timed out"}
+        return failure_payload(
+            code="MODFLOW_TIMEOUT",
+            category="timeout",
+            remediation="Increase timeout or reduce simulation complexity.",
+            error="MODFLOW timed out",
+            returncode=-2,
+        )
 
 
 def wellhead_protection_area(
@@ -854,9 +885,21 @@ def floodplain_mapping_bridge(config: Dict[str, Any]) -> Dict[str, Any]:
                            capture_output=True, text=True, timeout=600)
         return {"returncode": r.returncode, "stdout": r.stdout[:4000]}
     except FileNotFoundError:
-        return {"returncode": -1, "error": f"{exe} not found"}
+        return failure_payload(
+            code="HECRAS_EXECUTABLE_NOT_FOUND",
+            category="dependency",
+            remediation="Install HEC-RAS or set config['hecras_exe'] to a valid executable path.",
+            error=f"{exe} not found",
+            returncode=-1,
+        )
     except subprocess.TimeoutExpired:
-        return {"returncode": -2, "error": "HEC-RAS timed out"}
+        return failure_payload(
+            code="HECRAS_TIMEOUT",
+            category="timeout",
+            remediation="Increase timeout or simplify the floodplain model before retrying.",
+            error="HEC-RAS timed out",
+            returncode=-2,
+        )
 
 
 def coastal_erosion_model(

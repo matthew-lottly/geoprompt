@@ -26,12 +26,33 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Generator, Sequence
 
+import warnings
+from ._exceptions import FallbackWarning
 from .safe_expression import (
     ExpressionExecutionError,
     ExpressionValidationError,
     evaluate_safe_expression,
 )
 logger = logging.getLogger("geoprompt")
+
+
+def _failure_payload(
+    *,
+    code: str,
+    category: str,
+    remediation: str,
+    error: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build a consistent failure payload for dictionary-returning helpers."""
+    payload: dict[str, Any] = {
+        "code": code,
+        "category": category,
+        "remediation": remediation,
+        "error": error,
+    }
+    payload.update(extra)
+    return payload
 
 # ---------------------------------------------------------------------------
 # Environment settings (1124)
@@ -1826,6 +1847,17 @@ async def async_tool_execute(
         return ToolResult(tool_name=getattr(func, "__name__", "async_tool"), status="success", output=result, elapsed_seconds=elapsed)
     except Exception as exc:
         elapsed = time.time() - t0
+        logger.warning(
+            "async_tool_execute_failed",
+            extra={
+                "event": "async_tool_execute_failed",
+                "tool_name": getattr(func, "__name__", "async_tool"),
+                "elapsed_seconds": elapsed,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+            exc_info=True,
+        )
         return ToolResult(tool_name=getattr(func, "__name__", "async_tool"), status="failure", messages=[str(exc)], elapsed_seconds=elapsed)
 
 
@@ -1849,8 +1881,17 @@ class Observable:
         for cb in self._subscribers:
             try:
                 cb(value)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "observable_subscriber_failed",
+                    extra={
+                        "event": "observable_subscriber_failed",
+                        "subscriber": getattr(cb, "__name__", repr(cb)),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                    exc_info=True,
+                )
 
     @property
     def subscriber_count(self) -> int:
@@ -1875,7 +1916,24 @@ def notify_webhook(
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return {"status": resp.status, "sent": True}
     except (urllib.error.HTTPError, urllib.error.URLError, OSError, socket.timeout) as exc:
-        return {"status": 0, "sent": False, "error": str(exc)}
+        logger.warning(
+            "webhook_notification_failed",
+            extra={
+                "event": "webhook_notification_failed",
+                "url": url,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+            exc_info=True,
+        )
+        return _failure_payload(
+            code="WEBHOOK_DELIVERY_FAILED",
+            category="network",
+            remediation="Verify webhook URL reachability, credentials, and timeout settings.",
+            error=str(exc),
+            status=0,
+            sent=False,
+        )
 
 
 def notify_email_stub(
@@ -2351,6 +2409,12 @@ def identity_overlay(frame: _Any, identity_frame: _Any) -> _Any:
                 results.append(dict(r))
         return type(frame).from_records(results)
     except ImportError:
+        warnings.warn(
+            "shapely not installed; identity() returning input frame unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return frame
 
 
@@ -2389,6 +2453,12 @@ def erase(frame: _Any, erase_frame: _Any) -> _Any:
                 results.append(dict(r))
         return type(frame).from_records(results)
     except ImportError:
+        warnings.warn(
+            "shapely not installed; erase() returning input frame unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return frame
 
 
@@ -2428,15 +2498,20 @@ def select_by_location(frame: _Any, select_frame: _Any, *,
                 selected.append(r)
         return type(frame).from_records(selected)
     except ImportError:
+        warnings.warn(
+            "shapely not installed; select_by_location() returning input frame unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return frame
 
 
 def select_by_attributes(frame: _Any, expression: str) -> _Any:
     """Select features from *frame* using a SQL-style WHERE expression.
 
-    Evaluates *expression* for each row using Python's :func:`eval` with
-    the row's fields available as variables.  Only simple Python expressions
-    are supported (no subqueries).
+    Evaluates *expression* for each row using the safe expression engine.
+    Only simple Python expressions are supported (no subqueries).
 
     Args:
         frame: Input :class:`~geoprompt.GeoPromptFrame`.
@@ -2446,9 +2521,6 @@ def select_by_attributes(frame: _Any, expression: str) -> _Any:
     Returns:
         A new frame containing only matching features.
 
-    Warning:
-        *expression* is evaluated with :func:`eval`.  Only use this function
-        with trusted input expressions.
     """
     rows = list(frame)
     selected = []
@@ -2456,8 +2528,17 @@ def select_by_attributes(frame: _Any, expression: str) -> _Any:
         try:
             if evaluate_safe_expression(expression, r):
                 selected.append(r)
-        except (ExpressionExecutionError, ExpressionValidationError, ValueError):
-            pass
+        except (ExpressionExecutionError, ExpressionValidationError, ValueError) as exc:
+            logger.warning(
+                "select_by_attributes_expression_failed",
+                extra={
+                    "event": "select_by_attributes_expression_failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+                exc_info=True,
+            )
+            raise ValueError(f"invalid attribute selection expression: {expression}") from exc
     return type(frame).from_records(selected)
 
 
@@ -2491,6 +2572,12 @@ def thiessen_polygons(frame: _Any) -> _Any:
             results.append(nr)
         return type(frame).from_records(results)
     except ImportError:
+        warnings.warn(
+            "shapely not installed; thiessen_polygons() returning input frame unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return frame
 
 
@@ -2526,5 +2613,11 @@ def multiple_ring_buffer(frame: _Any, distances: list[float]) -> _Any:
                 prev = buf
         return type(frame).from_records(results)
     except ImportError:
+        warnings.warn(
+            "shapely not installed; multiple_ring_buffer() returning input frame unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return frame
 

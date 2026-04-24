@@ -2,6 +2,8 @@
 
 This matrix distinguishes hardened workflows from exploratory ones.
 
+Runtime tier labels map to this table as: stable -> Hardened, beta -> Supported optional, experimental -> Experimental, simulation_only -> Simulation-only.
+
 | Tier | Meaning | Examples |
 | --- | --- | --- |
 | Hardened | Verified regularly and recommended for production-style analyst workflows | frame, geometry, network, scenario reporting |

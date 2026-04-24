@@ -191,6 +191,25 @@ from .ecosystem import (
     recommend_recipes, register_migration, register_plugin,
     register_recipe, run_plugin, run_recipe,
 )
+from .api_contract import (
+    build_public_api_contract,
+    load_snapshot as load_public_api_contract_snapshot,
+    save_snapshot as save_public_api_contract_snapshot,
+)
+from ._capabilities import (
+    CAPABILITY_REGISTRY,
+    DEGRADED_MODE_GUARANTEES,
+    CI_EXTRAS_PROFILES,
+    CapabilitySpec,
+    ChunkDecision,
+    ChunkMode,
+    DegradedModePolicy,
+    FailureMode,
+    capability_status,
+    check_capability,
+    estimate_chunk_size,
+    require_capability,
+)
 from .equations import (accessibility_gini, age_adjusted_failure_rate, area_similarity,
                         composite_resilience_index, coordinate_distance,
                         corridor_strength, directional_alignment,
@@ -490,6 +509,14 @@ from .workspace import (GeoPromptWorkspace, JobSpec, LineageTracker,
                         build_workspace_manifest, export_provenance_bundle,
                         geopromptworkspace, jobspec, lineagetracker,
                         render_manifest_markdown)
+from .workflow import (
+    DataPipeline,
+    IOConfig,
+    JoinConfig,
+    ReportBuilder,
+    ReportConfig,
+    ScenarioRunner,
+)
 from .viz import (BASEMAP_PRESETS, MAP_STYLE_PACKS,
                   RESILIENCE_STYLE_PRESETS, SYMBOL_PRESETS,
                   audit_html_accessibility, before_after_comparison,
@@ -670,6 +697,8 @@ def capability_report() -> dict[str, object]:
         ``"fallback_policy"`` listing feature names in each state.
     """
     import importlib as _importlib
+    import importlib.metadata as _metadata
+    from datetime import datetime, timezone
 
     def _available(pkg: str) -> bool:
         try:
@@ -678,11 +707,20 @@ def capability_report() -> dict[str, object]:
         except ImportError:
             return False
 
-    from ._exceptions import FALLBACK_POLICY, FallbackPolicy
+    def _module_version(pkg: str) -> str | None:
+        try:
+            return _metadata.version(pkg)
+        except _metadata.PackageNotFoundError:
+            return None
+
+    from ._exceptions import FALLBACK_POLICY
 
     enabled: list[str] = []
     degraded: list[str] = []
     disabled: list[str] = []
+    disabled_reasons: dict[str, str] = {}
+    degraded_reasons: dict[str, str] = {}
+    optional_dependency_versions: dict[str, str | None] = {}
 
     # Core always available
     enabled.extend(["geojson_io", "csv_io", "geometry_engine", "crs", "safe_expression"])
@@ -706,24 +744,45 @@ def capability_report() -> dict[str, object]:
         ("dxf_reader", "fiona", ""),
     ]
     for feature, pkg, reason in _checks:
+        optional_dependency_versions[pkg] = _module_version(pkg)
         if _available(pkg):
             enabled.append(feature)
         elif reason:
             degraded.append(f"{feature} ({reason})")
+            degraded_reasons[feature] = reason
         else:
             disabled.append(feature)
+            disabled_reasons[feature] = f"{pkg} not installed"
+
+    package_version = _module_version("geoprompt") or __version__
+    checked_at_utc = datetime.now(timezone.utc).isoformat()
 
     return {
+        "schema_version": "1.0",
         "enabled": enabled,
         "disabled": disabled,
         "degraded": degraded,
+        "disabled_reasons": disabled_reasons,
+        "degraded_reasons": degraded_reasons,
         "fallback_policy": FALLBACK_POLICY.mode,
+        "package_version": package_version,
+        "optional_dependency_versions": optional_dependency_versions,
+        "checked_at_utc": checked_at_utc,
     }
 
 
 __all__ = [
     "__version__",
     "capability_report",
+    "build_public_api_contract",
+    "load_public_api_contract_snapshot",
+    "save_public_api_contract_snapshot",
+    "DataPipeline",
+    "IOConfig",
+    "JoinConfig",
+    "ReportBuilder",
+    "ReportConfig",
+    "ScenarioRunner",
     # --- ai ---
     "ExecutionCache",
     "WorkspaceMemory",

@@ -10,17 +10,20 @@ rather than trying to recreate a full raster platform. They support either:
 from __future__ import annotations
 
 import importlib
+import logging
 import math as _math
 from pathlib import Path
 from typing import Any, Sequence, Union
 
 from .frame import GeoPromptFrame
 from .geometry import geometry_type, geometry_within
-from .safe_expression import evaluate_safe_expression
+from .safe_expression import ExpressionExecutionError, ExpressionValidationError, evaluate_safe_expression
 from .table import PromptTable
 
 
 RasterLike = Union[dict, str, Path]
+
+_logger = logging.getLogger(__name__)
 
 
 def _load_rasterio() -> Any:
@@ -806,8 +809,19 @@ def raster_lazy_algebra(
             else:
                 try:
                     row_vals.append(evaluate_safe_expression(expression, local_vars))
-                except Exception:
-                    row_vals.append(None)
+                except (ExpressionValidationError, ExpressionExecutionError, ValueError, TypeError) as exc:
+                    _logger.warning(
+                        "raster_lazy_algebra_expression_failed",
+                        extra={
+                            "event": "raster_lazy_algebra_expression_failed",
+                            "row": r,
+                            "col": c,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                        exc_info=True,
+                    )
+                    raise ValueError(f"invalid raster algebra expression: {expression}") from exc
         result.append(row_vals)
 
     return {"data": result, "transform": first["transform"], "nodata": None, "width": cols, "height": rows}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import importlib
 import json
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from heapq import nlargest, nsmallest
@@ -31,6 +32,8 @@ SpatialJoinPredicate = Literal["intersects", "within", "contains"]
 SpatialJoinMode = Literal["inner", "left"]
 AggregationName = Literal["sum", "mean", "min", "max", "first", "count"]
 FillMethod = Literal["ffill", "bfill"]
+
+_logger = logging.getLogger(__name__)
 
 
 Coordinate = tuple[float, float]
@@ -1044,7 +1047,17 @@ class GeoPromptFrame:
                 else:
                     try:
                         new_row[key] = func(val)
-                    except Exception:
+                    except (TypeError, ValueError, AttributeError) as exc:
+                        _logger.warning(
+                            "frame_applymap_element_failed",
+                            extra={
+                                "event": "frame_applymap_element_failed",
+                                "column": key,
+                                "error_type": type(exc).__name__,
+                                "error": str(exc),
+                            },
+                            exc_info=True,
+                        )
                         new_row[key] = val
             rows.append(new_row)
         return self._clone_with_rows(rows)
@@ -1066,7 +1079,16 @@ class GeoPromptFrame:
                     from .geometry import geometry_bounds
                     minx, miny, maxx, maxy = geometry_bounds(geom)
                     bounds_list.append({'minx': minx, 'miny': miny, 'maxx': maxx, 'maxy': maxy})
-                except Exception:
+                except (ImportError, AttributeError, TypeError, ValueError) as exc:
+                    _logger.warning(
+                        "frame_row_bounds_failed",
+                        extra={
+                            "event": "frame_row_bounds_failed",
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                        exc_info=True,
+                    )
                     bounds_list.append({'minx': None, 'miny': None, 'maxx': None, 'maxy': None})
         return bounds_list
 

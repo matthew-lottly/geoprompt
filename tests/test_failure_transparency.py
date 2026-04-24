@@ -34,8 +34,19 @@ def test_notify_webhook_returns_explicit_failure_payload() -> None:
     assert isinstance(payload, dict)
     assert payload.get("sent") is False
     assert payload.get("status") == 0
+    assert payload.get("code") == "WEBHOOK_DELIVERY_FAILED"
+    assert payload.get("category") == "network"
+    assert isinstance(payload.get("remediation"), str)
+    assert payload["remediation"].strip() != ""
     assert isinstance(payload.get("error"), str)
     assert payload["error"].strip() != ""
+
+
+def test_notify_webhook_emits_structured_failure_log(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("WARNING"):
+        notify_webhook("http://127.0.0.1:1/webhook", {"event": "unit-test"}, timeout=0.05)
+
+    assert any(record.message == "webhook_notification_failed" for record in caplog.records)
 
 
 def test_parse_wkt_invalid_input_raises_explicit_exception() -> None:

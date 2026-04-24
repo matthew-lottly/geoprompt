@@ -11,6 +11,8 @@ import math
 from typing import Any, Callable, Sequence
 
 from .equations import DistanceMethod, coordinate_distance
+import warnings
+from ._exceptions import FallbackWarning
 
 
 Coordinate = tuple[float, ...]
@@ -1204,6 +1206,12 @@ def geometry_split(geometry: Geometry, splitter: Geometry) -> list[Geometry]:
         overlay = importlib.import_module("shapely.ops")
         shp_geom = importlib.import_module("shapely.geometry")
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_split_by_line() returning input unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return [geometry]
 
     def _to_shapely(g: Geometry) -> Any:
@@ -1253,6 +1261,12 @@ def geometry_voronoi(points: Sequence[Geometry]) -> list[Geometry]:
     try:
         spatial = importlib.import_module("scipy.spatial")
     except ImportError:
+        warnings.warn(
+            "scipy not installed; geometry_voronoi() returning empty list. "
+            "Install with: pip install scipy",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return []
 
     coords = []
@@ -1288,6 +1302,12 @@ def geometry_delaunay(points: Sequence[Geometry]) -> list[Geometry]:
     try:
         spatial = importlib.import_module("scipy.spatial")
     except ImportError:
+        warnings.warn(
+            "scipy not installed; geometry_delaunay() returning empty list. "
+            "Install with: pip install scipy",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return []
 
     coords = []
@@ -1339,6 +1359,12 @@ def geometry_identity(input_geom: Geometry, identity_geom: Geometry) -> list[Geo
                 parts.append(geometry_from_shapely(g))
         return parts
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_identity() returning input unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return [input_geom]
 
 
@@ -1350,6 +1376,12 @@ def geometry_symmetric_difference(a: Geometry, b: Geometry) -> Geometry:
         sb = geometry_to_shapely(b)
         return _collapse_geometry_parts(geometry_from_shapely(sa.symmetric_difference(sb)))
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_symmetric_difference() returning first input unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return a
 
 
@@ -1361,6 +1393,12 @@ def geometry_erase(input_geom: Geometry, erase_geom: Geometry) -> Geometry:
         sb = geometry_to_shapely(erase_geom)
         return _collapse_geometry_parts(geometry_from_shapely(sa.difference(sb)))
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_erase() returning input unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return input_geom
 
 
@@ -1371,6 +1409,12 @@ def geometry_simplify(geometry: Geometry, tolerance: float, *, preserve_topology
         s = geometry_to_shapely(geometry)
         return _collapse_geometry_parts(geometry_from_shapely(s.simplify(tolerance, preserve_topology=preserve_topology)))
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_simplify() returning input unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return geometry
 
 
@@ -1613,6 +1657,12 @@ def line_from_offsets(
         s = geometry_to_shapely(baseline)
         return [geometry_from_shapely(s.parallel_offset(d, "left")) for d in offsets]
     except ImportError:
+        warnings.warn(
+            "shapely not installed; line_from_offsets() returning copies of baseline. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return [baseline] * len(offsets)
 
 
@@ -1628,6 +1678,12 @@ def split_line_at_point(line: Geometry, point: Geometry) -> list[Geometry]:
         parts = shapely_ops.split(shapely_ops.snap(sl, snap_pt, 1e-8), snap_pt)
         return [geometry_from_shapely(p) for p in parts.geoms]
     except ImportError:
+        warnings.warn(
+            "shapely not installed; split_line_at_point() returning original line unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return [line]
 
 
@@ -1643,6 +1699,12 @@ def geometry_planarize(geometries: Sequence[Geometry]) -> list[Geometry]:
             return [geometry_from_shapely(g) for g in noded.geoms]
         return [geometry_from_shapely(noded)]
     except ImportError:
+        warnings.warn(
+            "shapely not installed; geometry_planarize() returning input list unchanged. "
+            "Install with: pip install geoprompt[overlay]",
+            FallbackWarning,
+            stacklevel=2,
+        )
         return list(geometries)
 
 

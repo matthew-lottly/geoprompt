@@ -12,11 +12,14 @@ import csv
 import hashlib
 import importlib
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from .safe_expression import evaluate_safe_expression
+
+_logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Lazy helpers
@@ -132,6 +135,17 @@ def check_constraints(
                 if not fn(val):
                     violations.append({"row": i, "field": field, "value": val})
             except Exception as exc:
+                _logger.warning(
+                    "check_constraints_callback_failed",
+                    extra={
+                        "event": "check_constraints_callback_failed",
+                        "row": i,
+                        "field": field,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                    exc_info=True,
+                )
                 violations.append({"row": i, "field": field, "value": val, "error": str(exc)})
     return violations
 
@@ -1863,8 +1877,19 @@ def topology_validate(frame: _Any, *, rule: str = "no_self_intersections") -> li
                     shp = sg.shape(geom)
                     if not shp.is_valid:
                         errors.append({"feature_index": i, "rule": rule, "message": sv.explain_validity(shp)})
-                except Exception as e:
-                    errors.append({"feature_index": i, "rule": rule, "message": str(e)})
+                except (TypeError, ValueError, AttributeError) as exc:
+                    _logger.warning(
+                        "topology_validate_shape_failed",
+                        extra={
+                            "event": "topology_validate_shape_failed",
+                            "feature_index": i,
+                            "rule": rule,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                        exc_info=True,
+                    )
+                    errors.append({"feature_index": i, "rule": rule, "message": str(exc)})
         except ImportError:
             # Fallback: no shapely available — skip validation
             pass
@@ -1886,7 +1911,17 @@ def topology_validate(frame: _Any, *, rule: str = "no_self_intersections") -> li
                 geom = r.get(geom_col)
                 try:
                     shapes.append(sg.shape(geom) if geom else None)
-                except Exception:
+                except (TypeError, ValueError, AttributeError) as exc:
+                    _logger.warning(
+                        "topology_validate_overlap_shape_failed",
+                        extra={
+                            "event": "topology_validate_overlap_shape_failed",
+                            "rule": rule,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                        exc_info=True,
+                    )
                     shapes.append(None)
             for i in range(len(shapes)):
                 for j in range(i + 1, len(shapes)):

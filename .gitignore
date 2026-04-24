@@ -7,3 +7,10 @@ outputs/
 private/
 *.private.md
 src/geoprompt.egg-info/
+
+# Internal planning/working docs — keep local only
+docs/competitive-scorecard.md
+docs/demo-storyboard.md
+docs/release-evidence.md
+docs/video-walkthroughs.md
+docs/MATURITY_MATRIX.md

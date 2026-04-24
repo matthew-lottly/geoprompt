@@ -51,15 +51,16 @@ class TestNoFallbackWithoutOptIn:
                 io_module.read_osm_pbf("/tmp/dummy.pbf")
 
     def test_dxf_reader_without_fiona_raises(self):
-        """DXF reader raises explicitly when fiona is missing."""
+        """DXF reader raises explicitly when ezdxf is missing."""
         import geoprompt.io as io_module
-        # Only test if fiona is not installed
+        from geoprompt._exceptions import DependencyError
+        # Only test if ezdxf is not installed
         try:
-            import fiona  # noqa: F401
-            pytest.skip("fiona is installed; cannot test missing-dependency path")
+            import ezdxf  # noqa: F401
+            pytest.skip("ezdxf is installed; cannot test missing-dependency path")
         except ImportError:
-            # fiona is missing, so DXF reader should fail explicitly
-            with pytest.raises((ImportError, RuntimeError), match="fiona|DXF"):
+            # ezdxf is missing — require_capability raises DependencyError with pip hint
+            with pytest.raises((ImportError, RuntimeError, DependencyError)):
                 io_module.read_dxf("/tmp/dummy.dxf")
 
 

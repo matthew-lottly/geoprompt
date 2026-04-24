@@ -23,6 +23,25 @@ from typing import Any, Callable, TypeVar
 T = TypeVar("T")
 
 
+def failure_payload(
+    *,
+    code: str,
+    category: str,
+    remediation: str,
+    error: str,
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build a standardized failure payload for dict-returning helpers."""
+    payload: dict[str, Any] = {
+        "code": code,
+        "category": category,
+        "remediation": remediation,
+        "error": error,
+    }
+    payload.update(extra)
+    return payload
+
+
 class GeoPromptError(Exception):
     """Base exception for GeoPrompt."""
     pass

@@ -69,7 +69,7 @@ class TestNoNewEvalCalls:
 # This test fails only when the count EXCEEDS this baseline, acting as a
 # forward-looking gate that prevents regression while accepting existing debt.
 # Decrement this number as existing broad-excepts are replaced.
-_BROAD_EXCEPT_BASELINE: int = 57
+_BROAD_EXCEPT_BASELINE: int = 51
 
 
 class TestNoBroadExceptException:

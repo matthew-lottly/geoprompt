@@ -5,6 +5,7 @@ catalogs, and guided no-code workflow planning from a simple goal.
 """
 from __future__ import annotations
 
+import re
 import textwrap
 import warnings
 from functools import wraps
@@ -17,6 +18,38 @@ Record = dict[str, Any]
 _PLUGIN_REGISTRY: dict[str, dict[str, Any]] = {}
 _RECIPE_REGISTRY: dict[str, dict[str, Any]] = {}
 _MIGRATION_REGISTRY: dict[str, dict[str, Any]] = {}
+
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def _parse_semver(version: str) -> tuple[int, int, int]:
+    m = _SEMVER_RE.fullmatch(version.strip())
+    if not m:
+        raise ValueError(f"version must use semantic format MAJOR.MINOR.PATCH, got {version!r}")
+    return int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+
+def _validate_deprecation_lifecycle(
+    *,
+    deprecated_in: str | None,
+    remove_in: str | None,
+    min_minor_grace: int,
+) -> None:
+    if deprecated_in is None or remove_in is None:
+        return
+
+    dep_major, dep_minor, dep_patch = _parse_semver(deprecated_in)
+    rem_major, rem_minor, rem_patch = _parse_semver(remove_in)
+    dep_tuple = (dep_major, dep_minor, dep_patch)
+    rem_tuple = (rem_major, rem_minor, rem_patch)
+
+    if rem_tuple <= dep_tuple:
+        raise ValueError("remove_in must be greater than deprecated_in")
+
+    if rem_major == dep_major and (rem_minor - dep_minor) < min_minor_grace:
+        raise ValueError(
+            f"remove_in must allow at least {min_minor_grace} minor release(s) of grace after deprecated_in"
+        )
 
 
 def register_plugin(
@@ -149,10 +182,18 @@ def get_migration_registry() -> dict[str, dict[str, Any]]:
 def deprecated_alias(
     new_name: str,
     *,
+    deprecated_in: str | None = None,
     remove_in: str | None = None,
     note: str = "",
+    min_minor_grace: int = 1,
 ) -> Callable[[PluginFunc], PluginFunc]:
     """Decorator that warns callers and records a migration alias."""
+
+    _validate_deprecation_lifecycle(
+        deprecated_in=deprecated_in,
+        remove_in=remove_in,
+        min_minor_grace=min_minor_grace,
+    )
 
     def decorator(func: PluginFunc) -> PluginFunc:
         register_migration(func.__name__, new_name, remove_in=remove_in, note=note)
@@ -160,12 +201,22 @@ def deprecated_alias(
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             msg = f"{func.__name__} is deprecated; use {new_name} instead."
+            if deprecated_in:
+                msg += f" Deprecated in {deprecated_in}."
             if remove_in:
                 msg += f" Planned removal in {remove_in}."
             if note:
                 msg += f" {note}"
             warnings.warn(msg, DeprecationWarning, stacklevel=2)
             return func(*args, **kwargs)
+
+        wrapper._geoprompt_deprecation = {
+            "new_name": new_name,
+            "deprecated_in": deprecated_in,
+            "remove_in": remove_in,
+            "note": note,
+            "min_minor_grace": min_minor_grace,
+        }
 
         return wrapper  # type: ignore[return-value]
 

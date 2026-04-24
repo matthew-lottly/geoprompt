@@ -8,7 +8,9 @@ read/write operations.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -19,6 +21,9 @@ import urllib.error
 from .frame import GeoPromptFrame
 from .geometry import geometry_intersects, geometry_type, normalize_geometry
 from .safe_expression import ExpressionExecutionError, ExpressionValidationError, evaluate_safe_expression
+import warnings
+from ._capabilities import check_capability, require_capability
+from ._exceptions import FallbackWarning
 
 
 WORKLOAD_PRESETS: dict[str, dict[str, int | None]] = {
@@ -619,12 +624,8 @@ def _read_with_geopandas(
     limit_rows: int | None,
     sample_step: int,
 ) -> GeoPromptFrame:
-    try:
-        import geopandas as gpd
-    except ImportError as exc:
-        raise ImportError(
-            "geopandas is required for this format. Install extras: pip install geoprompt[io,compare]"
-        ) from exc
+    require_capability("geopandas", context="read spatial vector format")
+    import geopandas as gpd
 
     data_path = Path(path)
     if data_path.suffix.lower() == ".parquet":
@@ -1486,12 +1487,8 @@ def write_data(
         return Path(write_feather(frame, output_path))
 
     if suffix in {".shp", ".gpkg", ".fgb", ".gdb", ".parquet"}:
-        try:
-            import geopandas as gpd
-        except ImportError as exc:
-            raise ImportError(
-                "geopandas is required to write this format. Install extras: pip install geoprompt[io,compare]"
-            ) from exc
+        require_capability("geopandas", context="write spatial vector format")
+        import geopandas as gpd
 
         collection = frame_to_geojson(frame, geometry=geometry, id_column=id_column)
         gdf = gpd.GeoDataFrame.from_features(collection["features"], crs=frame.crs)
@@ -1585,13 +1582,8 @@ def discover_layers(path: str | Path) -> list[dict[str, Any]]:
     try:
         import fiona
     except ImportError:
-        try:
-            import geopandas as gpd
-        except ImportError as exc:
-            raise ImportError(
-                "fiona or geopandas is required for layer discovery. "
-                "Install extras: pip install geoprompt[io,compare]"
-            ) from exc
+        require_capability("geopandas", context="layer_discovery() — fiona not installed")
+        import geopandas as gpd
 
         if suffix == ".parquet":
             gdf = gpd.read_parquet(data_path)
@@ -1666,12 +1658,8 @@ def write_geoparquet(
     Embeds ``geo`` metadata compliant with the GeoParquet specification,
     including CRS, geometry types, bounding box, and encoding information.
     """
-    try:
-        import geopandas as gpd
-    except ImportError as exc:
-        raise ImportError(
-            "geopandas is required to write GeoParquet. Install extras: pip install geoprompt[io,compare]"
-        ) from exc
+    require_capability("geopandas", context="write_geoparquet()")
+    import geopandas as gpd
 
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1706,6 +1694,12 @@ def write_geoparquet(
         table = table.replace_schema_metadata(existing_meta)
         pq.write_table(table, str(output_path))
     except ImportError:
+        warnings.warn(
+            "pyarrow not installed; GeoParquet geo-metadata embedding skipped. "
+            "Install with: pip install geoprompt[io]",
+            FallbackWarning,
+            stacklevel=3,
+        )
         gdf.to_parquet(output_path)
 
     return output_path
@@ -1727,19 +1721,21 @@ def read_geoparquet_metadata(path: str | Path) -> dict[str, Any]:
             return json.loads(geo_bytes.decode("utf-8"))
         return {}
     except ImportError:
-        try:
-            import geopandas as gpd
+        warnings.warn(
+            "pyarrow not installed; falling back to geopandas for GeoParquet metadata. "
+            "Install with: pip install geoprompt[io]",
+            FallbackWarning,
+            stacklevel=2,
+        )
+        require_capability("geopandas", context="read_geoparquet_metadata() — pyarrow not installed")
+        import geopandas as gpd
 
-            gdf = gpd.read_parquet(data_path)
-            return {
-                "primary_column": gdf.geometry.name,
-                "crs": str(gdf.crs) if gdf.crs is not None else None,
-                "feature_count": len(gdf),
-            }
-        except ImportError as exc:
-            raise ImportError(
-                "pyarrow or geopandas is required to read GeoParquet metadata"
-            ) from exc
+        gdf = gpd.read_parquet(data_path)
+        return {
+            "primary_column": gdf.geometry.name,
+            "crs": str(gdf.crs) if gdf.crs is not None else None,
+            "feature_count": len(gdf),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -1786,10 +1782,8 @@ def write_feather(
     path: str | Path,
 ) -> str:
     """Write a frame to Apache Feather while preserving GeoPrompt metadata."""
-    try:
-        import pyarrow.feather as feather
-    except ImportError as exc:
-        raise ImportError("pyarrow is required to write Feather files") from exc
+    require_capability("pyarrow", context="write_feather()")
+    import pyarrow.feather as feather
 
     from .interop import to_arrow
 
@@ -1806,10 +1800,8 @@ def read_feather(
     crs: str | None = None,
 ) -> GeoPromptFrame:
     """Read a GeoPrompt Feather file back into a frame."""
-    try:
-        import pyarrow.feather as feather
-    except ImportError as exc:
-        raise ImportError("pyarrow is required to read Feather files") from exc
+    require_capability("pyarrow", context="read_feather()")
+    import pyarrow.feather as feather
 
     from .interop import from_arrow
 
@@ -2259,10 +2251,9 @@ def read_cloud_json(
         path = Path(parsed.path if parsed.scheme == "file" else target)
         payload = _json.loads(path.read_text(encoding="utf-8"))
     elif parsed.scheme in {"s3", "gs", "az", "abfs"}:
-        try:
-            import fsspec  # type: ignore[import-not-found]
-        except ImportError as exc:  # pragma: no cover - optional dependency path
-            raise RuntimeError("Install fsspec plus the relevant cloud backend to read remote object-store paths") from exc
+        if not check_capability("fsspec"):  # pragma: no cover - optional dependency path
+            require_capability("fsspec", context="read_cloud_json() cloud object-store path")
+        import fsspec  # type: ignore[import-not-found]
         with fsspec.open(target, "r", encoding="utf-8") as handle:
             payload = _json.load(handle)
     else:
@@ -2305,10 +2296,9 @@ def list_remote_dataset_entries(path: str | Path, *, headers: dict[str, str] | N
             ]
         payload = read_cloud_json(local)
     elif parsed.scheme in {"s3", "gs", "az", "abfs"}:
-        try:
-            import fsspec  # type: ignore[import-not-found]
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install fsspec plus the relevant backend to list remote object-store paths") from exc
+        if not check_capability("fsspec"):  # pragma: no cover
+            require_capability("fsspec", context="list_remote_dataset_entries() cloud path")
+        import fsspec  # type: ignore[import-not-found]
         fs, resolved_path = fsspec.core.url_to_fs(target)
         entries = fs.ls(resolved_path, detail=True)
         return [
@@ -2350,10 +2340,9 @@ def inspect_remote_dataset_metadata(path: str | Path, *, headers: dict[str, str]
             "modified": stat.st_mtime,
         }
     if parsed.scheme in {"s3", "gs", "az", "abfs"}:
-        try:
-            import fsspec  # type: ignore[import-not-found]
-        except ImportError as exc:  # pragma: no cover
-            raise RuntimeError("Install fsspec plus the relevant backend to inspect object-store metadata") from exc
+        if not check_capability("fsspec"):  # pragma: no cover
+            require_capability("fsspec", context="inspect_remote_dataset_metadata() cloud path")
+        import fsspec  # type: ignore[import-not-found]
         fs, resolved_path = fsspec.core.url_to_fs(target)
         info = fs.info(resolved_path)
         return {
@@ -2483,10 +2472,9 @@ def write_cloud_json(
     target = str(path)
     parsed = urlparse(target)
     if parsed.scheme in {"s3", "gs", "az", "abfs"}:
-        try:
-            import fsspec  # type: ignore[import-not-found]
-        except ImportError as exc:  # pragma: no cover - optional dependency path
-            raise RuntimeError("Install fsspec plus the relevant cloud backend to write remote object-store paths") from exc
+        if not check_capability("fsspec"):  # pragma: no cover - optional dependency path
+            require_capability("fsspec", context="write_cloud_json() cloud object-store path")
+        import fsspec  # type: ignore[import-not-found]
         with fsspec.open(target, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, indent=indent)
         return target
@@ -2731,8 +2719,8 @@ def read_dxf(path: str | Path, layer: str | None = None) -> GeoPromptFrame:
             except (ValueError, AttributeError, IndexError):
                 continue
         return GeoPromptFrame.from_records(records)
-    except ImportError as exc:
-        raise ImportError("ezdxf is required to read DXF files. Install with: pip install ezdxf") from exc
+    except ImportError:
+        require_capability("ezdxf", context="read_dxf()")
 
 
 def read_mapinfo_tab(path: str | Path) -> GeoPromptFrame:
@@ -2760,14 +2748,17 @@ def read_mapinfo_tab(path: str | Path) -> GeoPromptFrame:
             rows.append(rec)
         return GeoPromptFrame.from_records(rows)
     except ImportError:
-        pass
-    try:
-        import fiona  # type: ignore[import]
-        with fiona.open(str(path)) as src:
-            rows = [dict(feat["properties"]) | {"geometry": dict(feat["geometry"])} for feat in src]
-        return GeoPromptFrame.from_records(rows)
-    except ImportError as err:
-        raise ImportError("pyogrio or fiona is required to read MapInfo TAB files") from err
+        warnings.warn(
+            "pyogrio not installed; falling back to fiona for MapInfo TAB. "
+            "Install with: pip install pyogrio",
+            FallbackWarning,
+            stacklevel=2,
+        )
+    require_capability("fiona", context="read_mapinfo_tab() — pyogrio not installed")
+    import fiona  # type: ignore[import]
+    with fiona.open(str(path)) as src:
+        rows = [dict(feat["properties"]) | {"geometry": dict(feat["geometry"])} for feat in src]
+    return GeoPromptFrame.from_records(rows)
 
 
 def read_wfs(url: str, type_name: str, *, max_features: int = 1000,
@@ -2965,3 +2956,95 @@ def auto_write_file(frame: GeoPromptFrame, path: str | Path, **kwargs: Any) -> N
         write_data(p, frame, **kwargs)
     else:
         raise ValueError(f"unsupported output format extension: {ext!r}")
+
+
+# ---------------------------------------------------------------------------
+# J6.72 — secure-default remote fetch helpers
+# ---------------------------------------------------------------------------
+
+_ALLOW_UNSAFE_REMOTE_FETCH: bool = (
+    os.environ.get("GEOPROMPT_ALLOW_UNSAFE_REMOTE_FETCH", "").lower()
+    in {"1", "true", "yes"}
+)
+
+_ALLOWED_SCHEMES = {"https"}
+_UNSAFE_SCHEME = "http"
+
+
+def _check_remote_fetch_allowed(url: str, *, allow_unsafe: bool = False) -> None:
+    """Raise ``ValueError`` if *url* uses an insecure scheme and opt-in is absent.
+
+    HTTPS is always allowed.  HTTP requires either the *allow_unsafe* keyword
+    argument to be ``True`` or the ``GEOPROMPT_ALLOW_UNSAFE_REMOTE_FETCH``
+    environment variable to be set to a truthy value.
+
+    Raises:
+        ValueError: If the URL uses an insecure scheme (http) and no opt-in is
+            present.
+    """
+    parsed = urlparse(url)
+    scheme = parsed.scheme.lower()
+    if scheme in _ALLOWED_SCHEMES:
+        return
+    if scheme == _UNSAFE_SCHEME and (allow_unsafe or _ALLOW_UNSAFE_REMOTE_FETCH):
+        return
+    if scheme == _UNSAFE_SCHEME:
+        raise ValueError(
+            f"Insecure fetch blocked: {url!r} uses http. "
+            "Use https:// or set allow_unsafe_remote_fetch=True to override."
+        )
+    raise ValueError(
+        f"Remote fetch scheme {scheme!r} is not allowed. Use https://."
+    )
+
+
+def _validate_remote_url(url: str) -> None:
+    """Validate that *url* has an allowed scheme and a non-empty netloc.
+
+    Raises:
+        ValueError: If the URL has no scheme or uses a disallowed scheme.
+    """
+    parsed = urlparse(url)
+    if not parsed.scheme:
+        raise ValueError(f"URL has no scheme: {url!r}")
+    scheme = parsed.scheme.lower()
+    if scheme not in _ALLOWED_SCHEMES and scheme != _UNSAFE_SCHEME:
+        raise ValueError(
+            f"Remote fetch scheme {scheme!r} is not allowed. Use https://."
+        )
+
+
+def fetch_remote_artifact(
+    url: str,
+    *,
+    expected_hash: str | None = None,
+    allow_unsafe: bool = False,
+    timeout: int = 30,
+) -> bytes:
+    """Fetch a remote artifact and optionally verify its SHA-256 checksum.
+
+    Args:
+        url: The URL to fetch. HTTPS is required unless *allow_unsafe* is set.
+        expected_hash: Optional expected SHA-256 hex digest. If provided and the
+            digest does not match, ``ValueError`` is raised.
+        allow_unsafe: Allow HTTP (insecure) fetch. Defaults to ``False``.
+        timeout: HTTP request timeout in seconds.
+
+    Returns:
+        Raw bytes of the fetched artifact.
+
+    Raises:
+        ValueError: If the URL uses an insecure scheme and no opt-in is given,
+            or if the checksum integrity check fails.
+    """
+    _check_remote_fetch_allowed(url, allow_unsafe=allow_unsafe)
+    with urlopen(url, timeout=timeout) as response:  # noqa: S310
+        data: bytes = response.read()
+    if expected_hash is not None:
+        actual = hashlib.sha256(data).hexdigest()
+        if actual != expected_hash:
+            raise ValueError(
+                f"Remote artifact integrity check failed for {url!r}: "
+                f"expected {expected_hash!r}, got {actual!r}."
+            )
+    return data

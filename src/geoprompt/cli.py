@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
+import json
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -14,9 +15,30 @@ def _version() -> str:
         return "local-dev"
 
 
+def _cli_require_capability(name: str, command: str) -> int | None:
+    """Check a capability and print an actionable error if missing.
+
+    Returns ``1`` (exit code) if the capability is absent so callers can
+    ``return _cli_require_capability(...)`` directly, or ``None`` on success.
+    """
+    from ._capabilities import CAPABILITY_REGISTRY, _is_importable
+
+    spec = CAPABILITY_REGISTRY.get(name)
+    if spec is None:
+        return None  # unknown capability – let the command handle it
+    if not _is_importable(spec.import_name):
+        print(
+            f"Error: '{command}' requires '{spec.import_name}' which is not installed.\n"
+            f"  {spec.description}\n"
+            f"  Install with: pip install {spec.pip_extra}"
+        )
+        return 1
+    return None
+
+
 def shell_completion_script(program: str = "geoprompt", *, shell: str = "bash") -> str:
     """Return a starter shell-completion script for the GeoPrompt CLI."""
-    commands = "info version wizard demo compare history serve plugins recipes doctor completion"
+    commands = "info version wizard demo compare history serve plugins recipes doctor completion capability-report model-register model-validate infer-raster benchmark-run"
     if shell == "powershell":
         return (
             f"Register-ArgumentCompleter -Native -CommandName {program} -ScriptBlock {{\n"
@@ -48,6 +70,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("plugins", help="List registered plugins and extension hooks")
     subparsers.add_parser("recipes", help="List built-in workflow recipes")
     subparsers.add_parser("doctor", help="Run a lightweight release-readiness audit")
+    capability_parser = subparsers.add_parser("capability-report", help="Print startup capability availability and dependency status")
+    capability_parser.add_argument("--format", choices=["text", "json"], default="text")
 
     completion_parser = subparsers.add_parser("completion", help="Print a starter shell completion script")
     completion_parser.add_argument("--shell", choices=["bash", "powershell"], default="bash")
@@ -96,7 +120,7 @@ def _print_info() -> None:
     print("GeoPrompt")
     print(f"Version: {_version()}")
     print("Install profiles: core, viz, io, excel, db, overlay, compare, raster, service, all")
-    print("Commands: info, version, wizard, demo, compare, history, serve, plugins, recipes, doctor, completion")
+    print("Commands: info, version, wizard, demo, compare, history, serve, plugins, recipes, doctor, completion, capability-report, model-register, model-validate, infer-raster, benchmark-run")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -137,6 +161,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Release stage: {report['release_stage']}")
         print(f"Quality passed: {report['quality'].get('passed')}")
         print(f"Smoke profiles: {', '.join(item['profile'] for item in report['packaging_smoke_matrix'])}")
+        return 0
+
+    if args.command == "capability-report":
+        from . import capability_report
+
+        report = capability_report()
+        if args.format == "json":
+            print(json.dumps(report, indent=2, sort_keys=True))
+            return 0
+        print(f"GeoPrompt capability report v{report.get('schema_version', 'unknown')}")
+        print(f"Package version: {report.get('package_version', 'unknown')}")
+        print(f"Checked at (UTC): {report.get('checked_at_utc', 'unknown')}")
+        print(f"Fallback policy: {report.get('fallback_policy', 'warn')}")
+        print(f"Enabled ({len(report.get('enabled', []))}): {', '.join(report.get('enabled', []))}")
+        print(f"Disabled ({len(report.get('disabled', []))}): {', '.join(report.get('disabled', [])) or 'none'}")
+        print(f"Degraded ({len(report.get('degraded', []))}): {', '.join(report.get('degraded', [])) or 'none'}")
         return 0
 
     if args.command == "completion":
@@ -193,6 +233,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "serve":
+        rc = _cli_require_capability("fastapi", "serve")
+        if rc is not None:
+            return rc
+        rc = _cli_require_capability("uvicorn", "serve")
+        if rc is not None:
+            return rc
         from .service import app
         if app is None:
             print("FastAPI support is not installed. Install the service extra to run the API.")
@@ -234,6 +280,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "infer-raster":
+        rc = _cli_require_capability("rasterio", "infer-raster")
+        if rc is not None:
+            return rc
         from .ai import raster_ai_pipeline
         raster_path = Path(args.raster_path)
         if not raster_path.exists():
