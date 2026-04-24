@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <rect width="900" height="420" rx="14" fill="#f7f9fc"/>
+  <rect x="1" y="1" width="898" height="418" rx="14" fill="none" stroke="#d7dde8"/>
+
+  <text x="34" y="34" font-size="20" font-weight="700" fill="#12263a">Resilience risk heatmap and mitigation impact</text>
+  <text x="34" y="54" font-size="12" fill="#4c5d70">Sample dataset: outage and restoration summary fixtures</text>
+
+  <rect x="34" y="78" width="430" height="300" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+  <text x="50" y="102" font-size="13" font-weight="700" fill="#1f3347">Risk heatmap (likelihood x consequence)</text>
+
+  <g transform="translate(50,122)">
+    <rect x="0" y="0" width="360" height="220" fill="#f8fafc" stroke="#d7dde8"/>
+    <g>
+      <rect x="0" y="0" width="120" height="73" fill="#e8f5e9"/>
+      <rect x="120" y="0" width="120" height="73" fill="#fff3cd"/>
+      <rect x="240" y="0" width="120" height="73" fill="#f8d7da"/>
+      <rect x="0" y="73" width="120" height="73" fill="#fff3cd"/>
+      <rect x="120" y="73" width="120" height="73" fill="#fde2a8"/>
+      <rect x="240" y="73" width="120" height="73" fill="#f5c2c7"/>
+      <rect x="0" y="146" width="120" height="74" fill="#f8d7da"/>
+      <rect x="120" y="146" width="120" height="74" fill="#f5c2c7"/>
+      <rect x="240" y="146" width="120" height="74" fill="#ef9aa2"/>
+    </g>
+    <g stroke="#d7dde8" stroke-width="1">
+      <line x1="120" y1="0" x2="120" y2="220"/><line x1="240" y1="0" x2="240" y2="220"/>
+      <line x1="0" y1="73" x2="360" y2="73"/><line x1="0" y1="146" x2="360" y2="146"/>
+    </g>
+    <text x="60" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">Low consequence</text>
+    <text x="180" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">Medium</text>
+    <text x="300" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">High consequence</text>
+    <text x="-8" y="190" font-size="10" fill="#4c5d70" transform="rotate(-90 -8,190)">Likelihood increases</text>
+
+    <circle cx="275" cy="40" r="7" fill="#b42318"/><text x="287" y="43" font-size="10" fill="#8f1d15">substation A</text>
+    <circle cx="292" cy="117" r="7" fill="#b42318"/><text x="304" y="120" font-size="10" fill="#8f1d15">hospital feeder</text>
+    <circle cx="170" cy="188" r="7" fill="#d97706"/><text x="182" y="191" font-size="10" fill="#9a5a00">pump node</text>
+    <circle cx="75" cy="42" r="7" fill="#12724f"/><text x="87" y="45" font-size="10" fill="#125f41">telecom node</text>
+  </g>
+
+  <rect x="486" y="78" width="380" height="300" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+  <text x="502" y="102" font-size="13" font-weight="700" fill="#1f3347">Before and after mitigation bars</text>
+  <text x="502" y="118" font-size="10" fill="#4c5d70">Unit: impacted customers</text>
+
+  <g transform="translate(502,132)">
+    <g font-size="10" fill="#4c5d70" text-anchor="end">
+      <text x="86" y="28">Zone North</text><text x="86" y="88">Zone East</text><text x="86" y="148">Zone South</text>
+    </g>
+    <g>
+      <rect x="98" y="14" width="210" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="34" width="112" height="14" fill="#12724f" rx="4"/>
+      <rect x="98" y="74" width="180" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="94" width="92" height="14" fill="#12724f" rx="4"/>
+      <rect x="98" y="134" width="160" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="154" width="76" height="14" fill="#12724f" rx="4"/>
+    </g>
+    <g font-size="10" fill="#2b3d52">
+      <text x="314" y="25">210</text><text x="216" y="45">112</text>
+      <text x="284" y="85">180</text><text x="196" y="105">92</text>
+      <text x="264" y="145">160</text><text x="180" y="165">76</text>
+    </g>
+    <line x1="98" y1="188" x2="330" y2="188" stroke="#d7dde8"/>
+    <g font-size="10" fill="#4c5d70" text-anchor="middle">
+      <text x="98" y="202">0</text><text x="156" y="202">50</text><text x="214" y="202">100</text><text x="272" y="202">150</text><text x="330" y="202">200+</text>
+    </g>
+  </g>
+
+  <rect x="34" y="388" width="832" height="20" rx="6" fill="#edf3fb"/>
+  <text x="56" y="402" font-size="11" fill="#2b3d52">Legend:</text>
+  <rect x="96" y="394" width="12" height="8" rx="2" fill="#b42318"/><text x="114" y="402" font-size="11" fill="#2b3d52">before mitigation</text>
+  <rect x="238" y="394" width="12" height="8" rx="2" fill="#12724f"/><text x="256" y="402" font-size="11" fill="#2b3d52">after mitigation</text>
+  <text x="530" y="402" font-size="11" fill="#2b3d52">Direct labels and axis units included for QA compliance</text>
+</svg>

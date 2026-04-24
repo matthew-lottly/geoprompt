@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from geoprompt.viz import MAP_STYLE_PACKS, audit_html_accessibility, build_executive_briefing_pack
+from geoprompt.viz import MAP_STYLE_PACKS, audit_html_accessibility, audit_visual_quality, build_executive_briefing_pack
 
 
 def _sections() -> list[dict[str, object]]:
@@ -41,6 +41,10 @@ def test_viz_module_briefing_pack_uses_theme_and_contract_markers() -> None:
     assert "data-theme='utilities'" in html
     assert f"background:{MAP_STYLE_PACKS['utilities']['background']}" in html
     assert html.count("data-artifact-type='") == 3
+    assert "What changed:" in html
+    assert "Why it matters:" in html
+    assert "What to do next:" in html
+    assert audit_visual_quality(html)["passed"] is True
 
 
 def test_viz_module_accessibility_audit_flags_missing_main_landmark() -> None:
@@ -48,3 +52,21 @@ def test_viz_module_accessibility_audit_flags_missing_main_landmark() -> None:
 
     assert result["passed"] is False
     assert "missing_main_landmark" in result["issues"]
+
+
+def test_viz_module_visual_audit_flags_missing_chart_markers() -> None:
+        html = """
+        <html lang='en'>
+            <head><title>x</title></head>
+            <body>
+                <main>
+                    <svg class='briefing-chart-svg' viewBox='0 0 100 40'></svg>
+                </main>
+            </body>
+        </html>
+        """
+
+        result = audit_visual_quality(html)
+        assert result["passed"] is False
+        assert "chart_missing_legend" in result["issues"]
+        assert "chart_missing_axis_unit" in result["issues"]

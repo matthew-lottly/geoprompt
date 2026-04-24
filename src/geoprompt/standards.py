@@ -45,8 +45,9 @@ def ogc_geopackage_compliance(package_info: dict[str, Any]) -> dict[str, Any]:
 def ogc_api_features_implementation(features: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Simulation-only OGC API - Features placeholder endpoint.
 
-    This helper does not expose a real HTTP service. For production, implement
-    an OGC API server using pygeoapi/FastAPI and a real datastore backend.
+    This helper is non-production and does not expose a real HTTP service.
+    For deployment, implement an OGC API server using pygeoapi/FastAPI and a
+    datastore-backed feature endpoint.
     """
     return {"service": "OGC API - Features", "feature_count": len(features), "status": "ready"}
 
@@ -55,8 +56,9 @@ def ogc_api_features_implementation(features: Sequence[dict[str, Any]]) -> dict[
 def ogc_api_processes_implementation(processes: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """Simulation-only OGC API - Processes placeholder endpoint.
 
-    For production, implement real process registration/execution with a
-    service backend and authenticated HTTP API.
+    This helper is non-production and does not execute registered processes.
+    For production, implement process registration/execution with an
+    authenticated HTTP API and durable execution backend.
     """
     return {"service": "OGC API - Processes", "process_count": len(processes), "status": "ready"}
 
@@ -115,8 +117,9 @@ def ogc_wms_client(url: str) -> dict[str, Any]:
 def wms_capabilities_document(url: str) -> dict[str, Any]:
     """Simulation-only alias for WMS capabilities helper.
 
-    For production, implement a real capabilities parser using OWSLib/httpx
-    and XML schema validation.
+    This helper is non-production and does not parse full capabilities XML.
+    For production, implement robust parsing using OWSLib/httpx and schema
+    validation.
     """
     return ogc_wms_client(url)
 

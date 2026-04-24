@@ -11,7 +11,7 @@ GeoPrompt is not trying to replace every part of the GeoPandas ecosystem. It is 
 ## Quick mental model
 
 | GeoPandas habit | GeoPrompt equivalent |
-|---|---|
+| --- | --- |
 | `GeoDataFrame(...)` | `geopromptframe(...)` |
 | `read_file(...)` | `read_data(...)`, `read_geopackage(...)`, `read_shapefile(...)` |
 | `to_file(...)` | `write_data(...)`, `write_geopackage(...)`, `write_shapefile(...)` |
@@ -53,23 +53,46 @@ save_map(m, "outputs/sites.html")
 ## Side-by-side cookbook tasks
 
 | Task | GeoPandas habit | GeoPrompt path |
-|---|---|---|
+| --- | --- | --- |
 | Read a file and inspect columns | `gpd.read_file(...).head()` | `gp.read_data(...).head()` |
 | Filter and sort features | boolean masks and `sort_values` | `frame.query(...)` and `frame.sort_values(...)` |
 | Fix missing fields | `fillna`, `astype`, string ops | `fillna`, `astype`, `frame.str`, `frame.dt` |
 | Export decision outputs | plot then save separately | `save_map`, scenario report exports, briefing packs |
 | Build network workflow | add external stack | use built-in routing, resilience, and utility helpers |
 
+## Behaviour differences to plan for
+
+| Area | GeoPandas default expectation | GeoPrompt guidance |
+| --- | --- | --- |
+| dataframe breadth | very broad pandas-style surface | use the focused analyst workflow surface and link out when you need ecosystem breadth |
+| reporting outputs | usually assembled manually | prefer built-in markdown, html, and json export helpers |
+| network analysis | usually external libraries or custom code | use built-in routing, outage, resilience, and restoration helpers |
+| degraded environments | import-time success may hide missing optional integrations | use `geoprompt capability-report` before claiming optional-path support |
+
+## Migration effort vs benefit map
+
+![Migration effort versus benefit quadrant based on repository migration playbook tasks](../assets/migration-effort-benefit-quadrant.svg)
+
+Data-linked render: built from checked-in migration playbook examples to help sequence low-effort/high-benefit moves before deeper platform hardening tasks.
+
 ## When to stay in GeoPandas
 
 GeoPandas is still the better choice when you need:
+
 - a very broad mature vector stack
 - deeper ecosystem integrations across many external packages
 - workflows centered around full pandas parity expectations
 
+## Performance and complexity notes
+
+- GeoPrompt is strongest when the workflow ends in a decision artifact, not just a dataframe transform.
+- GeoPandas may remain the better fit for exploratory notebook work where broad vector ecosystem interop matters more than bundled reporting.
+- For raster-heavy or enterprise-service-heavy work, plan a hybrid path instead of forcing a full migration.
+
 ## When GeoPrompt is a better fit
 
 GeoPrompt stands out when you want:
+
 - a lightweight geospatial frame with analyst-friendly chaining
 - built-in network and resilience analysis
 - decision-support and reporting workflows

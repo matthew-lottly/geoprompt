@@ -260,6 +260,94 @@ def documentation_asset_manifest(manifest_path: str | Path = "docs/figures-manif
     return {"passed": not issues, "count": len(figures), "issues": issues, "figures": figures}
 
 
+def simulation_symbol_labels_manifest(src_root: str | Path = "src/geoprompt") -> dict[str, Any]:
+    """Collect per-symbol simulation/deprecation labels for API documentation.
+
+    Scans user modules for functions decorated with ``@simulation_only`` and
+    emits a label manifest suitable for generated API-index pages.
+    """
+    root = _to_path(src_root)
+    rows: list[dict[str, str]] = []
+    for path in sorted(root.rglob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except SyntaxError:
+            continue
+        module = path.stem
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            has_simulation_only = any(
+                (isinstance(d, ast.Name) and d.id == "simulation_only")
+                or (isinstance(d, ast.Attribute) and d.attr == "simulation_only")
+                or (isinstance(d, ast.Call) and (
+                    (isinstance(d.func, ast.Name) and d.func.id == "simulation_only")
+                    or (isinstance(d.func, ast.Attribute) and d.func.attr == "simulation_only")
+                ))
+                for d in node.decorator_list
+            )
+            if not has_simulation_only:
+                continue
+
+            reason = ""
+            for dec in node.decorator_list:
+                if not isinstance(dec, ast.Call):
+                    continue
+                is_target = (
+                    (isinstance(dec.func, ast.Name) and dec.func.id == "simulation_only")
+                    or (isinstance(dec.func, ast.Attribute) and dec.func.attr == "simulation_only")
+                )
+                if is_target and dec.args and isinstance(dec.args[0], ast.Constant) and isinstance(dec.args[0].value, str):
+                    reason = dec.args[0].value
+                    break
+
+            doc = (ast.get_docstring(node) or "").strip()
+            lowered = doc.lower()
+            deprecation_label = "deprecated" if "deprecated" in lowered else "active"
+            rows.append(
+                {
+                    "module": module,
+                    "symbol": node.name,
+                    "label": "simulation-only",
+                    "deprecation": deprecation_label,
+                    "reason": reason,
+                    "doc_excerpt": doc.split("\n", 1)[0],
+                }
+            )
+
+    return {
+        "count": len(rows),
+        "symbols": rows,
+        "generated_from": str(root),
+    }
+
+
+def export_simulation_symbol_labels(output_path: str | Path = "docs/reference-simulation-labels.md") -> str:
+    """Export simulation/deprecation labels to a markdown API-doc artifact."""
+    payload = simulation_symbol_labels_manifest()
+    path = _to_path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Simulation and Deprecation Labels",
+        "",
+        "Auto-generated symbol labels for simulation-only API surfaces.",
+        "",
+        f"- Symbols labeled: {payload['count']}",
+        "",
+        "| Module | Symbol | Label | Deprecation | Guidance |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for row in payload["symbols"]:
+        guidance = row["reason"] or row["doc_excerpt"] or "n/a"
+        lines.append(
+            f"| {row['module']} | {row['symbol']} | {row['label']} | {row['deprecation']} | {guidance.replace('|', '/')} |"
+        )
+    path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    return str(path)
+
+
 def release_readiness_report(
     paths: Iterable[str | Path],
     *,
@@ -326,6 +414,8 @@ __all__ = [
     "placeholder_inventory",
     "quality_scorecard",
     "release_readiness_report",
+    "simulation_symbol_labels_manifest",
+    "export_simulation_symbol_labels",
     "simulation_only",
     "subsystem_maturity_matrix",
     # I8 — Quality Gates, Benchmarks, and Scientific Defensibility

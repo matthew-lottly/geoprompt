@@ -3,6 +3,7 @@
     {
       "path": "assets/neighborhood-pressure-review-live.png",
       "caption": "Neighborhood pressure review generated from the package demo.",
+      "alt_text": "Map-style neighborhood pressure review screenshot highlighting zones under stress.",
       "data_source": "Representative synthetic utility sample data from the repository fixtures.",
       "generation_script": "geoprompt-demo",
       "last_verified": "2026-04-20",
@@ -11,6 +12,7 @@
     {
       "path": "assets/portfolio-scorecard-example.svg",
       "caption": "Portfolio scorecard example for screening and prioritization.",
+      "alt_text": "Portfolio scorecard with candidate projects, risk scores, and rank ordering.",
       "data_source": "Repository scenario output sample.",
       "generation_script": "examples/benchmark_report_bundle.py",
       "last_verified": "2026-04-20",
@@ -19,6 +21,7 @@
     {
       "path": "assets/before-after-scenario-example.svg",
       "caption": "Before and after scenario comparison view.",
+      "alt_text": "Side-by-side before and after scenario chart showing service and cost deltas.",
       "data_source": "Repository scenario output sample.",
       "generation_script": "examples/benchmark_report_bundle.py",
       "last_verified": "2026-04-20",
@@ -27,10 +30,38 @@
     {
       "path": "assets/restoration-storyboard-example.svg",
       "caption": "Restoration storyboard for outage sequencing and recovery planning.",
+      "alt_text": "Stepwise restoration storyboard showing repair sequence and cumulative demand restored.",
       "data_source": "Repository scenario output sample.",
       "generation_script": "examples/benchmark_report_bundle.py",
       "last_verified": "2026-04-20",
       "representative_note": "Shows a realistic utility restoration narrative using package outputs."
+    },
+    {
+      "path": "assets/network-restoration-unmet-demand.svg",
+      "caption": "Network restoration timeline versus unmet demand curve.",
+      "alt_text": "Dual-axis trend chart of restoration progress and unmet demand over time.",
+      "data_source": "Checked-in sample network scenario fixtures and data/sample_features.json.",
+      "generation_script": "generate_assets.py",
+      "last_verified": "2026-04-24",
+      "representative_note": "Direct-label dual-trend chart used in network workflow documentation."
+    },
+    {
+      "path": "assets/resilience-risk-heatmap-mitigation.svg",
+      "caption": "Resilience risk heatmap with before/after mitigation bars.",
+      "alt_text": "Heatmap matrix of asset risk tiers paired with mitigation bar comparisons.",
+      "data_source": "Checked-in outage and restoration summary sample fixtures.",
+      "generation_script": "generate_assets.py",
+      "last_verified": "2026-04-24",
+      "representative_note": "Risk prioritization visual for utility resilience case studies."
+    },
+    {
+      "path": "assets/migration-effort-benefit-quadrant.svg",
+      "caption": "Migration effort versus benefit quadrant.",
+      "alt_text": "Quadrant chart placing migration tasks by implementation effort and expected benefit.",
+      "data_source": "Migration playbook tasks represented from repository docs examples.",
+      "generation_script": "generate_assets.py",
+      "last_verified": "2026-04-24",
+      "representative_note": "Planning visual for sequencing migration work by impact and complexity."
     }
   ]
 }

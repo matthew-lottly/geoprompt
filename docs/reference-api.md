@@ -53,6 +53,11 @@ GeoPrompt exports a typed public API and includes a package typing marker for ed
 
 Use the API stability guide to distinguish mature surfaces from newer expansion modules. Deprecated names should keep a migration path before removal.
 
+## Simulation and Deprecation Labels
+
+Per-symbol simulation and deprecation labels are published in `docs/reference-simulation-labels.md`.
+Generate or refresh this artifact with `geoprompt.quality.export_simulation_symbol_labels(...)`.
+
 ## Capability Contract
 
 `geoprompt.capability_report()` is a stable contract for startup capability signaling.

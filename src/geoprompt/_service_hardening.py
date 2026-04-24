@@ -43,6 +43,23 @@ PRIVILEGED_OPERATIONS: frozenset[str] = frozenset(
     }
 )
 
+# Strict RBAC policy for high-risk operation classes (J2.20 follow-up).
+HIGH_RISK_RBAC: dict[str, set[str]] = {
+    "query": {"analyst", "admin"},
+    "enterprise": {"admin"},
+    "data_write": {"editor", "admin"},
+}
+
+
+def required_rbac_roles_for_path(path: str) -> set[str]:
+    """Return strict RBAC roles required for high-risk operations in *path*."""
+    clean = path.strip("/").replace("-", "_").lower()
+    required: set[str] = set()
+    for operation, roles in HIGH_RISK_RBAC.items():
+        if operation in clean:
+            required.update(roles)
+    return required
+
 
 def check_auth(
     path: str,
@@ -65,13 +82,19 @@ def check_auth(
     if clean == "health":
         return True, "health endpoint is public"
 
-    if required_roles and not actor_roles.intersection(required_roles):
+    normalized_roles = {role.lower() for role in actor_roles}
+
+    if required_roles and not normalized_roles.intersection({role.lower() for role in required_roles}):
         return False, f"actor lacks required role(s): {sorted(required_roles)}"
 
     for op in PRIVILEGED_OPERATIONS:
         if op in clean:
-            if not actor_roles:
+            if not normalized_roles:
                 return False, f"privileged operation '{op}' requires at least one role"
+
+    strict_roles = required_rbac_roles_for_path(path)
+    if strict_roles and not normalized_roles.intersection(strict_roles):
+        return False, f"operation requires one of roles: {sorted(strict_roles)}"
 
     return True, "allowed"
 
@@ -914,7 +937,9 @@ def run_deployment_smoke_checks(
 __all__ = [
     # J7.1
     "PRIVILEGED_OPERATIONS",
+    "HIGH_RISK_RBAC",
     "check_auth",
+    "required_rbac_roles_for_path",
     # J7.2
     "classify_operation",
     # J7.3

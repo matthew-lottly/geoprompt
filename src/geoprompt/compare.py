@@ -808,16 +808,40 @@ def _html_table(table: PromptTable) -> str:
     return f"<table><thead><tr>{header}</tr></thead><tbody>{body}</tbody></table>"
 
 
+def _ascii_sparkline(values: list[float]) -> str:
+    if not values:
+        return ""
+    blocks = "._-:=+*#%@"
+    lo = min(values)
+    hi = max(values)
+    span = hi - lo
+    if span <= 1e-9:
+        return blocks[4] * len(values)
+    chars: list[str] = []
+    for value in values:
+        idx = int(round(((value - lo) / span) * (len(blocks) - 1)))
+        idx = max(0, min(len(blocks) - 1, idx))
+        chars.append(blocks[idx])
+    return "".join(chars)
+
+
 def render_comparison_markdown(report: dict[str, Any]) -> str:
     summary = report.get("summary", {})
     benchmark_table = benchmark_summary_table(report)
     correctness_table = correctness_summary_table(report)
+    speedups = [
+        float(row.get("speedup_ratio"))
+        for row in benchmark_table.to_records()
+        if isinstance(row.get("speedup_ratio"), (int, float))
+    ]
+    speedup_trend = _ascii_sparkline(speedups)
     pass_count = sum(1 for value in summary.values() if bool(value))
     total_count = len(summary)
     lines = [
         "# GeoPrompt Comparison Summary",
         "",
         f"- Checks passed: {pass_count}/{total_count}",
+        f"- Speedup trend: {speedup_trend}",
         f"- Corpus: {', '.join(str(item) for item in report.get('comparison', {}).get('corpus', []))}",
         f"- Engines: {', '.join(str(item) for item in report.get('comparison', {}).get('engines', []))}",
         "",
@@ -835,21 +859,32 @@ def render_comparison_html(report: dict[str, Any]) -> str:
     summary = report.get("summary", {})
     pass_count = sum(1 for value in summary.values() if bool(value))
     total_count = len(summary)
+    speedups = [
+        float(row.get("speedup_ratio"))
+        for row in benchmark_summary_table(report).to_records()
+        if isinstance(row.get("speedup_ratio"), (int, float))
+    ]
+    speedup_trend = _ascii_sparkline(speedups)
     correctness_table = _html_table(correctness_summary_table(report))
     benchmark_table = _html_table(benchmark_summary_table(report))
     return (
         "<html><head><meta charset='utf-8'><title>GeoPrompt Comparison Summary</title>"
-        "<style>body{font-family:Arial,sans-serif;margin:24px;}table{border-collapse:collapse;width:100%;margin:16px 0;}"
-        "th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}th{background:#f6f8fa;}</style>"
+        "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1f2937;background:#f5f7fa;}"
+        "main{max-width:1100px;margin:0 auto;}section{background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:12px 14px;margin:12px 0;}"
+        "table{border-collapse:collapse;width:100%;margin:16px 0;background:#fff;}"
+        "th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}th{background:#eef2f7;}"
+        ".pill{display:inline-block;padding:4px 10px;border-radius:999px;background:#e8efff;color:#1e3a8a;font-weight:600;}</style>"
         "</head><body>"
+        "<main>"
         "<h1>GeoPrompt Comparison Summary</h1>"
-        f"<p><strong>Checks passed:</strong> {pass_count}/{total_count}</p>"
+        f"<p><span class='pill'>Checks passed: {pass_count}/{total_count}</span></p>"
+        f"<p><strong>Speedup trend:</strong> {html.escape(speedup_trend)}</p>"
         f"<p><strong>Corpus:</strong> {html.escape(', '.join(str(item) for item in report.get('comparison', {}).get('corpus', [])))}</p>"
-        "<h2>Correctness Overview</h2>"
+        "<section><h2>Correctness Overview</h2>"
         f"{correctness_table}"
-        "<h2>Benchmark Overview</h2>"
+        "</section><section><h2>Benchmark Overview</h2>"
         f"{benchmark_table}"
-        "</body></html>"
+        "</section></main></body></html>"
     )
 
 
@@ -982,6 +1017,149 @@ def render_benchmark_history_html(history_dir: str | Path) -> str:
     )
 
 
+def _benchmark_dashboard_alerts(rows: list[dict[str, Any]], min_speedup_ratio: float = 1.05) -> list[dict[str, Any]]:
+    alerts: list[dict[str, Any]] = []
+    for row in rows:
+        version = str(row.get("version", "unknown"))
+        all_checks_passed = bool(row.get("all_checks_passed"))
+        speedup = row.get("mean_speedup_ratio")
+        if not all_checks_passed:
+            alerts.append({
+                "version": version,
+                "severity": "high",
+                "kind": "correctness",
+                "message": "One or more correctness checks failed.",
+            })
+        if isinstance(speedup, (int, float)) and float(speedup) < min_speedup_ratio:
+            alerts.append({
+                "version": version,
+                "severity": "medium",
+                "kind": "performance",
+                "message": f"Mean speedup ratio {float(speedup):.3f} below threshold {min_speedup_ratio:.3f}.",
+            })
+    return alerts
+
+
+def render_benchmark_dashboard_markdown(
+    history_dir: str | Path,
+    *,
+    min_speedup_ratio: float = 1.05,
+) -> str:
+    table = benchmark_history_table(history_dir)
+    rows = table.to_records()
+    alerts = _benchmark_dashboard_alerts(rows, min_speedup_ratio=min_speedup_ratio)
+    lines = [
+        "# GeoPrompt Benchmark Dashboard",
+        "",
+        f"- Releases tracked: {len(rows)}",
+        f"- Alert threshold (mean speedup ratio): {min_speedup_ratio:.3f}",
+        f"- Alerts: {len(alerts)}",
+        "",
+    ]
+    if alerts:
+        lines.extend([
+            "## Alerts",
+            "",
+            "| Version | Severity | Type | Message |",
+            "| --- | --- | --- | --- |",
+        ])
+        lines.extend(
+            f"| {alert['version']} | {alert['severity']} | {alert['kind']} | {alert['message']} |"
+            for alert in alerts
+        )
+        lines.append("")
+
+    lines.extend([
+        "## Trend Table",
+        "",
+        table.to_markdown(),
+    ])
+    return "\n".join(lines).strip() + "\n"
+
+
+def render_benchmark_dashboard_html(
+    history_dir: str | Path,
+    *,
+    min_speedup_ratio: float = 1.05,
+) -> str:
+    table = benchmark_history_table(history_dir)
+    rows = table.to_records()
+    alerts = _benchmark_dashboard_alerts(rows, min_speedup_ratio=min_speedup_ratio)
+    alert_items = "".join(
+        "<li>"
+        f"<strong>{html.escape(str(item['version']))}</strong> "
+        f"[{html.escape(str(item['severity']))}/{html.escape(str(item['kind']))}] "
+        f"{html.escape(str(item['message']))}"
+        "</li>"
+        for item in alerts
+    )
+    alert_block = (
+        "<section><h2>Alerts</h2><ul>" + alert_items + "</ul></section>"
+        if alerts
+        else "<section><h2>Alerts</h2><p>No threshold alerts.</p></section>"
+    )
+    return (
+        "<html><head><meta charset='utf-8'><title>GeoPrompt Benchmark Dashboard</title>"
+        "<style>body{font-family:Segoe UI,Arial,sans-serif;margin:24px;color:#1f2937;background:#f5f7fa;}"
+        "main{max-width:1100px;margin:0 auto;}section{background:#fff;border:1px solid #d0d7de;border-radius:10px;padding:12px 14px;margin:12px 0;}"
+        "table{border-collapse:collapse;width:100%;margin:12px 0;}th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}th{background:#eef2f7;}"
+        "</style></head><body><main>"
+        "<h1>GeoPrompt Benchmark Dashboard</h1>"
+        f"<p><strong>Releases tracked:</strong> {len(rows)}<br>"
+        f"<strong>Alert threshold:</strong> {min_speedup_ratio:.3f}</p>"
+        f"{alert_block}"
+        "<section><h2>Trend Table</h2>"
+        f"{_html_table(table)}"
+        "</section></main></body></html>"
+    )
+
+
+def export_benchmark_dashboard_bundle(
+    history_dir: str | Path,
+    *,
+    min_speedup_ratio: float = 1.05,
+) -> dict[str, str]:
+    history_path = Path(history_dir)
+    history_path.mkdir(parents=True, exist_ok=True)
+    table = benchmark_history_table(history_path)
+    rows = table.to_records()
+    alerts = _benchmark_dashboard_alerts(rows, min_speedup_ratio=min_speedup_ratio)
+
+    payload = {
+        "metadata": {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "source_dir": str(history_path),
+            "min_speedup_ratio": min_speedup_ratio,
+        },
+        "summary": {
+            "release_count": len(rows),
+            "alert_count": len(alerts),
+            "high_alert_count": sum(1 for alert in alerts if alert.get("severity") == "high"),
+            "medium_alert_count": sum(1 for alert in alerts if alert.get("severity") == "medium"),
+        },
+        "alerts": alerts,
+        "trend_rows": rows,
+    }
+
+    json_path = history_path / "benchmark_dashboard.json"
+    markdown_path = history_path / "benchmark_dashboard.md"
+    html_path = history_path / "benchmark_dashboard.html"
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    markdown_path.write_text(
+        render_benchmark_dashboard_markdown(history_path, min_speedup_ratio=min_speedup_ratio),
+        encoding="utf-8",
+    )
+    html_path.write_text(
+        render_benchmark_dashboard_html(history_path, min_speedup_ratio=min_speedup_ratio),
+        encoding="utf-8",
+    )
+    return {
+        "json": str(json_path),
+        "markdown": str(markdown_path),
+        "html": str(html_path),
+    }
+
+
 def export_benchmark_history(history_dir: str | Path) -> dict[str, str]:
     """Export benchmark history summary artifacts to the given directory."""
     history_path = Path(history_dir)
@@ -991,7 +1169,9 @@ def export_benchmark_history(history_dir: str | Path) -> dict[str, str]:
     json_path = history_path / "benchmark_history.json"
     html_path.write_text(render_benchmark_history_html(history_path), encoding="utf-8")
     json_path.write_text(json.dumps(table.to_records(), indent=2), encoding="utf-8")
-    return {"html": str(html_path), "json": str(json_path)}
+    markdown_path = history_path / "benchmark_history.md"
+    markdown_path.write_text(benchmark_history_table(history_path).to_markdown() + "\n", encoding="utf-8")
+    return {"html": str(html_path), "json": str(json_path), "markdown": str(markdown_path)}
 
 
 def parse_args() -> argparse.Namespace:
@@ -1031,9 +1211,12 @@ __all__ = [
     "build_comparison_report",
     "correctness_summary_table",
     "export_benchmark_history",
+    "export_benchmark_dashboard_bundle",
     "export_comparison_bundle",
     "main",
     "render_benchmark_history_html",
+    "render_benchmark_dashboard_html",
+    "render_benchmark_dashboard_markdown",
     "render_comparison_html",
     "render_comparison_markdown",
     "save_benchmark_snapshot",

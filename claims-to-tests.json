@@ -1,0 +1,62 @@
+{
+  "schema_version": "1.0",
+  "generated_by": "manual",
+  "claims": [
+    {
+      "id": "C-OUTPUT-CONTRACTS",
+      "statement": "Scenario and resilience outputs publish structured contracts in JSON/CSV/Markdown/HTML.",
+      "tests": [
+        "tests/test_tools_advanced.py",
+        "tests/test_output_quality_gates.py"
+      ],
+      "artifacts": [
+        "src/geoprompt/tools.py",
+        "data/executive_briefing_golden.html"
+      ]
+    },
+    {
+      "id": "C-COMPARE-BUNDLE",
+      "statement": "Comparison workflow exports machine-readable and presentation-ready bundles.",
+      "tests": [
+        "tests/test_compare_module.py"
+      ],
+      "artifacts": [
+        "src/geoprompt/compare.py",
+        "outputs/geoprompt_comparison_report.json",
+        "outputs/geoprompt_comparison_summary.html"
+      ]
+    },
+    {
+      "id": "C-BENCHMARK-DASHBOARD",
+      "statement": "Benchmark history includes threshold-aware dashboard outputs for governance review.",
+      "tests": [
+        "tests/test_compare_module.py"
+      ],
+      "artifacts": [
+        "src/geoprompt/compare.py",
+        "tests/test_compare_module.py"
+      ]
+    },
+    {
+      "id": "C-DOCS-FIGURES",
+      "statement": "Documentation figures are cataloged with metadata and valid references.",
+      "tests": [
+        "tests/test_figure_manifest_gate.py"
+      ],
+      "artifacts": [
+        "docs/figures-manifest.json"
+      ]
+    },
+    {
+      "id": "C-FRESHNESS",
+      "statement": "Generated outputs include provenance and fail stale checks in CI.",
+      "tests": [
+        "tests/test_artifact_freshness_gate.py"
+      ],
+      "artifacts": [
+        "src/geoprompt/artifacts.py",
+        "tests/test_artifact_freshness_gate.py"
+      ]
+    }
+  ]
+}

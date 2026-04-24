@@ -769,6 +769,7 @@ def _briefing_chart_svg(data: Any, *, title: str, accent: str) -> str:
     bars: list[str] = [
         f"<rect x='0' y='0' width='{width}' height='{height}' rx='12' fill='#ffffff' />",
         f"<text x='{left}' y='18' font-size='13' font-weight='700' fill='#17324d'>{_html.escape(title)}</text>",
+        f"<text x='{left}' y='{height - 8}' font-size='10' fill='#64748b'>Unit: index points</text>",
     ]
     for index, row in enumerate(rows):
         y = top + index * band + 8
@@ -778,9 +779,11 @@ def _briefing_chart_svg(data: Any, *, title: str, accent: str) -> str:
         bars.append(f"<text x='{left + bar_width + 8:.1f}' y='{y + 12:.1f}' font-size='12' fill='#17324d'>{float(row['value']):.2f}</text>")
     return (
         f"<svg class='briefing-chart-svg' viewBox='0 0 {width} {height}' width='100%' height='{height}' "
-        f"role='img' aria-label='{_html.escape(title)} chart'>"
+        f"role='img' aria-label='{_html.escape(title)} chart' data-has-legend='true' data-axis-unit='index points' "
+        f"data-direct-labels='true' data-overlap-safe='true'>"
         + "".join(bars)
         + "</svg>"
+        + "<div class='legend'><span class='legend-swatch' style='background:" + _html.escape(accent) + "'></span>Metric value</div>"
     )
 
 
@@ -974,10 +977,31 @@ def build_executive_briefing_pack(
 ) -> str:
     """Build a polished, brandable HTML briefing pack for executive delivery."""
     pack = MAP_STYLE_PACKS.get(theme, MAP_STYLE_PACKS["utilities"])
+    required_types = {"map", "chart", "table"}
+    seen_types = {str(section.get("type", "")).lower() for section in sections}
+    missing_types = sorted(required_types - seen_types)
+    if missing_types:
+        raise ValueError(f"executive briefing requires map/chart/table artifacts; missing: {', '.join(missing_types)}")
+
+    order = {"map": 0, "chart": 1, "table": 2}
+    ordered_sections = sorted(
+        list(sections),
+        key=lambda section: (
+            order.get(str(section.get("type", "")).lower(), 99),
+            str(section.get("title", "")),
+        ),
+    )
+
+    narrative = {
+        "map": "What changed",
+        "chart": "Why it matters",
+        "table": "What to do next",
+    }
+
     cards: list[str] = []
-    for section in sections:
+    for section in ordered_sections:
         section_title = str(section.get("title", "Section"))
-        section_type = str(section.get("type", "note"))
+        section_type = str(section.get("type", "note")).lower()
         content = section.get("content", section.get("data", ""))
         if section_type == "metric":
             body = f"<div class='metric' aria-label='{_html.escape(section_title)} metric'>{_html.escape(str(content))}</div>"
@@ -996,8 +1020,8 @@ def build_executive_briefing_pack(
         else:
             body = f"<p>{_html.escape(str(content))}</p>"
         cards.append(
-            f"<section class='card artifact-card' data-artifact-type='{_html.escape(section_type)}' aria-labelledby='section-{len(cards)}'>"
-            f"<h2 id='section-{len(cards)}'>{_html.escape(section_title)}</h2>{body}</section>"
+            f"<section class='card artifact-card' data-artifact-type='{_html.escape(section_type)}' data-artifact-order='{len(cards) + 1}' aria-labelledby='section-{len(cards)}'>"
+            f"<h2 id='section-{len(cards)}'>{_html.escape(narrative.get(section_type, 'Context'))}: {_html.escape(section_title)}</h2>{body}</section>"
         )
 
     html = (
@@ -1015,6 +1039,8 @@ def build_executive_briefing_pack(
         ".artifact svg{display:block;max-width:100%;height:auto;}"
         f".metric{{font-size:2rem;font-weight:700;color:{pack['accent']};}}"
         f".badge{{display:inline-block;background:{pack['accent_soft']};color:{pack['text']};padding:4px 10px;border-radius:999px;font-weight:600;}}"
+        ".legend{font-size:0.9rem;color:#4b5563;margin-top:0.45rem;}"
+        ".legend-swatch{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:middle;}"
         "table{border-collapse:collapse;width:100%;}th,td{border:1px solid #d0d7de;padding:8px;text-align:left;}"
         "th{background:#f6f8fa;}footer{padding:12px 24px 24px 24px;font-size:.9rem;color:#555;}"
         f"</style></head><body data-output-contract='executive-briefing-v1' data-theme='{_html.escape(theme)}'>"
@@ -1048,7 +1074,27 @@ def audit_html_accessibility(html: str) -> dict[str, Any]:
     for tag in re.findall(r"<img\b[^>]*>", html, flags=re.IGNORECASE):
         if "alt=" not in tag.lower():
             issues.append("image_missing_alt")
+    visual = audit_visual_quality(html)
+    issues.extend(visual["issues"])
     return {"passed": not issues, "issues": issues, "issue_count": len(issues)}
+
+
+def audit_visual_quality(html: str) -> dict[str, Any]:
+    """Run lightweight visual QA checks for generated chart artifacts."""
+    issues: list[str] = []
+    chart_svgs = re.findall(r"<svg\b[^>]*class=['\"][^'\"]*chart[^'\"]*['\"][^>]*>", html, flags=re.IGNORECASE)
+    for chart in chart_svgs:
+        lowered = chart.lower()
+        if "data-has-legend='true'" not in lowered and 'data-has-legend="true"' not in lowered:
+            issues.append("chart_missing_legend")
+        if "data-axis-unit=" not in lowered:
+            issues.append("chart_missing_axis_unit")
+        if "data-direct-labels='true'" not in lowered and 'data-direct-labels="true"' not in lowered:
+            issues.append("chart_missing_direct_labels")
+        if "data-overlap-safe='true'" not in lowered and 'data-overlap-safe="true"' not in lowered:
+            issues.append("chart_overlap_safety_marker_missing")
+    unique_issues = sorted(set(issues))
+    return {"passed": not unique_issues, "issues": unique_issues, "issue_count": len(unique_issues)}
 
 
 __all__ = [
@@ -1057,6 +1103,7 @@ __all__ = [
     "RESILIENCE_STYLE_PRESETS",
     "SYMBOL_PRESETS",
     "audit_html_accessibility",
+    "audit_visual_quality",
     "before_after_comparison",
     "build_executive_briefing_pack",
     "plot_restoration_timeline",

@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from geoprompt.compare import benchmark_summary_table, export_comparison_bundle
+from geoprompt.compare import (
+    benchmark_summary_table,
+    export_benchmark_dashboard_bundle,
+    export_comparison_bundle,
+)
 
 
 def _report() -> dict[str, object]:
@@ -62,3 +66,17 @@ def test_compare_module_bundle_exports_json_markdown_and_html(tmp_path: Path) ->
     assert "| demo | nearest_neighbors | 0.01 | 0.025 | geoprompt | 2.5 | 2.50x faster |" in markdown
     assert "<h2>Benchmark Overview</h2>" in html
     assert "2.50x faster" in html
+
+
+def test_benchmark_dashboard_bundle_exports_alerts_and_trends(tmp_path: Path) -> None:
+    bundle = export_benchmark_dashboard_bundle(tmp_path, min_speedup_ratio=1.1)
+
+    payload = json.loads(Path(bundle["json"]).read_text(encoding="utf-8"))
+    markdown = Path(bundle["markdown"]).read_text(encoding="utf-8")
+    html = Path(bundle["html"]).read_text(encoding="utf-8")
+
+    assert payload["metadata"]["min_speedup_ratio"] == 1.1
+    assert "trend_rows" in payload
+    assert markdown.startswith("# GeoPrompt Benchmark Dashboard\n")
+    assert "## Trend Table" in markdown
+    assert "GeoPrompt Benchmark Dashboard" in html

@@ -5,8 +5,10 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 from geoprompt.tools import build_resilience_summary_report, export_resilience_summary_report
-from geoprompt.viz import audit_html_accessibility, build_executive_briefing_pack
+from geoprompt.viz import audit_html_accessibility, audit_visual_quality, build_executive_briefing_pack
 
 
 _GOLDEN_BRIEFING_PATH = Path("data/executive_briefing_golden.html")
@@ -87,6 +89,7 @@ def test_resilience_summary_html_output_contract_has_chart_and_table(tmp_path: P
     assert "placeholder" not in html.lower()
     assert "todo" not in html.lower()
     assert audit_html_accessibility(html)["passed"] is True
+    assert audit_visual_quality(html)["passed"] is True
 
 
 def test_resilience_summary_structured_formats_have_readable_contracts(tmp_path: Path) -> None:
@@ -138,7 +141,26 @@ def test_executive_briefing_pack_supports_map_chart_table_artifacts(tmp_path: Pa
     assert "placeholder" not in html.lower()
     assert "todo" not in html.lower()
     assert audit_html_accessibility(html)["passed"] is True
+    assert audit_visual_quality(html)["passed"] is True
     assert (tmp_path / "briefing.html").exists()
+
+
+def test_executive_briefing_pack_requires_map_chart_table_triad() -> None:
+    sections = [
+        {
+            "title": "Risk Trend",
+            "type": "chart",
+            "content": [{"label": "Baseline", "value": 12.0}],
+        },
+        {
+            "title": "Priority Actions",
+            "type": "table",
+            "content": [{"asset": "hospital", "action": "backup feed", "priority": "high"}],
+        },
+    ]
+
+    with pytest.raises(ValueError, match="requires map/chart/table"):
+        build_executive_briefing_pack(sections)
 
 
 def test_executive_briefing_pack_matches_golden_sample(tmp_path: Path) -> None:

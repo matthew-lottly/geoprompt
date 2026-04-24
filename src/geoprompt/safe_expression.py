@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import logging
 import operator
+import time
+from collections import deque
 from typing import Any, Iterable
 
 _logger = logging.getLogger(__name__)
@@ -81,6 +83,86 @@ _ALLOWED_CMPOPS: dict[type[ast.cmpop], Any] = {
     ast.In: lambda a, b: a in b,
     ast.NotIn: lambda a, b: a not in b,
 }
+
+_EXPRESSION_METRICS: dict[str, Any] = {
+    "total_evaluated": 0,
+    "validation_errors": 0,
+    "execution_errors": 0,
+    "module_metrics": {},
+}
+
+_REJECTION_WINDOW_SECONDS = 60
+_REJECTION_THRESHOLD = 5
+_CALLER_REJECTIONS: dict[str, deque[float]] = {}
+
+
+def _metric_bucket(module: str) -> dict[str, int]:
+    modules = _EXPRESSION_METRICS.setdefault("module_metrics", {})
+    bucket = modules.setdefault(module, {"evaluated": 0, "validation_errors": 0, "execution_errors": 0})
+    return bucket
+
+
+def _record_metric(module: str, key: str) -> None:
+    _EXPRESSION_METRICS[key] = int(_EXPRESSION_METRICS.get(key, 0)) + 1
+    bucket = _metric_bucket(module)
+    bucket[key if key != "total_evaluated" else "evaluated"] = int(bucket.get(key if key != "total_evaluated" else "evaluated", 0)) + 1
+
+
+def _register_rejection(caller_id: str, now: float, *, window_seconds: int) -> int:
+    history = _CALLER_REJECTIONS.setdefault(caller_id, deque())
+    history.append(now)
+    cutoff = now - window_seconds
+    while history and history[0] < cutoff:
+        history.popleft()
+    return len(history)
+
+
+def _is_caller_blocked(caller_id: str, now: float, *, window_seconds: int, threshold: int) -> bool:
+    history = _CALLER_REJECTIONS.get(caller_id)
+    if not history:
+        return False
+    cutoff = now - window_seconds
+    while history and history[0] < cutoff:
+        history.popleft()
+    return len(history) >= threshold
+
+
+def get_expression_audit_metrics() -> dict[str, Any]:
+    """Return a snapshot of expression-evaluation metrics and rejection counters."""
+    module_metrics = {
+        name: {
+            "evaluated": int(values.get("evaluated", 0)),
+            "validation_errors": int(values.get("validation_errors", 0)),
+            "execution_errors": int(values.get("execution_errors", 0)),
+        }
+        for name, values in dict(_EXPRESSION_METRICS.get("module_metrics", {})).items()
+    }
+    now = time.time()
+    blocked_callers: dict[str, int] = {}
+    for caller_id, history in list(_CALLER_REJECTIONS.items()):
+        cutoff = now - _REJECTION_WINDOW_SECONDS
+        while history and history[0] < cutoff:
+            history.popleft()
+        if history:
+            blocked_callers[caller_id] = len(history)
+    return {
+        "total_evaluated": int(_EXPRESSION_METRICS.get("total_evaluated", 0)),
+        "validation_errors": int(_EXPRESSION_METRICS.get("validation_errors", 0)),
+        "execution_errors": int(_EXPRESSION_METRICS.get("execution_errors", 0)),
+        "module_metrics": module_metrics,
+        "recent_rejections_by_caller": blocked_callers,
+        "rejection_window_seconds": _REJECTION_WINDOW_SECONDS,
+        "rejection_threshold": _REJECTION_THRESHOLD,
+    }
+
+
+def reset_expression_audit_metrics() -> None:
+    """Reset expression metrics and caller rejection history (for tests/admin tooling)."""
+    _EXPRESSION_METRICS["total_evaluated"] = 0
+    _EXPRESSION_METRICS["validation_errors"] = 0
+    _EXPRESSION_METRICS["execution_errors"] = 0
+    _EXPRESSION_METRICS["module_metrics"] = {}
+    _CALLER_REJECTIONS.clear()
 
 
 def _check_depth(node: ast.AST, *, max_depth: int, _depth: int = 0) -> None:
@@ -264,6 +346,10 @@ def evaluate_safe_expression(
     max_nodes: int = 120,
     max_depth: int = 16,
     allowed_attribute_roots: Iterable[str] | None = None,
+    module: str = "unknown",
+    caller_id: str | None = None,
+    rejection_window_seconds: int = _REJECTION_WINDOW_SECONDS,
+    rejection_threshold: int = _REJECTION_THRESHOLD,
 ) -> Any:
     """Validate and evaluate a restricted expression with no eval/exec.
 
@@ -289,27 +375,83 @@ def evaluate_safe_expression(
             return expr[:max_display] + "..."
         return expr
 
+    module_name = module.strip() if isinstance(module, str) and module.strip() else "unknown"
+    _record_metric(module_name, "total_evaluated")
+
+    inferred_caller = caller_id
+    if inferred_caller is None and isinstance(context, dict):
+        inferred_caller = str(context.get("__caller_id") or context.get("__caller_ip") or "").strip() or None
+
+    now = time.time()
+    if inferred_caller and _is_caller_blocked(
+        inferred_caller,
+        now,
+        window_seconds=rejection_window_seconds,
+        threshold=rejection_threshold,
+    ):
+        _logger.warning(
+            "Rejected expression (caller circuit breaker): caller=%s module=%s",
+            inferred_caller,
+            module_name,
+        )
+        _record_metric(module_name, "validation_errors")
+        raise ExpressionValidationError(
+            "expression evaluations temporarily blocked for caller due to repeated validation failures"
+        )
+
     if not isinstance(expression, str) or not expression.strip():
         error_msg = "expression must be a non-empty string"
-        _logger.warning("Rejected expression: %s", error_msg)
+        if inferred_caller:
+            _register_rejection(inferred_caller, now, window_seconds=rejection_window_seconds)
+        _record_metric(module_name, "validation_errors")
+        _logger.warning("Rejected expression: %s (module=%s, caller=%s)", error_msg, module_name, inferred_caller or "unknown")
         raise ExpressionValidationError(error_msg)
 
     if len(expression) > max_length:
         error_msg = f"expression length {len(expression)} exceeds maximum {max_length}"
-        _logger.warning("Rejected expression (length exceeded): %s", _redact_expression(expression))
+        if inferred_caller:
+            _register_rejection(inferred_caller, now, window_seconds=rejection_window_seconds)
+        _record_metric(module_name, "validation_errors")
+        _logger.warning(
+            "Rejected expression (length exceeded): %s (module=%s, caller=%s)",
+            _redact_expression(expression),
+            module_name,
+            inferred_caller or "unknown",
+        )
         raise ExpressionValidationError(error_msg)
 
     try:
         tree = ast.parse(expression, mode="eval")
     except SyntaxError as exc:
-        _logger.warning("Rejected expression (syntax error): %s — %s", _redact_expression(expression), exc.msg)
+        if inferred_caller:
+            _register_rejection(inferred_caller, now, window_seconds=rejection_window_seconds)
+        _record_metric(module_name, "validation_errors")
+        _logger.warning(
+            "Rejected expression (syntax error): %s - %s (module=%s, caller=%s)",
+            _redact_expression(expression),
+            exc.msg,
+            module_name,
+            inferred_caller or "unknown",
+        )
         raise ExpressionValidationError(f"invalid expression syntax: {exc.msg}") from exc
 
     roots = set(allowed_attribute_roots or [])
     try:
         _validate_tree(tree, max_nodes=max_nodes, max_depth=max_depth, allowed_attribute_roots=roots)
     except ExpressionValidationError as exc:
-        _logger.warning("Rejected expression (validation failed): %s — %s", _redact_expression(expression), str(exc))
+        if inferred_caller:
+            count = _register_rejection(inferred_caller, now, window_seconds=rejection_window_seconds)
+        else:
+            count = None
+        _record_metric(module_name, "validation_errors")
+        _logger.warning(
+            "Rejected expression (validation failed): %s - %s (module=%s, caller=%s, rejection_count=%s)",
+            _redact_expression(expression),
+            str(exc),
+            module_name,
+            inferred_caller or "unknown",
+            count if count is not None else "n/a",
+        )
         raise
 
     local_ctx = dict(context or {})
@@ -319,9 +461,17 @@ def evaluate_safe_expression(
     try:
         return _eval_node(tree, local_ctx, allowed_attribute_roots=roots)
     except ExpressionValidationError:
+        _record_metric(module_name, "validation_errors")
         raise
     except Exception as exc:
-        _logger.warning("Rejected expression (execution error): %s — %s", _redact_expression(expression), str(exc))
+        _record_metric(module_name, "execution_errors")
+        _logger.warning(
+            "Rejected expression (execution error): %s - %s (module=%s, caller=%s)",
+            _redact_expression(expression),
+            str(exc),
+            module_name,
+            inferred_caller or "unknown",
+        )
         raise ExpressionExecutionError(str(exc)) from exc
 
 
@@ -329,4 +479,6 @@ __all__ = [
     "ExpressionExecutionError",
     "ExpressionValidationError",
     "evaluate_safe_expression",
+    "get_expression_audit_metrics",
+    "reset_expression_audit_metrics",
 ]

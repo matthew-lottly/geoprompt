@@ -30,6 +30,50 @@ else:  # pragma: no cover - optional dependency
 
 _ZIP_SENTINEL = object()
 
+_REPORT_STYLE = {
+    "background": "#f5f7fa",
+    "surface": "#ffffff",
+    "text": "#1f2937",
+    "muted": "#4b5563",
+    "grid": "#d1d5db",
+    "accent": "#1d4ed8",
+    "improved": "#12724f",
+    "worsened": "#b42318",
+    "ribbon": "#94b8e6",
+}
+
+
+def _ascii_sparkline(values: Sequence[float]) -> str:
+    if not values:
+        return ""
+    blocks = "._-:=+*#%@"
+    lo = min(values)
+    hi = max(values)
+    span = hi - lo
+    if span <= 1e-9:
+        return blocks[4] * len(values)
+    chars: list[str] = []
+    for value in values:
+        idx = int(round(((value - lo) / span) * (len(blocks) - 1)))
+        idx = max(0, min(len(blocks) - 1, idx))
+        chars.append(blocks[idx])
+    return "".join(chars)
+
+
+def _report_css() -> str:
+    return (
+        "body{font-family:Segoe UI,Arial,sans-serif;margin:2rem;color:#1f2937;background:#f5f7fa;}"
+        "h1,h2{margin-bottom:0.5rem;}"
+        "main{max-width:1100px;margin:0 auto;}"
+        "section{background:#ffffff;border:1px solid #d1d5db;border-radius:10px;padding:0.9rem 1rem;margin:0.9rem 0;}"
+        "table{border-collapse:collapse;width:100%;margin-top:0.6rem;background:#ffffff;}"
+        "th,td{border:1px solid #d1d5db;padding:0.55rem;text-align:left;}"
+        "th{background:#eef2f7;}"
+        ".pill{display:inline-block;padding:0.2rem 0.55rem;margin-right:0.4rem;border-radius:999px;background:#e8efff;color:#1e3a8a;font-weight:600;}"
+        ".legend{font-size:0.9rem;color:#4b5563;margin-top:0.4rem;}"
+        ".legend-swatch{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:4px;vertical-align:middle;}"
+    )
+
 
 def _zip_strict(*iterables: Sequence[Any]) -> list[tuple[Any, ...]]:
     rows: list[tuple[Any, ...]] = []
@@ -615,18 +659,23 @@ def _scenario_report_svg(rows: Sequence[dict[str, float | str]]) -> str:
         delta_percent = float(row["delta_percent"])
         bar_width = abs(delta_percent) / max_magnitude * 220.0
         y = 18 + index * 32
-        color = "#1d8f6a" if str(row["direction"]) == "improved" else "#c75050"
+        color = _REPORT_STYLE["improved"] if str(row["direction"]) == "improved" else _REPORT_STYLE["worsened"]
         x = center_x if delta_percent >= 0 else center_x - bar_width
+        label_x = x + bar_width + 6 if delta_percent >= 0 else max(6.0, x - 36)
         bar_rows.append(
-            f"<text x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"#1f2937\">{escape(str(row['metric']))}</text>"
+            f"<text class=\"direct-label\" x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"{_REPORT_STYLE['text']}\">{escape(str(row['metric']))}</text>"
             f"<rect x=\"{x:.1f}\" y=\"{y}\" width=\"{bar_width:.1f}\" height=\"18\" fill=\"{color}\" rx=\"4\" />"
-            f"<text x=\"{center_x + 228:.1f}\" y=\"{y + 12}\" font-size=\"12\" fill=\"#4b5563\">{delta_percent:.2f}%</text>"
+            f"<text class=\"direct-label\" x=\"{label_x:.1f}\" y=\"{y + 12}\" font-size=\"12\" fill=\"{_REPORT_STYLE['muted']}\">{delta_percent:.2f}%</text>"
         )
     return (
-        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Metric delta percent chart\">"
+        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Metric delta percent chart\" data-has-legend=\"true\" data-axis-unit=\"percent\" data-direct-labels=\"true\" data-overlap-safe=\"true\">"
+        f"<rect x=\"0\" y=\"0\" width=\"{width}\" height=\"{height}\" fill=\"{_REPORT_STYLE['surface']}\" rx=\"8\" />"
         f"<line x1=\"{center_x:.1f}\" y1=\"0\" x2=\"{center_x:.1f}\" y2=\"{height}\" stroke=\"#9ca3af\" stroke-dasharray=\"4 4\" />"
+        f"<text x=\"{center_x + 8:.1f}\" y=\"14\" font-size=\"11\" fill=\"{_REPORT_STYLE['muted']}\">Delta (%)</text>"
         + "".join(bar_rows)
         + "</svg>"
+        + "<div class=\"legend\"><span class=\"legend-swatch\" style=\"background:#12724f\"></span>improved"
+        + " <span class=\"legend-swatch\" style=\"background:#b42318\"></span>worsened</div>"
     )
 
 
@@ -676,13 +725,15 @@ def _multi_scenario_svg(report: dict[str, Any]) -> str:
             )
 
     legend = "".join(
-        f"<span style=\"display:inline-block;margin-right:12px;\"><span style=\"display:inline-block;width:10px;height:10px;background:{colors[i % len(colors)]};border-radius:2px;margin-right:4px;\"></span>{escape(name)}</span>"
+        f"<span style=\"display:inline-block;margin-right:12px;\"><span class=\"legend-swatch\" style=\"background:{colors[i % len(colors)]};\"></span>{escape(name)}</span>"
         for i, name in enumerate(scenario_names)
     )
 
     return (
-        f"<div>{legend}</div>"
-        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Multi-scenario delta chart\">"
+        f"<div class=\"legend\" data-has-legend=\"true\">{legend}</div>"
+        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Multi-scenario delta chart\" data-has-legend=\"true\" data-axis-unit=\"percent\" data-direct-labels=\"true\" data-overlap-safe=\"true\">"
+        f"<rect x=\"0\" y=\"0\" width=\"{width}\" height=\"{height}\" fill=\"{_REPORT_STYLE['surface']}\" rx=\"8\" />"
+        f"<text x=\"{left:.1f}\" y=\"16\" font-size=\"11\" fill=\"{_REPORT_STYLE['muted']}\">Metric delta (%) by scenario</text>"
         + "".join(row_parts)
         + "</svg>"
     )
@@ -713,14 +764,18 @@ def _scenario_uncertainty_svg(uncertainty: dict[str, dict[str, float]]) -> str:
         end_x = 140 + ((upper - min_value) / span) * 360
         observed_x = 140 + ((observed - min_value) / span) * 360
         rows.append(
-            f"<text x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"#1f2937\">{escape(str(metric))}</text>"
-            f"<line x1=\"{start_x:.1f}\" y1=\"{y + 9}\" x2=\"{end_x:.1f}\" y2=\"{y + 9}\" stroke=\"#2563eb\" stroke-width=\"4\" stroke-linecap=\"round\" />"
+            f"<text class=\"direct-label\" x=\"8\" y=\"{y + 12}\" font-size=\"12\" fill=\"{_REPORT_STYLE['text']}\">{escape(str(metric))}</text>"
+            f"<rect x=\"{start_x:.1f}\" y=\"{y + 5}\" width=\"{max(end_x - start_x, 1.5):.1f}\" height=\"8\" fill=\"{_REPORT_STYLE['ribbon']}\" opacity=\"0.5\" rx=\"4\" />"
             f"<circle cx=\"{observed_x:.1f}\" cy=\"{y + 9}\" r=\"5\" fill=\"#111827\" />"
+            f"<text class=\"direct-label\" x=\"505\" y=\"{y + 12}\" font-size=\"11\" fill=\"{_REPORT_STYLE['muted']}\">{observed:.2f}</text>"
         )
     return (
-        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Uncertainty interval chart\">"
+        f"<svg viewBox=\"0 0 {width} {height}\" width=\"100%\" height=\"{height}\" role=\"img\" aria-label=\"Uncertainty interval chart\" data-has-legend=\"true\" data-axis-unit=\"metric units\" data-direct-labels=\"true\" data-overlap-safe=\"true\">"
+        f"<text x=\"140\" y=\"14\" font-size=\"11\" fill=\"{_REPORT_STYLE['muted']}\">Observed value with confidence ribbon</text>"
         + "".join(rows)
         + "</svg>"
+        + "<div class=\"legend\"><span class=\"legend-swatch\" style=\"background:#94b8e6\"></span>confidence interval ribbon"
+        + " <span class=\"legend-swatch\" style=\"background:#111827\"></span>observed value</div>"
     )
 
 
@@ -766,10 +821,12 @@ def export_scenario_report(
 
     if resolved_format == "markdown":
         summary = report.get("summary", {})
+        delta_spark = _ascii_sparkline([float(row["delta_percent"]) for row in rows])
         lines = [
             f"# Scenario Report: {report.get('baseline_name', 'baseline')} vs {report.get('candidate_name', 'candidate')}",
             "",
             f"Metrics compared: {int(summary.get('metric_count', 0))}",
+            f"Delta trend: {delta_spark}",
             "",
             "| Metric | Baseline | Candidate | Delta | Delta % | Direction |",
             "| --- | ---: | ---: | ---: | ---: | --- |",
@@ -813,35 +870,36 @@ def export_scenario_report(
 <head>
   <meta charset=\"utf-8\">
   <title>{title}</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
-    h1, h2 {{ margin-bottom: 0.5rem; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.6rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-    .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
-  </style>
+    <style>{_report_css()}</style>
 </head>
 <body>
+    <main>
   <h1>{title}</h1>
     <p><span class=\"pill\">metrics: {int(summary.get('metric_count', 0))}</span>
     <span class=\"pill\">improved: {len(summary.get('improved_metrics', []))}</span>
     <span class=\"pill\">worsened: {len(summary.get('worsened_metrics', []))}</span></p>
-  <h2>Metrics</h2>
+    <section><h2>Metrics</h2>
     {chart_html}
+    </section>
+    <section>
   <table>
     <thead>
       <tr><th>Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Delta %</th><th>Direction</th></tr>
     </thead>
     <tbody>{row_html}</tbody>
   </table>
-    <h2>Top Metric Changes</h2>
+        </section>
+        <section><h2>Top Metric Changes</h2>
     {ranking_html}
-  <h2>Metadata</h2>
+        </section>
+        <section><h2>Metadata</h2>
   <ul>{metadata_items}</ul>
-  <h2>Uncertainty</h2>
+        </section>
+        <section><h2>Uncertainty</h2>
     {uncertainty_chart_html}
   <ul>{uncertainty_items}</ul>
+        </section>
+    </main>
 </body>
 </html>
 """
@@ -882,8 +940,11 @@ def export_multi_scenario_report(
         return str(path)
 
     if resolved_format == "markdown":
+        score_spark = _ascii_sparkline([float(item["weighted_score"]) for item in ranking])
         lines = [
             f"# Multi-Scenario Report (baseline: {report.get('baseline_name', '')})",
+            "",
+            f"Scenario score trend: {score_spark}",
             "",
             "| Scenario | Metric | Baseline | Candidate | Delta | Delta % | Direction |",
             "| --- | --- | ---: | ---: | ---: | ---: | --- |",
@@ -941,24 +1002,23 @@ def export_multi_scenario_report(
 <head>
   <meta charset=\"utf-8\">
   <title>Multi-Scenario Report</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-  </style>
+    <style>{_report_css()}</style>
 </head>
 <body>
+    <main>
   <h1>Multi-Scenario Report</h1>
   <p>Baseline: <strong>{escape(str(report.get('baseline_name', '')))}</strong></p>
     <p>Top scenario: <strong>{escape(str(top_scenario))}</strong></p>
-  {chart_html}
+    <section>{chart_html}</section>
+    <section>
   <table>
     <thead>
       <tr><th>Scenario</th><th>Metric</th><th>Baseline</th><th>Candidate</th><th>Delta</th><th>Delta %</th><th>Direction</th></tr>
     </thead>
     <tbody>{table_rows}</tbody>
   </table>
+    </section>
+        <section>
     <h2>Scenario Ranking</h2>
     <table>
         <thead>
@@ -966,6 +1026,8 @@ def export_multi_scenario_report(
         </thead>
         <tbody>{ranking_rows}</tbody>
     </table>
+        </section>
+    </main>
 </body>
 </html>
 """
@@ -1081,6 +1143,9 @@ def export_resilience_summary_report(
         return str(path)
 
     if resolved_format == "markdown":
+        restored_spark = _ascii_sparkline([
+            float(stage.get("cumulative_restored_demand", 0.0)) for stage in report.get("restoration_report", {}).get("stages", [])
+        ])
         lines = [
             "# Resilience Summary Report",
             "",
@@ -1091,6 +1156,7 @@ def export_resilience_summary_report(
             f"- Impacted customers: {int(summary.get('impacted_customer_count', 0))}",
             f"- Estimated cost: {float(summary.get('estimated_cost', 0.0)):.2f}",
             f"- Severity tier: {summary.get('severity_tier', 'unknown')}",
+            f"- Restoration trend: {restored_spark}",
             "",
             "| Node | Single Source | Critical | Tier |",
             "| --- | --- | --- | --- |",
@@ -1118,13 +1184,7 @@ def export_resilience_summary_report(
 <head>
   <meta charset=\"utf-8\">
   <title>Resilience Summary Report</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-    .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
-  </style>
+    <style>{_report_css()}</style>
 </head>
 <body data-output-contract=\"resilience-summary-v1\">
     <main>
@@ -1277,6 +1337,7 @@ def export_resilience_portfolio_report(
         return str(path)
 
     if resolved_format == "markdown":
+        score_spark = _ascii_sparkline([float(row.get("resilience_score", 0.0)) for row in rows])
         lines = [
             "# Resilience Portfolio Report",
             "",
@@ -1284,6 +1345,7 @@ def export_resilience_portfolio_report(
             f"- Best scenario: {summary.get('best_scenario', '')}",
             f"- Worst scenario: {summary.get('worst_scenario', '')}",
             f"- Mean resilience score: {float(summary.get('mean_resilience_score', 0.0)):.2f}",
+            f"- Score trend: {score_spark}",
             "",
             "| Scenario | Score | Severity | High Nodes | Low Nodes | Impacted Customers | Cost |",
             "| --- | --- | --- | --- | --- | --- | --- |",
@@ -1313,25 +1375,23 @@ def export_resilience_portfolio_report(
 <head>
   <meta charset=\"utf-8\">
   <title>Resilience Portfolio Report</title>
-  <style>
-    body {{ font-family: Segoe UI, Arial, sans-serif; margin: 2rem; color: #1f2937; }}
-    table {{ border-collapse: collapse; width: 100%; margin-top: 1rem; }}
-    th, td {{ border: 1px solid #d1d5db; padding: 0.55rem; text-align: left; }}
-    th {{ background: #f3f4f6; }}
-    .pill {{ display: inline-block; padding: 0.2rem 0.55rem; margin-right: 0.4rem; border-radius: 999px; background: #e5f3ff; }}
-  </style>
+    <style>{_report_css()}</style>
 </head>
 <body>
+    <main>
   <h1>Resilience Portfolio Report</h1>
   <p><span class=\"pill\">scenario count: {int(summary.get('scenario_count', 0))}</span>
   <span class=\"pill\">best: {escape(str(summary.get('best_scenario', '')))}</span>
   <span class=\"pill\">mean score: {float(summary.get('mean_resilience_score', 0.0)):.2f}</span></p>
-  <h2>Scenario Ranking</h2>
-  {svg}
+    <section><h2>Scenario Ranking</h2>
+    {svg}</section>
+    <section>
   <table>
     <thead><tr><th>Scenario</th><th>Score</th><th>Severity</th><th>High Nodes</th><th>Low Nodes</th><th>Impacted Customers</th><th>Cost</th></tr></thead>
     <tbody>{table_rows}</tbody>
   </table>
+    </section>
+    </main>
 </body>
 </html>
 """

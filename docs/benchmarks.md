@@ -32,6 +32,22 @@ This writes:
 - outputs/geoprompt_comparison_summary.md
 - outputs/geoprompt_comparison_summary.html
 
+## Reproducibility checklist
+
+Record these with any benchmark claim:
+
+- command used to generate the bundle
+- dataset or corpus source
+- package version and git revision
+- whether optional extras changed between runs
+- hardware or hosted environment notes when runtime comparisons are shown
+
+## Interpretation notes
+
+1. correctness flags must pass before any speed claim is promoted.
+2. benchmark ratios are directional unless the same corpus, environment, and optional extras are held constant.
+3. network and reporting workflows should emphasize decision value as well as runtime.
+
 ## What to look for
 
 1. Correctness checks should all pass before performance claims are highlighted.
@@ -46,3 +62,7 @@ For each release:
 2. attach the markdown or HTML summary to the release notes
 3. compare the new snapshot against the previous release
 4. only publish better-than claims when the evidence is visible
+
+## Dashboard follow-up
+
+For release governance, also generate the benchmark dashboard bundle so threshold alerts are captured alongside the raw history table.

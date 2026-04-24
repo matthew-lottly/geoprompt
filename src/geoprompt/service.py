@@ -284,8 +284,16 @@ def build_app() -> Any:
                     request_id, operation_class, request.url.path,
                 )
                 return response
-        if required_roles and request.url.path not in {"/health", "/ops/metrics"} and not actor_roles.intersection(required_roles):
-            response = fastapi.responses.JSONResponse({"detail": "forbidden", "request_id": request_id}, status_code=403)
+        allowed, auth_reason = check_auth(
+            request.url.path,
+            actor_roles,
+            required_roles=required_roles,
+        )
+        if request.url.path not in {"/health", "/ops/metrics"} and not allowed:
+            response = fastapi.responses.JSONResponse(
+                {"detail": f"forbidden: {auth_reason}", "request_id": request_id},
+                status_code=403,
+            )
             response.headers["x-request-id"] = request_id
             return response
         if rate_limit_per_minute > 0 and request.url.path != "/health":

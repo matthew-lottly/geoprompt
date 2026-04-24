@@ -24,19 +24,40 @@ Business context: use this when a decision-maker needs a clear baseline-versus-c
 
 Business context: use this for outage, repair, restoration, and resilience sequencing walkthroughs.
 
+### Network restoration and unmet demand
+
+![Restoration timeline and unmet demand from repository sample scenario data](../assets/network-restoration-unmet-demand.svg)
+
+Business context: use this to communicate both service recovery pace and unmet demand burden in one visual.
+
+### Resilience risk and mitigation impact
+
+![Resilience risk heatmap with before and after mitigation bars](../assets/resilience-risk-heatmap-mitigation.svg)
+
+Business context: use this to prioritize high-risk assets and demonstrate mitigation value to operators and leadership.
+
+### Migration effort and benefit planning
+
+![Migration effort versus benefit quadrant based on repository migration tasks](../assets/migration-effort-benefit-quadrant.svg)
+
+Business context: use this to sequence migration workstreams with fast wins first and high-effort investments staged.
+
 ## Persona gallery
 
 ### Analyst track
+
 - Start with the quickstart cookbook and the benchmark bundle.
 - Focus on repeatable scenario comparison, summary tables, and map exports.
 - Recommended outputs: HTML scorecards, CSV summaries, and choropleth maps.
 
 ### Planner track
+
 - Start with the migration and connectors recipes.
 - Focus on site screening, tradeoff comparison, and map-series generation.
 - Recommended outputs: briefing packs, SVG figures, and narrative summaries.
 
 ### Operations track
+
 - Start with the network scenario recipes and deployment guide.
 - Focus on dispatch, restoration, and field coordination workflows.
 - Recommended outputs: outage overlays, routing tables, and service-style reports.

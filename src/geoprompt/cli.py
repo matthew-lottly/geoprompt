@@ -38,7 +38,7 @@ def _cli_require_capability(name: str, command: str) -> int | None:
 
 def shell_completion_script(program: str = "geoprompt", *, shell: str = "bash") -> str:
     """Return a starter shell-completion script for the GeoPrompt CLI."""
-    commands = "info version wizard demo compare history serve plugins recipes doctor completion capability-report model-register model-validate infer-raster benchmark-run"
+    commands = "info version wizard demo compare history docs-artifacts serve plugins recipes doctor completion capability-report model-register model-validate infer-raster benchmark-run"
     if shell == "powershell":
         return (
             f"Register-ArgumentCompleter -Native -CommandName {program} -ScriptBlock {{\n"
@@ -89,6 +89,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     history_parser = subparsers.add_parser("history", help="Export a benchmark history summary page")
     history_parser.add_argument("--output-dir", type=Path, default=Path("outputs"), help="Directory containing JSON benchmark reports")
+    history_parser.add_argument("--dashboard", action="store_true", help="Also export benchmark dashboard bundle")
+    history_parser.add_argument("--min-speedup-ratio", type=float, default=1.05, help="Alert threshold for benchmark dashboard speedup ratio")
+
+    docs_artifacts_parser = subparsers.add_parser("docs-artifacts", help="Rebuild or validate generated docs/report artifacts")
+    docs_artifacts_parser.add_argument("--output-dir", type=Path, default=Path("outputs"), help="Target artifact directory")
+    docs_artifacts_parser.add_argument("--check", action="store_true", help="Fail if artifacts are stale or mismatched")
+    docs_artifacts_parser.add_argument("--clean", action="store_true", help="Clear output directory before rebuilding artifacts")
 
     serve_parser = subparsers.add_parser("serve", help="Run the FastAPI service template")
     serve_parser.add_argument("--host", default="127.0.0.1")
@@ -120,7 +127,7 @@ def _print_info() -> None:
     print("GeoPrompt")
     print(f"Version: {_version()}")
     print("Install profiles: core, viz, io, excel, db, overlay, compare, raster, service, all")
-    print("Commands: info, version, wizard, demo, compare, history, serve, plugins, recipes, doctor, completion, capability-report, model-register, model-validate, infer-raster, benchmark-run")
+    print("Commands: info, version, wizard, demo, compare, history, docs-artifacts, serve, plugins, recipes, doctor, completion, capability-report, model-register, model-validate, infer-raster, benchmark-run")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -225,11 +232,38 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.command == "history":
-        from .compare import export_benchmark_history
+        from .compare import export_benchmark_dashboard_bundle, export_benchmark_history
 
         written = export_benchmark_history(args.output_dir)
         print(f"History HTML: {written['html']}")
         print(f"History JSON: {written['json']}")
+        if args.dashboard:
+            dashboard = export_benchmark_dashboard_bundle(
+                args.output_dir,
+                min_speedup_ratio=args.min_speedup_ratio,
+            )
+            print(f"Dashboard HTML: {dashboard['html']}")
+            print(f"Dashboard JSON: {dashboard['json']}")
+            print(f"Dashboard Markdown: {dashboard['markdown']}")
+        return 0
+
+    if args.command == "docs-artifacts":
+        from .artifacts import check_docs_artifacts_freshness, generate_docs_artifacts
+
+        if args.check:
+            result = check_docs_artifacts_freshness(args.output_dir)
+            if result.get("ok"):
+                print(f"Artifacts are fresh: {result.get('manifest', 'unknown manifest')}")
+                print(f"Checked files: {result.get('checked_files', 0)}")
+                return 0
+            print("Artifacts are stale or invalid.")
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return 1
+
+        written = generate_docs_artifacts(args.output_dir, clean_output_dir=args.clean)
+        print(f"Artifacts rebuilt in: {written['output_dir']}")
+        print(f"Manifest: {written['manifest']}")
+        print(f"Files tracked: {written['file_count']}")
         return 0
 
     if args.command == "serve":

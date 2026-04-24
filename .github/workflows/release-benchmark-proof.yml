@@ -26,6 +26,7 @@ jobs:
       - name: Generate comparison bundle and history page
         run: |
           python -m geoprompt.compare --export-history --output-dir outputs/release-proof
+          python -m geoprompt.cli history --output-dir outputs/release-proof --dashboard --min-speedup-ratio 1.05
 
       - name: Build distribution artifacts
         run: python -m build

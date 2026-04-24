@@ -27,9 +27,15 @@ GeoPrompt is designed for lightweight, scriptable spatial workflows using plain 
 ## Recipe mapping
 
 | ArcPy workflow | GeoPrompt workflow |
-|---|---|
+| --- | --- |
 | Feature class read and summarize | `read_data(...)`, `summary()`, groupby aggregation |
 | Service-area or routing script | network helpers plus scenario reports |
 | Batch map export | map series, HTML briefing packs, and dashboard exports |
 | Script-tool style automation | CLI wizard, recipes, and service endpoints |
 | Executive handoff | portfolio scorecards and scenario comparison bundles |
+
+## Effort-benefit sequencing aid
+
+![Migration effort versus benefit quadrant based on repository migration playbook tasks](../assets/migration-effort-benefit-quadrant.svg)
+
+Use this visual as a planning companion when deciding which ArcPy workflow substitutions should be executed first.

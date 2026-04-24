@@ -39,9 +39,24 @@ This flow chart is intentionally kept in Mermaid so it renders directly on GitHu
 | Interop | [GeoPandas interop](docs/geopandas-interop-and-reporting.md) · [Migration from GeoPandas](docs/migration-from-geopandas.md) · [Migration from ArcPy](docs/migration-from-arcpy.md) |
 | Environment | [Optional dependencies](docs/environment-and-optional-dependencies.md) · [Deployment guide](docs/deployment-guide.md) |
 | Trust and security | [Threat model](docs/threat-model.md) · [Exception taxonomy](docs/exception-taxonomy.md) · [API architecture](docs/API_ARCHITECTURE.md) · [Trust profiles and migration](docs/trust-profiles-and-migration.md) |
-| Extension and governance | [Extending GeoPrompt](docs/extending-geoprompt.md) · [Governance and support](docs/governance-and-support.md) |
+| Extension and governance | [Extending GeoPrompt](docs/extending-geoprompt.md) · [Governance and support](docs/governance-and-support.md) · [Video walkthroughs](docs/video-walkthroughs.md) |
 | Release governance | [Trust governance and SLOs](docs/trust-governance-slos.md) |
 | Help | [Troubleshooting](docs/troubleshooting.md) · [When to use GeoPrompt](docs/when-to-use-geoprompt.md) |
+
+---
+
+## Persona Paths
+
+Choose a path based on what you need to deliver.
+
+| Persona | Start | Goal output |
+| --- | --- | --- |
+| Analyst | [Quickstart cookbook](docs/quickstart-cookbook.md) | Scenario contract bundle and stakeholder summary |
+| Operations | [Network scenario recipes](docs/network-scenario-recipes.md) | Restoration timeline and resilience portfolio report |
+| Executive | [Notebook gallery](docs/notebook-gallery.md) + [Benchmarks](docs/benchmarks.md) | Executive briefing and comparison decision packet |
+| Platform/engineering | [Deployment guide](docs/deployment-guide.md) + [Maturity matrix](docs/MATURITY_MATRIX.md) | Repeatable CI/CD workflow with governance gates |
+
+Use [Best workflow by problem type](docs/problem-to-workflow-guide.md) when you are unsure which persona path maps to your current request.
 
 ---
 
@@ -60,7 +75,7 @@ Use stable and beta tiers for stakeholder-facing work. Treat simulation-only hel
 
 ---
 
-## Why GeoPrompt
+## Why choose GeoPrompt
 
 GeoPrompt is built for the full analyst-to-decision-support workflow: scenario comparison, resilience screening, routing, report generation, and stakeholder-ready outputs from a single package surface. It does not require GeoPandas or matplotlib for core workflows — plotting, mapping, and richer interop stay in optional extras.
 

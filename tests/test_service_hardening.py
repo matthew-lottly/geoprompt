@@ -13,6 +13,7 @@ import pytest
 
 from geoprompt._service_hardening import (
     COMPLIANCE_PROFILES,
+    HIGH_RISK_RBAC,
     KNOWN_SECRET_ENV_VARS,
     PRIVILEGED_OPERATIONS,
     REPLAY_WINDOW_SECONDS,
@@ -32,6 +33,7 @@ from geoprompt._service_hardening import (
     validate_geometry_payload,
     validate_payload_complexity,
     verify_request_signature,
+    required_rbac_roles_for_path,
 )
 
 
@@ -69,6 +71,19 @@ class TestCheckAuth:
         for op in list(PRIVILEGED_OPERATIONS)[:3]:
             allowed, _ = check_auth(f"/{op}", set(), required_roles={"admin"})
             assert not allowed  # missing role → denied
+
+    def test_high_risk_rbac_is_enforced_for_query(self):
+        allowed, reason = check_auth("/query", {"viewer"}, required_roles=set())
+        assert not allowed
+        assert "roles" in reason
+
+        allowed, _ = check_auth("/query", {"analyst"}, required_roles=set())
+        assert allowed
+
+    def test_required_rbac_roles_for_path_reports_expected_roles(self):
+        expected = HIGH_RISK_RBAC["enterprise"]
+        actual = required_rbac_roles_for_path("/enterprise/jobs")
+        assert expected.issubset(actual)
 
 
 # ---------------------------------------------------------------------------

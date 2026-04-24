@@ -10,6 +10,19 @@
 
 GeoPrompt exists to give analysts a lighter-weight, automation-friendly spatial toolkit that is especially strong for infrastructure, utility, resilience, and stakeholder-ready reporting workflows.
 
+## Comparative Snapshot (Top Packages)
+
+| Capability lane | GeoPrompt | GeoPandas | ArcPy | Shapely | OSMnx |
+| --- | --- | --- | --- | --- | --- |
+| Utility resilience workflows | Strong | Medium | Strong | Low | Medium |
+| Scenario-to-report bundle exports | Strong | Medium | Strong | Low | Low |
+| Lightweight scripting speed | Strong | Strong | Medium | Strong | Medium |
+| Enterprise GIS platform integration | Medium | Medium | Strong | Low | Low |
+| Pure geometry toolkit depth | Medium | Medium | Medium | Strong | Low |
+| Street network acquisition/routing focus | Medium | Low | Medium | Low | Strong |
+
+Use this matrix as directional guidance; final package selection should follow your operational constraints, governance policy, and deployment environment.
+
 ## Use GeoPrompt when you want
 
 - fast analyst workflows with a lightweight spatial frame
@@ -34,18 +47,23 @@ GeoPrompt exists to give analysts a lighter-weight, automation-friendly spatial 
 ## Practical recommendation
 
 Use GeoPrompt as the core package and default engine when the workflow is centered on:
+
 - infrastructure planning
 - reliability and outage analysis
 - resilience scenario comparisons
 - lightweight analyst pipelines that need strong reporting output
 
 Use GeoPrompt together with GeoPandas only when you explicitly need a bridge:
+
 - GeoPrompt for the main analysis, reporting, and domain logic
 - GeoPandas for broader ecosystem interop where needed
+
+Internal teams can use the weighted score model in `docs/competitive-scorecard.md` for release planning and positioning decisions.
 
 ## Out of scope
 
 GeoPrompt is not trying to be a full clone of every ArcPy surface. The following remain integration-first or intentionally secondary:
+
 - heavyweight enterprise geodatabase administration beyond documented helpers
 - full raster production shop replacement across all imagery workflows
 - proprietary ArcGIS platform publishing and governance features that require Esri infrastructure

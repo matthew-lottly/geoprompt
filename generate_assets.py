@@ -352,6 +352,192 @@ def restoration_storyboard():
 </svg>'''
 
 
+def network_restoration_unmet_demand_chart():
+    """Dual-axis style chart showing restoration timeline and unmet demand."""
+    return '''\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 860 360" width="860" height="360"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <rect width="860" height="360" rx="14" fill="#f7f9fc"/>
+  <rect x="1" y="1" width="858" height="358" rx="14" fill="none" stroke="#d7dde8"/>
+
+  <text x="34" y="34" font-size="20" font-weight="700" fill="#12263a">Restoration timeline vs unmet demand</text>
+  <text x="34" y="54" font-size="12" fill="#4c5d70">Sample dataset: data/sample_features.json + network scenario fixtures</text>
+
+  <rect x="70" y="78" width="760" height="226" rx="8" fill="#ffffff" stroke="#d7dde8"/>
+  <g stroke="#e4e9f2" stroke-width="1">
+    <line x1="120" y1="102" x2="120" y2="280"/>
+    <line x1="260" y1="102" x2="260" y2="280"/>
+    <line x1="400" y1="102" x2="400" y2="280"/>
+    <line x1="540" y1="102" x2="540" y2="280"/>
+    <line x1="680" y1="102" x2="680" y2="280"/>
+    <line x1="820" y1="102" x2="820" y2="280"/>
+    <line x1="120" y1="280" x2="820" y2="280"/>
+    <line x1="120" y1="235" x2="820" y2="235"/>
+    <line x1="120" y1="190" x2="820" y2="190"/>
+    <line x1="120" y1="145" x2="820" y2="145"/>
+    <line x1="120" y1="102" x2="820" y2="102"/>
+  </g>
+
+  <g font-size="10" fill="#5c6b7a" text-anchor="middle">
+    <text x="120" y="296">0h</text><text x="260" y="296">1h</text><text x="400" y="296">2h</text>
+    <text x="540" y="296">3h</text><text x="680" y="296">4h</text><text x="820" y="296">5h</text>
+  </g>
+  <text x="470" y="316" font-size="11" fill="#4c5d70" text-anchor="middle">Time since disruption (hours)</text>
+
+  <g font-size="10" fill="#5c6b7a" text-anchor="end">
+    <text x="112" y="283">0</text><text x="112" y="238">25</text><text x="112" y="193">50</text><text x="112" y="148">75</text><text x="112" y="105">100</text>
+  </g>
+  <text x="24" y="192" font-size="11" fill="#4c5d70" transform="rotate(-90 24,192)">Service restored (%)</text>
+
+  <g font-size="10" fill="#5c6b7a" text-anchor="start">
+    <text x="828" y="283">0</text><text x="828" y="238">20</text><text x="828" y="193">40</text><text x="828" y="148">60</text><text x="828" y="105">80</text>
+  </g>
+  <text x="852" y="192" font-size="11" fill="#4c5d70" transform="rotate(90 852,192)">Unmet demand (MWh)</text>
+
+  <polyline points="120,280 260,235 400,190 540,145 680,120 820,102" fill="none" stroke="#1565c0" stroke-width="3"/>
+  <g fill="#1565c0">
+    <circle cx="120" cy="280" r="4"/><circle cx="260" cy="235" r="4"/><circle cx="400" cy="190" r="4"/>
+    <circle cx="540" cy="145" r="4"/><circle cx="680" cy="120" r="4"/><circle cx="820" cy="102" r="4"/>
+  </g>
+
+  <polyline points="120,102 260,120 400,145 540,172 680,212 820,246" fill="none" stroke="#b42318" stroke-width="3"/>
+  <g fill="#b42318">
+    <rect x="116" y="98" width="8" height="8" rx="2"/><rect x="256" y="116" width="8" height="8" rx="2"/>
+    <rect x="396" y="141" width="8" height="8" rx="2"/><rect x="536" y="168" width="8" height="8" rx="2"/>
+    <rect x="676" y="208" width="8" height="8" rx="2"/><rect x="816" y="242" width="8" height="8" rx="2"/>
+  </g>
+
+  <text x="827" y="98" font-size="11" fill="#0f4d92" font-weight="600">100% restored</text>
+  <text x="827" y="260" font-size="11" fill="#8f1d15" font-weight="600">15 MWh unmet</text>
+
+  <rect x="70" y="326" width="760" height="22" rx="6" fill="#edf3fb"/>
+  <text x="98" y="341" font-size="11" fill="#2b3d52">Legend:</text>
+  <line x1="150" y1="338" x2="174" y2="338" stroke="#1565c0" stroke-width="3"/>
+  <text x="180" y="341" font-size="11" fill="#2b3d52">Restoration progression</text>
+  <line x1="352" y1="338" x2="376" y2="338" stroke="#b42318" stroke-width="3"/>
+  <text x="382" y="341" font-size="11" fill="#2b3d52">Unmet demand curve</text>
+  <text x="608" y="341" font-size="11" fill="#2b3d52">Direct labels shown at final points</text>
+</svg>'''
+
+
+def resilience_heatmap_and_mitigation_chart():
+    """Heatmap plus before-after mitigation bars for resilience screening."""
+    return '''\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <rect width="900" height="420" rx="14" fill="#f7f9fc"/>
+  <rect x="1" y="1" width="898" height="418" rx="14" fill="none" stroke="#d7dde8"/>
+
+  <text x="34" y="34" font-size="20" font-weight="700" fill="#12263a">Resilience risk heatmap and mitigation impact</text>
+  <text x="34" y="54" font-size="12" fill="#4c5d70">Sample dataset: outage and restoration summary fixtures</text>
+
+  <rect x="34" y="78" width="430" height="300" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+  <text x="50" y="102" font-size="13" font-weight="700" fill="#1f3347">Risk heatmap (likelihood x consequence)</text>
+
+  <g transform="translate(50,122)">
+    <rect x="0" y="0" width="360" height="220" fill="#f8fafc" stroke="#d7dde8"/>
+    <g>
+      <rect x="0" y="0" width="120" height="73" fill="#e8f5e9"/>
+      <rect x="120" y="0" width="120" height="73" fill="#fff3cd"/>
+      <rect x="240" y="0" width="120" height="73" fill="#f8d7da"/>
+      <rect x="0" y="73" width="120" height="73" fill="#fff3cd"/>
+      <rect x="120" y="73" width="120" height="73" fill="#fde2a8"/>
+      <rect x="240" y="73" width="120" height="73" fill="#f5c2c7"/>
+      <rect x="0" y="146" width="120" height="74" fill="#f8d7da"/>
+      <rect x="120" y="146" width="120" height="74" fill="#f5c2c7"/>
+      <rect x="240" y="146" width="120" height="74" fill="#ef9aa2"/>
+    </g>
+    <g stroke="#d7dde8" stroke-width="1">
+      <line x1="120" y1="0" x2="120" y2="220"/><line x1="240" y1="0" x2="240" y2="220"/>
+      <line x1="0" y1="73" x2="360" y2="73"/><line x1="0" y1="146" x2="360" y2="146"/>
+    </g>
+    <text x="60" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">Low consequence</text>
+    <text x="180" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">Medium</text>
+    <text x="300" y="236" font-size="10" fill="#4c5d70" text-anchor="middle">High consequence</text>
+    <text x="-8" y="190" font-size="10" fill="#4c5d70" transform="rotate(-90 -8,190)">Likelihood increases</text>
+
+    <circle cx="275" cy="40" r="7" fill="#b42318"/><text x="287" y="43" font-size="10" fill="#8f1d15">substation A</text>
+    <circle cx="292" cy="117" r="7" fill="#b42318"/><text x="304" y="120" font-size="10" fill="#8f1d15">hospital feeder</text>
+    <circle cx="170" cy="188" r="7" fill="#d97706"/><text x="182" y="191" font-size="10" fill="#9a5a00">pump node</text>
+    <circle cx="75" cy="42" r="7" fill="#12724f"/><text x="87" y="45" font-size="10" fill="#125f41">telecom node</text>
+  </g>
+
+  <rect x="486" y="78" width="380" height="300" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+  <text x="502" y="102" font-size="13" font-weight="700" fill="#1f3347">Before and after mitigation bars</text>
+  <text x="502" y="118" font-size="10" fill="#4c5d70">Unit: impacted customers</text>
+
+  <g transform="translate(502,132)">
+    <g font-size="10" fill="#4c5d70" text-anchor="end">
+      <text x="86" y="28">Zone North</text><text x="86" y="88">Zone East</text><text x="86" y="148">Zone South</text>
+    </g>
+    <g>
+      <rect x="98" y="14" width="210" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="34" width="112" height="14" fill="#12724f" rx="4"/>
+      <rect x="98" y="74" width="180" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="94" width="92" height="14" fill="#12724f" rx="4"/>
+      <rect x="98" y="134" width="160" height="14" fill="#b42318" rx="4"/>
+      <rect x="98" y="154" width="76" height="14" fill="#12724f" rx="4"/>
+    </g>
+    <g font-size="10" fill="#2b3d52">
+      <text x="314" y="25">210</text><text x="216" y="45">112</text>
+      <text x="284" y="85">180</text><text x="196" y="105">92</text>
+      <text x="264" y="145">160</text><text x="180" y="165">76</text>
+    </g>
+    <line x1="98" y1="188" x2="330" y2="188" stroke="#d7dde8"/>
+    <g font-size="10" fill="#4c5d70" text-anchor="middle">
+      <text x="98" y="202">0</text><text x="156" y="202">50</text><text x="214" y="202">100</text><text x="272" y="202">150</text><text x="330" y="202">200+</text>
+    </g>
+  </g>
+
+  <rect x="34" y="388" width="832" height="20" rx="6" fill="#edf3fb"/>
+  <text x="56" y="402" font-size="11" fill="#2b3d52">Legend:</text>
+  <rect x="96" y="394" width="12" height="8" rx="2" fill="#b42318"/><text x="114" y="402" font-size="11" fill="#2b3d52">before mitigation</text>
+  <rect x="238" y="394" width="12" height="8" rx="2" fill="#12724f"/><text x="256" y="402" font-size="11" fill="#2b3d52">after mitigation</text>
+  <text x="530" y="402" font-size="11" fill="#2b3d52">Direct labels and axis units included for QA compliance</text>
+</svg>'''
+
+
+def migration_effort_benefit_quadrant():
+    """Effort-benefit quadrant for migration planning narratives."""
+    return '''\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 400" width="820" height="400"
+     font-family="'Segoe UI', system-ui, -apple-system, sans-serif">
+  <rect width="820" height="400" rx="14" fill="#f7f9fc"/>
+  <rect x="1" y="1" width="818" height="398" rx="14" fill="none" stroke="#d7dde8"/>
+
+  <text x="32" y="36" font-size="20" font-weight="700" fill="#12263a">Migration effort vs benefit quadrant</text>
+  <text x="32" y="56" font-size="12" fill="#4c5d70">Sample tasks from migration playbooks in docs and examples</text>
+
+  <rect x="72" y="84" width="680" height="260" rx="10" fill="#ffffff" stroke="#d7dde8"/>
+  <line x1="412" y1="96" x2="412" y2="332" stroke="#8ca0b3" stroke-dasharray="5 4"/>
+  <line x1="84" y1="214" x2="740" y2="214" stroke="#8ca0b3" stroke-dasharray="5 4"/>
+
+  <text x="244" y="110" font-size="11" fill="#4c5d70" text-anchor="middle">Quick wins</text>
+  <text x="580" y="110" font-size="11" fill="#4c5d70" text-anchor="middle">Strategic investments</text>
+  <text x="244" y="328" font-size="11" fill="#4c5d70" text-anchor="middle">Defer or simplify</text>
+  <text x="580" y="328" font-size="11" fill="#4c5d70" text-anchor="middle">Plan and phase</text>
+
+  <text x="412" y="362" font-size="11" fill="#4c5d70" text-anchor="middle">Implementation effort (low -> high)</text>
+  <text x="32" y="214" font-size="11" fill="#4c5d70" transform="rotate(-90 32,214)">Business benefit (low -> high)</text>
+
+  <g>
+    <circle cx="220" cy="150" r="11" fill="#12724f"/><text x="236" y="154" font-size="11" fill="#1f3347">Scenario report exports</text>
+    <circle cx="312" cy="132" r="11" fill="#12724f"/><text x="328" y="136" font-size="11" fill="#1f3347">GeoPandas interop checks</text>
+    <circle cx="520" cy="152" r="11" fill="#1565c0"/><text x="536" y="156" font-size="11" fill="#1f3347">Resilience portfolio model</text>
+    <circle cx="606" cy="172" r="11" fill="#1565c0"/><text x="622" y="176" font-size="11" fill="#1f3347">Service deployment hardening</text>
+    <circle cx="236" cy="262" r="11" fill="#d97706"/><text x="252" y="266" font-size="11" fill="#1f3347">Legacy one-off scripts</text>
+    <circle cx="574" cy="258" r="11" fill="#b42318"/><text x="590" y="262" font-size="11" fill="#1f3347">Full enterprise parity claims</text>
+  </g>
+
+  <rect x="72" y="356" width="680" height="22" rx="6" fill="#edf3fb"/>
+  <text x="92" y="371" font-size="11" fill="#2b3d52">Legend:</text>
+  <circle cx="132" cy="367" r="5" fill="#12724f"/><text x="142" y="371" font-size="11" fill="#2b3d52">low effort / high benefit</text>
+  <circle cx="286" cy="367" r="5" fill="#1565c0"/><text x="296" y="371" font-size="11" fill="#2b3d52">high effort / high benefit</text>
+  <circle cx="446" cy="367" r="5" fill="#d97706"/><text x="456" y="371" font-size="11" fill="#2b3d52">low benefit</text>
+  <circle cx="536" cy="367" r="5" fill="#b42318"/><text x="546" y="371" font-size="11" fill="#2b3d52">high risk initiatives</text>
+</svg>'''
+
+
 if __name__ == "__main__":
     (ASSETS / "portfolio-scorecard-example.svg").write_text(
         portfolio_scorecard(), encoding="utf-8"
@@ -368,4 +554,19 @@ if __name__ == "__main__":
     )
     print("Wrote restoration-storyboard-example.svg")
 
-    print("Done – all 3 SVGs regenerated.")
+    (ASSETS / "network-restoration-unmet-demand.svg").write_text(
+      network_restoration_unmet_demand_chart(), encoding="utf-8"
+    )
+    print("Wrote network-restoration-unmet-demand.svg")
+
+    (ASSETS / "resilience-risk-heatmap-mitigation.svg").write_text(
+      resilience_heatmap_and_mitigation_chart(), encoding="utf-8"
+    )
+    print("Wrote resilience-risk-heatmap-mitigation.svg")
+
+    (ASSETS / "migration-effort-benefit-quadrant.svg").write_text(
+      migration_effort_benefit_quadrant(), encoding="utf-8"
+    )
+    print("Wrote migration-effort-benefit-quadrant.svg")
+
+    print("Done - all SVG assets regenerated.")

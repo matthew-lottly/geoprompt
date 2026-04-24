@@ -49,6 +49,9 @@ jobs:
         run: |
           python -m pytest tests/test_docs_readme_flowchart_gate.py -q
           python -m pytest tests/test_docs_markdown_gate.py -q
+          python -m pytest tests/test_docs_api_contract_gate.py -q
+          python -m pytest tests/test_figure_manifest_gate.py -q
+          python -m pytest tests/test_claims_to_tests_manifest.py -q
           python -m pytest tests/test_simulation_only_docs.py -q
 
       - name: Run trust and artifact contract gates
@@ -65,6 +68,12 @@ jobs:
 
       - name: Run comparison corpus
         run: python -m geoprompt.compare
+
+      - name: Rebuild docs artifacts and verify freshness
+        run: |
+          python -m geoprompt.cli docs-artifacts --output-dir outputs --clean
+          python -m geoprompt.cli docs-artifacts --output-dir outputs --check
+          python -m pytest tests/test_artifact_freshness_gate.py -q
 
       - name: Execute notebooks with timeout
         run: python examples/notebooks/execute_notebooks_with_timeout.py --timeout 20

@@ -185,11 +185,11 @@ def random_forest_spatial_prediction(
 def gradient_boosted_spatial_prediction(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Simulation-only gradient-boosted style scoring using weighted features.
+    """Simulation-only placeholder for gradient-boosted spatial scoring.
 
-    This helper is a placeholder and does not run a real gradient boosting
-    backend. For production, install and use sklearn GradientBoosting or
-    XGBoost.
+    This function does not train or run a production gradient boosting model.
+    For real outputs, use sklearn GradientBoosting or XGBoost with a trained
+    estimator and validated feature pipeline.
     """
     weights = [i + 1 for i, _ in enumerate(feature_keys)] or [1]
     scores = [sum(float(r.get(k, 0)) * w for k, w in zip(feature_keys, weights)) for r in rows]
@@ -201,10 +201,11 @@ def gradient_boosted_spatial_prediction(
 def svm_spatial_classification(
     rows: Sequence[dict[str, Any]], *, feature_keys: Sequence[str], target_key: str = "target"
 ) -> list[dict[str, Any]]:
-    """Simulation-only linear-margin classifier fallback for spatial features.
+    """Simulation-only placeholder for SVM-style spatial classification.
 
-    This is a lightweight placeholder. For production classification, install
-    sklearn and use ``sklearn.svm.SVC``.
+    This fallback is heuristic and not a real SVM model execution. For
+    production classification, install sklearn and use ``sklearn.svm.SVC``
+    with tuned hyperparameters.
     """
     center = _mean([_simple_score(r, feature_keys) for r in rows])
     return [{**r, "prediction": 1 if _simple_score(r, feature_keys) >= center else 0} for r in rows]
@@ -242,10 +243,10 @@ def logistic_regression_spatial_features(
 
 @simulation_only("Use PyTorch (torch.nn) or TensorFlow for real neural network integration.")
 def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Simulation-only neural-network integration and sequence embedding preview.
+    """Simulation-only neural-network integration preview.
 
-    This does not execute a real neural backend. For production, install and
-    configure PyTorch or TensorFlow.
+    This helper does not execute a real neural backend or trained model.
+    For production inference, install and configure PyTorch or TensorFlow.
     """
     backend = "heuristic"
     if _try_import("torch"):
@@ -257,10 +258,11 @@ def neural_network_integration(sequences: Sequence[Sequence[float]]) -> dict[str
 
 @simulation_only("Use PyG (torch_geometric) or DGL for a real Graph Neural Network.")
 def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
-    """Simulation-only GNN placeholder using centrality-style node scores.
+    """Simulation-only GNN placeholder using centrality-style scoring.
 
-    For production graph learning, install and use PyTorch Geometric (PyG) or
-    DGL with a trained model.
+    This function does not perform real message passing or learned graph
+    inference. For production graph learning, use PyG or DGL with a trained
+    architecture.
     """
     nodes = list(graph.get("nodes", []))
     edges = list(graph.get("edges", []))
@@ -270,10 +272,10 @@ def graph_neural_network_prediction(graph: dict[str, Any]) -> dict[str, Any]:
 
 @simulation_only("Use PyTorch torchvision or TensorFlow Keras for a real CNN on rasters.")
 def convolutional_neural_network_on_rasters(raster: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Simulation-only raster embedding helper.
+    """Simulation-only raster embedding placeholder.
 
-    This placeholder does not run a real CNN. For production raster inference,
-    install TensorFlow/Keras or PyTorch vision models.
+    This helper does not execute a real CNN or segmentation model. For
+    production raster inference, use TensorFlow/Keras or PyTorch vision models.
     """
     vals = _flatten_grid(raster)
     return {"embedding_dim": 4, "embedding": [min(vals or [0]), max(vals or [0]), round(_mean(vals), 4), len(vals)]}
@@ -281,10 +283,10 @@ def convolutional_neural_network_on_rasters(raster: Sequence[Sequence[float]]) -
 
 @simulation_only("Use PyTorch LSTM/GRU or TensorFlow Keras for a real RNN time-series model.")
 def recurrent_neural_network_spatial_time_series(sequences: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Simulation-only temporal trend summary for sequence inputs.
+    """Simulation-only temporal trend placeholder for sequence inputs.
 
-    This does not execute an actual RNN. For production forecasting, install
-    and use LSTM/GRU models in PyTorch or TensorFlow.
+    This function does not execute an RNN or learned forecasting model. For
+    production forecasting, use LSTM/GRU models in PyTorch or TensorFlow.
     """
     trends = [round(seq[-1] - seq[0], 4) if len(seq) >= 2 else 0.0 for seq in sequences]
     return {"sequence_count": len(sequences), "trend": trends}
@@ -292,10 +294,10 @@ def recurrent_neural_network_spatial_time_series(sequences: Sequence[Sequence[fl
 
 @simulation_only("Use PyTorch transformers or Hugging Face for a real attention/transformer model.")
 def transformer_model_spatial_sequences(sequences: Sequence[Sequence[float]], *, attention_heads: int = 4) -> dict[str, Any]:
-    """Simulation-only transformer-style sequence summary.
+    """Simulation-only transformer-style sequence placeholder.
 
-    This helper is a placeholder and not a real transformer backend. For
-    production sequence modeling, install PyTorch transformers or Hugging Face.
+    This helper does not run a real attention model or transformer backend.
+    For production sequence modeling, use PyTorch transformers or Hugging Face.
     """
     return {"sequence_count": len(sequences), "attention_heads": attention_heads, "token_count": sum(len(s) for s in sequences)}
 

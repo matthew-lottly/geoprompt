@@ -18,6 +18,8 @@ from geoprompt.safe_expression import (
     ExpressionExecutionError,
     ExpressionValidationError,
     evaluate_safe_expression,
+    get_expression_audit_metrics,
+    reset_expression_audit_metrics,
 )
 
 
@@ -164,3 +166,43 @@ class TestExecutionErrors:
     def test_type_error_wrapped(self):
         with pytest.raises(ExpressionExecutionError):
             evaluate_safe_expression("'a' + 1", {})
+
+
+class TestAuditMetricsAndCircuitBreaker:
+    def test_metrics_track_module_validation_and_execution_errors(self):
+        reset_expression_audit_metrics()
+
+        assert evaluate_safe_expression("1 + 1", module="query") == 2
+        with pytest.raises(ExpressionValidationError):
+            evaluate_safe_expression("__import__('os')", module="query")
+        with pytest.raises(ExpressionExecutionError):
+            evaluate_safe_expression("unknown_name + 1", module="query")
+
+        metrics = get_expression_audit_metrics()
+        assert metrics["total_evaluated"] >= 3
+        assert metrics["validation_errors"] >= 1
+        assert metrics["execution_errors"] >= 1
+        assert metrics["module_metrics"]["query"]["evaluated"] >= 3
+
+    def test_caller_rejection_circuit_breaker_blocks_after_threshold(self):
+        reset_expression_audit_metrics()
+
+        caller = "127.0.0.1"
+        for _ in range(2):
+            with pytest.raises(ExpressionValidationError):
+                evaluate_safe_expression(
+                    "__import__('os')",
+                    module="service",
+                    caller_id=caller,
+                    rejection_threshold=2,
+                    rejection_window_seconds=600,
+                )
+
+        with pytest.raises(ExpressionValidationError, match="temporarily blocked"):
+            evaluate_safe_expression(
+                "1 + 1",
+                module="service",
+                caller_id=caller,
+                rejection_threshold=2,
+                rejection_window_seconds=600,
+            )

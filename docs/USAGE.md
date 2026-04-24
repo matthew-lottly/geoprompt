@@ -6,6 +6,22 @@ required.
 
 ---
 
+## Persona Navigation
+
+| Persona | Use this section first | Deliverable |
+| --- | --- | --- |
+| Analyst | Quick Start + Core Routing | service area, OD matrix, and screening table |
+| Operations planner | utility bottlenecks + restoration helpers | staged repair and restoration demand storyline |
+| Engineering lead | preset and streaming sections | production-ready throughput configuration |
+
+Execution shortcut:
+
+1. Build graph and route baseline.
+2. Run OD matrix or streaming bottlenecks for scale.
+3. Export scenario and resilience reports for stakeholder review.
+
+---
+
 ## Quick Start
 
 ```python
