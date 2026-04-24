@@ -6,6 +6,13 @@ This page covers the most common setup and runtime issues.
 
 GeoPrompt keeps several features behind optional extras.
 
+## Deterministic triage order
+
+1. run `geoprompt capability-report` and inspect disabled or degraded capabilities
+2. confirm install profile matches the failing workflow
+3. reproduce with the smallest checked-in sample dataset
+4. run the narrowest matching test file before broad full-suite runs
+
 ## Installation decision tree
 
 - Need only core frame, geometry, and reporting? install the base package.
@@ -158,3 +165,12 @@ When reporting an issue, include:
 2. Install required extras for the failing capability.
 3. Re-run only the failing workflow path in strict mode.
 4. If the function is simulation-only, replace with a production backend before release.
+
+## Failure signatures quick table
+
+| Signature | Likely cause | First fix |
+| --- | --- | --- |
+| `DependencyError` with capability name | optional extra not installed | install matching extras profile and rerun capability report |
+| `PayloadTooLargeError` in service paths | request body exceeds configured guardrails | reduce payload size or raise configured limit intentionally |
+| repeated `401` or signature validation errors | auth/signature mismatch | validate secret, timestamp window, and caller role mapping |
+| report freshness gate mismatch | regenerated artifacts differ from committed manifest | rebuild docs artifacts and review source-digest deltas |

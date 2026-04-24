@@ -971,7 +971,7 @@ def _load_benchmark_history_reports(history_dir: Path) -> list[dict[str, Any]]:
     for path in sorted(history_dir.glob("*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             continue
         if isinstance(payload, dict) and "datasets" in payload:
             payload.setdefault("_source_path", str(path))

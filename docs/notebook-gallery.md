@@ -42,6 +42,15 @@ Business context: use this to prioritize high-risk assets and demonstrate mitiga
 
 Business context: use this to sequence migration workstreams with fast wins first and high-effort investments staged.
 
+## Scored gallery
+
+| Notebook or output lane | Purpose | Typical runtime | Dependencies | Primary output files | Trust profile |
+| --- | --- | --- | --- | --- | --- |
+| Quickstart and analyst screen | fast scenario and triage walkthrough | low | core plus optional viz | scenario and resilience html/json bundles | stable-to-beta |
+| Executive briefing pack | stakeholder-ready narrative outputs | low to medium | viz profile recommended | executive briefing html and comparison summary | beta |
+| Network restoration walkthrough | outage and restoration sequencing | medium | network plus optional viz | restoration charts and resilience summaries | stable-to-beta |
+| Benchmark proof bundle | reproducible comparison evidence | medium | compare profile | comparison json, html, dashboard outputs | beta with governance gates |
+
 ## Persona gallery
 
 ### Analyst track

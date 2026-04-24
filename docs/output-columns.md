@@ -2,6 +2,23 @@
 
 This document describes the exact columns added or returned by each `GeoPromptFrame` method. Use it to know what to expect in results without inspecting source code.
 
+## Contract policy
+
+1. Column names and units documented here are treated as public output contracts for stable workflows.
+2. If a stable output column must change, ship migration guidance and release notes in the same change.
+3. Nullable fields should be documented with explicit null behavior so downstream checks remain deterministic.
+
+## Standard schema fields
+
+| Field | Meaning |
+| --- | --- |
+| Column | output field name |
+| Type | expected runtime type |
+| Description | semantic meaning |
+| Nullability | when null is expected or prohibited |
+| Units | numeric unit when applicable |
+| Source | method or stage where the value is produced |
+
 ---
 
 ## Join Methods
@@ -13,7 +30,7 @@ All join methods produce a new `GeoPromptFrame`. Column collision rules: if a ri
 Joins each left row to its `k` nearest right rows by centroid distance.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all left columns)* | — | Preserved as-is |
 | *(right non-geometry columns)* | — | Copied, suffixed with `_{rsuffix}` on collision |
 | `{other.geometry_column}_{rsuffix}` | geometry | Right geometry |
@@ -38,7 +55,7 @@ Output columns are identical to `nearest_join`, with `rsuffix=origin_suffix` (de
 Joins each left row to all right rows within `max_distance`. One output row per (left, right) pair.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all left columns)* | — | Preserved as-is |
 | *(right non-geometry columns)* | — | Copied, suffixed with `_{rsuffix}` on collision |
 | `{other.geometry_column}_{rsuffix}` | geometry | Right geometry |
@@ -52,7 +69,7 @@ Joins each left row to all right rows within `max_distance`. One output row per 
 Expands each left geometry by `distance` (requires Shapely) and joins to all right geometries that intersect the buffer.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all left columns)* | — | Preserved as-is |
 | `buffer_geometry_{lsuffix}` | geometry / None | The buffer polygon used for matching |
 | `buffer_distance_{lsuffix}` | float | Buffer radius applied |
@@ -66,7 +83,7 @@ Expands each left geometry by `distance` (requires Shapely) and joins to all rig
 Geometry-predicate join (`"intersects"`, `"within"`, `"contains"`). Requires Shapely for non-trivial geometries.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all left columns)* | — | Preserved as-is |
 | *(right non-geometry columns)* | — | Copied, suffixed with `_{rsuffix}` on collision |
 | `{other.geometry_column}_{rsuffix}` | geometry / None | Right geometry |
@@ -79,7 +96,7 @@ Geometry-predicate join (`"intersects"`, `"within"`, `"contains"`). Requires Sha
 Computes geometric intersections of all crossing left/right geometry pairs. The left geometry column is replaced with the intersection geometry.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all left columns, geometry replaced)* | — | `geometry_column` holds the intersection polygon |
 | *(right non-geometry columns)* | — | Copied, suffixed with `_{rsuffix}` on collision |
 | `{other.geometry_column}_{rsuffix}` | geometry | Original right geometry |
@@ -95,7 +112,7 @@ These methods return a new `GeoPromptFrame` with one row per origin, summarising
 For each origin, finds all targets whose nearest origin is this one and summarises the assignment.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all origin columns)* | — | Preserved as-is |
 | `{target_id_column}s_{assignment_suffix}` | list[str] | IDs of all assigned targets |
 | `count_{assignment_suffix}` | int | Number of assigned targets |
@@ -112,7 +129,7 @@ For each origin, finds all targets whose nearest origin is this one and summaris
 For each row, counts targets that satisfy the spatial predicate.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all self columns)* | — | Preserved as-is |
 | `{target_id_column}s_{rsuffix}` | list[str] | IDs of all matched targets |
 | `count_{rsuffix}` | int | Number of matched targets |
@@ -128,7 +145,7 @@ For each row, counts targets that satisfy the spatial predicate.
 Returns a filtered `GeoPromptFrame` with rows within `max_distance` of the anchor, sorted by distance.
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | *(all row columns)* | — | Preserved as-is |
 | `distance` | float | Distance to anchor |
 | `distance_method` | str | Distance method used |
@@ -155,7 +172,7 @@ These return `list[Record]` (plain dicts), not a `GeoPromptFrame`.
 ### `nearest_neighbors(id_column, k, distance_method)` → `list[Record]`
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `origin` | any | Origin row ID |
 | `neighbor` | any | Neighbor row ID |
 | `distance` | float | Centroid distance |
@@ -169,7 +186,7 @@ These return `list[Record]` (plain dicts), not a `GeoPromptFrame`.
 ### `interaction_table(origin_weight, destination_weight, id_column, ...)` → `list[Record]`
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `origin` | any | Origin row ID |
 | `destination` | any | Destination row ID |
 | `distance` | float | Centroid distance |
@@ -182,7 +199,7 @@ These return `list[Record]` (plain dicts), not a `GeoPromptFrame`.
 ### `area_similarity_table(id_column, ...)` → `list[Record]`
 
 | Column | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `origin` | any | Origin row ID |
 | `destination` | any | Destination row ID |
 | `area_similarity` | float | Area-weighted similarity score |
@@ -193,7 +210,7 @@ These return `list[Record]` (plain dicts), not a `GeoPromptFrame`.
 ## Scalar / Vector Methods
 
 | Method | Returns | Description |
-|---|---|---|
+| --- | --- | --- |
 | `neighborhood_pressure(...)` | `list[float]` | One float per row — cumulative influence score from all neighbors |
 | `anchor_influence(...)` | `list[float]` | One float per row — influence score relative to a single anchor |
 | `corridor_accessibility(...)` | `list[float]` | One float per row — corridor strength weighted by line length |
@@ -209,7 +226,7 @@ These return `list[Record]` (plain dicts), not a `GeoPromptFrame`.
 ## Suffix Defaults Quick Reference
 
 | Method | lsuffix default | rsuffix default | assignment_suffix default |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `nearest_join` | `"left"` | `"right"` | — |
 | `assign_nearest` | — | `origin_suffix="origin"` | — |
 | `proximity_join` | `"left"` | `"right"` | — |

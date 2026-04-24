@@ -18,6 +18,14 @@ This page is the fastest way to get productive with GeoPrompt.
 3. Export a map, report, or benchmark bundle.
 4. Move to the deeper recipes and deployment guide.
 
+## Time-boxed onboarding tracks
+
+| Time budget | Suggested track | Outcome |
+| --- | --- | --- |
+| 10 minutes | read quickstart plus run one persona script | first report artifact generated |
+| 30 minutes | run analyst plus operations persona scripts | baseline comparison and restoration outputs |
+| Half day | run full persona set plus benchmark and docs artifacts | reproducible evidence bundle for team review |
+
 ## Copy/Paste Starter
 
 ```python

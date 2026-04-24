@@ -47,7 +47,7 @@ class ServiceJobManager:
             try:
                 raw = json.loads(self.storage_path.read_text(encoding="utf-8"))
                 self._jobs = {str(item["job_id"]): dict(item) for item in raw}
-            except Exception:
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
                 self._jobs = {}
 
     def _persist(self) -> None:
@@ -128,7 +128,16 @@ class ServiceJobManager:
             job["result"] = handler(dict(job.get("payload", {})))
             job["error"] = None
             job["status"] = "completed"
-        except Exception as exc:
+        except (
+            AssertionError,
+            AttributeError,
+            KeyError,
+            LookupError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
             job["result"] = None
             job["error"] = str(exc)
             job["status"] = "failed"
@@ -343,7 +352,7 @@ def build_app() -> Any:
                         return response
                     except (json.JSONDecodeError, ValueError):
                         pass  # non-JSON bodies are not validated here
-            except Exception:
+            except RuntimeError:
                 pass  # body already consumed by signature check above; skip silently
 
         response = await call_next(request)

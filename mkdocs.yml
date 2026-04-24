@@ -3,8 +3,15 @@ site_description: Lightweight spatial analysis workflows and parity documentatio
 nav:
   - Home: README.md
   - Start Here: docs/start-here.md
+  - Notebook Gallery: docs/notebook-gallery.md
+  - Benchmarks: docs/benchmarks.md
+  - API Architecture: docs/API_ARCHITECTURE.md
   - Trust Profiles and Migration: docs/trust-profiles-and-migration.md
   - Trust Governance and SLOs: docs/trust-governance-slos.md
+  - Release Evidence: docs/release-evidence.md
+  - Competitive Scorecard: docs/competitive-scorecard.md
+  - Demo Storyboard: docs/demo-storyboard.md
+  - Video Walkthroughs: docs/video-walkthroughs.md
   - ArcPy Migration: docs/migration-from-arcpy.md
   - Environment and Optional Dependencies: docs/environment-and-optional-dependencies.md
   - Troubleshooting: docs/troubleshooting.md

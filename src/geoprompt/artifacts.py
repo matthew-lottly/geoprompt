@@ -58,7 +58,7 @@ def _git_sha() -> str:
             cwd=str(PROJECT_ROOT),
             text=True,
         ).strip()
-    except Exception:
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
         return "unknown"
 
 
@@ -212,7 +212,7 @@ def _stamp_text_provenance(path: Path, metadata: dict[str, Any]) -> None:
 def _stamp_json_provenance(path: Path, metadata: dict[str, Any]) -> None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return
     if isinstance(payload, dict):
         payload["_provenance"] = dict(metadata)
@@ -286,7 +286,7 @@ def check_docs_artifacts_freshness(output_dir: str | Path = DEFAULT_OUTPUT_DIR) 
 
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except Exception as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return {"ok": False, "reason": "invalid_manifest", "error": str(exc)}
 
     source_inputs = [path for path in DEFAULT_SOURCE_INPUTS if path.exists()]
