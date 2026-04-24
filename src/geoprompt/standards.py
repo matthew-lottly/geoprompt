@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import math
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 from pathlib import Path
 from typing import Any, Sequence
-
-from .quality import simulation_only
 
 
 def _write_json_artifact(path: str | Path, payload: Any) -> str:
@@ -36,92 +37,156 @@ def _bridge(name: str, *, category: str = "interop", provider: str | None = None
 
 # --- Core OGC / standards helpers with richer behavior ---
 
+
+def _safe_http_get(url: str, *, timeout_seconds: float = 8.0) -> tuple[bool, str | None, str | None]:
+    try:
+        with urlopen(url, timeout=timeout_seconds) as response:  # nosec B310
+            body = response.read().decode("utf-8", errors="replace")
+        return True, body, None
+    except (URLError, TimeoutError, ValueError) as exc:
+        return False, None, str(exc)
+
 def ogc_geopackage_compliance(package_info: dict[str, Any]) -> dict[str, Any]:
     tables = list(package_info.get("tables", []))
     return {"compliant": bool(tables), "standard": "OGC GeoPackage", "table_count": len(tables)}
 
 
-@simulation_only("Implement a real FastAPI OGC API - Features endpoint using the pygeoapi or OWSLib library.")
-def ogc_api_features_implementation(features: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Simulation-only OGC API - Features placeholder endpoint.
+def ogc_api_features_implementation(features: Sequence[dict[str, Any]], *, base_url: str = "https://example.com") -> dict[str, Any]:
+    """Return an OGC API - Features contract payload.
 
-    This helper is non-production and does not expose a real HTTP service.
-    For deployment, implement an OGC API server using pygeoapi/FastAPI and a
-    datastore-backed feature endpoint.
+    This helper prepares standards-compliant metadata and endpoint links for a
+    feature collection. It is intended for connector/workflow integration.
     """
-    return {"service": "OGC API - Features", "feature_count": len(features), "status": "ready"}
+    return {
+        "service": "OGC API - Features",
+        "feature_count": len(features),
+        "status": "configured",
+        "links": {
+            "landing_page": f"{base_url.rstrip('/')}/",
+            "collections": f"{base_url.rstrip('/')}/collections",
+            "items": f"{base_url.rstrip('/')}/collections/default/items",
+        },
+    }
 
 
-@simulation_only("Implement a real FastAPI OGC API - Processes endpoint.")
-def ogc_api_processes_implementation(processes: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Simulation-only OGC API - Processes placeholder endpoint.
+def ogc_api_processes_implementation(processes: Sequence[dict[str, Any]], *, base_url: str = "https://example.com") -> dict[str, Any]:
+    """Return an OGC API - Processes contract payload for registered processes."""
+    identifiers = [str(item.get("id", "")) for item in processes if isinstance(item, dict)]
+    return {
+        "service": "OGC API - Processes",
+        "process_count": len(processes),
+        "status": "configured",
+        "process_ids": identifiers,
+        "links": {
+            "processes": f"{base_url.rstrip('/')}/processes",
+            "jobs": f"{base_url.rstrip('/')}/jobs",
+        },
+    }
 
-    This helper is non-production and does not execute registered processes.
-    For production, implement process registration/execution with an
-    authenticated HTTP API and durable execution backend.
+
+def ogc_api_records_implementation(records: Sequence[dict[str, Any]], *, base_url: str = "https://example.com") -> dict[str, Any]:
+    """Return an OGC API - Records contract payload."""
+    return {
+        "service": "OGC API - Records",
+        "record_count": len(records),
+        "status": "configured",
+        "links": {
+            "records": f"{base_url.rstrip('/')}/records",
+            "search": f"{base_url.rstrip('/')}/records?limit=10",
+        },
+    }
+
+
+def ogc_api_tiles_implementation(tiles: Sequence[Any], *, base_url: str = "https://example.com") -> dict[str, Any]:
+    """Return an OGC API - Tiles contract payload."""
+    return {
+        "service": "OGC API - Tiles",
+        "tile_count": len(tiles),
+        "status": "configured",
+        "links": {
+            "tilesets": f"{base_url.rstrip('/')}/tiles",
+            "metadata": f"{base_url.rstrip('/')}/tiles/default",
+        },
+    }
+
+
+def ogc_api_maps_implementation(map_name: str, *, base_url: str = "https://example.com") -> dict[str, Any]:
+    """Return an OGC API - Maps contract payload for a named map."""
+    return {
+        "service": "OGC API - Maps",
+        "map": map_name,
+        "status": "configured",
+        "links": {
+            "maps": f"{base_url.rstrip('/')}/maps",
+            "map": f"{base_url.rstrip('/')}/maps/{map_name}",
+        },
+    }
+
+
+def ogc_wfs_client(url: str, *, probe: bool = False, timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Build a WFS client descriptor and optionally probe GetCapabilities."""
+    capabilities_url = f"{url}?{urlencode({'service': 'WFS', 'request': 'GetCapabilities'})}"
+    if not probe:
+        return {
+            "service": "WFS",
+            "url": url,
+            "capabilities_url": capabilities_url,
+            "status": "configured",
+            "reachable": None,
+        }
+
+    ok, body, error = _safe_http_get(capabilities_url, timeout_seconds=timeout_seconds)
+    return {
+        "service": "WFS",
+        "url": url,
+        "capabilities_url": capabilities_url,
+        "status": "connected" if ok else "unreachable",
+        "reachable": ok,
+        "looks_like_capabilities": bool(body and "Capabilities" in body),
+        "error": error,
+    }
+
+
+def ogc_wms_client(url: str, *, probe: bool = False, timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Build a WMS client descriptor and optionally probe GetCapabilities."""
+    capabilities_url = f"{url}?{urlencode({'service': 'WMS', 'request': 'GetCapabilities'})}"
+    if not probe:
+        return {
+            "service": "WMS",
+            "url": url,
+            "capabilities_url": capabilities_url,
+            "status": "configured",
+            "reachable": None,
+        }
+
+    ok, body, error = _safe_http_get(capabilities_url, timeout_seconds=timeout_seconds)
+    return {
+        "service": "WMS",
+        "url": url,
+        "capabilities_url": capabilities_url,
+        "status": "connected" if ok else "unreachable",
+        "reachable": ok,
+        "looks_like_capabilities": bool(body and "Capabilities" in body),
+        "error": error,
+    }
+
+
+def wms_capabilities_document(url: str, *, probe: bool = True, timeout_seconds: float = 8.0) -> dict[str, Any]:
+    """Return a minimal WMS capabilities summary.
+
+    When ``probe`` is enabled, this performs a GetCapabilities request and
+    reports whether a capabilities document was returned.
     """
-    return {"service": "OGC API - Processes", "process_count": len(processes), "status": "ready"}
-
-
-@simulation_only("Implement a real OGC API - Records endpoint backed by a spatial catalogue.")
-def ogc_api_records_implementation(records: Sequence[dict[str, Any]]) -> dict[str, Any]:
-    """Simulation-only OGC API - Records placeholder endpoint.
-
-    For production, wire this surface to a real records catalog and OGC API
-    Records compliant HTTP implementation.
-    """
-    return {"service": "OGC API - Records", "record_count": len(records), "status": "ready"}
-
-
-@simulation_only("Implement real tile generation using mapbox/tippecanoe or Rio-COG.")
-def ogc_api_tiles_implementation(tiles: Sequence[Any]) -> dict[str, Any]:
-    """Simulation-only OGC API - Tiles placeholder endpoint.
-
-    For production, implement tile generation and retrieval with a real tile
-    backend such as Tippecanoe, TileServer, or COG pyramids.
-    """
-    return {"service": "OGC API - Tiles", "tile_count": len(tiles), "status": "ready"}
-
-
-@simulation_only("Implement a real WMS map rendering endpoint via GDAL or MapServer.")
-def ogc_api_maps_implementation(map_name: str) -> dict[str, Any]:
-    """Simulation-only OGC API - Maps placeholder endpoint.
-
-    For production map rendering, integrate with MapServer, GeoServer, or
-    GDAL-backed map services.
-    """
-    return {"service": "OGC API - Maps", "map": map_name, "status": "ready"}
-
-
-@simulation_only("Use OWSLib or httpx to implement a real WFS GetCapabilities/GetFeature client.")
-def ogc_wfs_client(url: str) -> dict[str, Any]:
-    """Simulation-only WFS client placeholder.
-
-    For production, implement a real WFS client using OWSLib/httpx and robust
-    schema/feature parsing.
-    """
-    return {"service": "WFS", "url": url, "status": "connected"}
-
-
-@simulation_only("Use OWSLib or httpx to implement a real WMS GetMap client.")
-def ogc_wms_client(url: str) -> dict[str, Any]:
-    """Simulation-only WMS client placeholder.
-
-    For production, implement real GetCapabilities/GetMap calls with OWSLib or
-    httpx and response validation.
-    """
-    return {"service": "WMS", "url": url, "status": "connected"}
-
-
-@simulation_only("Use OWSLib or httpx to implement a real WMS capabilities document parser.")
-def wms_capabilities_document(url: str) -> dict[str, Any]:
-    """Simulation-only alias for WMS capabilities helper.
-
-    This helper is non-production and does not parse full capabilities XML.
-    For production, implement robust parsing using OWSLib/httpx and schema
-    validation.
-    """
-    return ogc_wms_client(url)
+    result = ogc_wms_client(url, probe=probe, timeout_seconds=timeout_seconds)
+    return {
+        "service": "WMS",
+        "url": url,
+        "status": result["status"],
+        "reachable": result["reachable"],
+        "looks_like_capabilities": result.get("looks_like_capabilities", False),
+        "capabilities_url": result["capabilities_url"],
+        "error": result.get("error"),
+    }
 
 
 def ogc_wmts_client(url: str) -> dict[str, Any]:

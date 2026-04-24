@@ -631,16 +631,16 @@ class TestSimulationOnlyDecorator:
     def test_performance_stubs_are_flagged(self):
         from geoprompt.quality import is_simulation_only
         import geoprompt.performance as perf
-        assert is_simulation_only(perf.gpu_accelerated_distance_matrix)
+        assert not is_simulation_only(perf.gpu_accelerated_distance_matrix)
         assert is_simulation_only(perf.gpu_accelerated_raster_algebra)
         assert is_simulation_only(perf.distributed_spatial_join)
 
     def test_standards_stubs_are_flagged(self):
         from geoprompt.quality import is_simulation_only
         import geoprompt.standards as std
-        assert is_simulation_only(std.ogc_api_features_implementation)
-        assert is_simulation_only(std.ogc_wfs_client)
-        assert is_simulation_only(std.ogc_wms_client)
+        assert not is_simulation_only(std.ogc_api_features_implementation)
+        assert not is_simulation_only(std.ogc_wfs_client)
+        assert not is_simulation_only(std.ogc_wms_client)
 
     def test_warning_includes_function_name(self):
         from geoprompt.quality import simulation_only

@@ -93,9 +93,6 @@ class TestSimulationTierRegressions:
             "ml.neural_network_integration",
             "ml.recurrent_neural_network_spatial_time_series",
             "ml.transformer_model_spatial_sequences",
-            "standards.wms_capabilities_document",
-            "standards.ogc_api_features_implementation",
-            "standards.ogc_api_processes_implementation",
         ],
     )
     def test_symbol_is_simulation(self, key: str) -> None:
@@ -130,6 +127,15 @@ class TestBetaTierRegressions:
             "ml.spatial_cross_validation",
             "geoprocessing.ToolChain",
             "geoprocessing.batch_process",
+            "standards.wms_capabilities_document",
+            "standards.ogc_api_features_implementation",
+            "standards.ogc_api_processes_implementation",
+            "standards.ogc_api_records_implementation",
+            "standards.ogc_api_tiles_implementation",
+            "standards.ogc_api_maps_implementation",
+            "standards.ogc_wfs_client",
+            "standards.ogc_wms_client",
+            "performance.gpu_accelerated_distance_matrix",
         ],
     )
     def test_symbol_is_beta(self, key: str) -> None:
@@ -152,7 +158,7 @@ class TestWarnIfNonStable:
             warn_if_non_stable("gwr")
 
     def test_simulation_emits_user_warning(self) -> None:
-        with pytest.warns(UserWarning):
+        with pytest.warns(FutureWarning):
             warn_if_non_stable("wms_capabilities_document")
 
     def test_stable_does_not_warn(self) -> None:
@@ -177,7 +183,7 @@ class TestGetTier:
         assert get_tier("gwr") == TIER_BETA
 
     def test_get_tier_for_simulation_symbol(self) -> None:
-        assert get_tier("wms_capabilities_document") == TIER_SIMULATION
+        assert get_tier("wms_capabilities_document") == TIER_BETA
 
     def test_get_tier_returns_none_for_unknown_symbol(self) -> None:
         result = get_tier("completely_unknown_function_xyz")

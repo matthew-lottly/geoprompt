@@ -84,6 +84,7 @@ def test_a12_backend_and_scalability_helpers(tmp_path: Path) -> None:
 
     matrix = gp.gpu_accelerated_distance_matrix([(0.0, 0.0), (3.0, 4.0)])
     assert matrix["matrix"][0][1] == 5.0
+    assert matrix["backend"] in {"gpu", "cpu"}
 
     filtered = gp.predicate_pushdown_to_storage(
         [{"id": 1, "status": "ok"}, {"id": 2, "status": "bad"}],

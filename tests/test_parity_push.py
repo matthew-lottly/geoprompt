@@ -306,7 +306,7 @@ class TestVizPresets:
         assert "low" in smap
 
     def test_plot_restoration_timeline(self):
-        pytest.importorskip("matplotlib")
+        pytest.importorskip("matplotlib", exc_type=ImportError)
         from geoprompt.viz import plot_restoration_timeline
 
         events = [

@@ -175,15 +175,27 @@ def gpu_accelerated_point_in_polygon(
     return {"backend": "gpu", "inside": inside, "count": len(inside), "engine": "cuSpatial-style"}
 
 
-@simulation_only("Use CuPy + cuSpatial or RAPIDS for real GPU-accelerated spatial operations.")
 def gpu_accelerated_distance_matrix(points: Sequence[Sequence[float]]) -> dict[str, Any]:
-    """Simulation-only GPU distance-matrix placeholder.
+    """Compute a distance matrix with optional CuPy acceleration.
 
-    This implementation runs on CPU and mimics GPU output shape. For real GPU
-    acceleration, install RAPIDS/cuSpatial or CuPy-backed kernels.
+    Uses CuPy when available and falls back to deterministic CPU computation
+    otherwise.
     """
-    matrix = [[_distance(a, b) for b in points] for a in points]
-    return {"backend": "gpu", "matrix": matrix, "count": len(points)}
+    coords = [(_point_tuple(p)[0], _point_tuple(p)[1]) for p in points]
+    if not coords:
+        return {"backend": "cpu", "engine": "python", "matrix": [], "count": 0}
+
+    try:
+        import cupy as cp  # type: ignore[import-not-found]
+
+        arr = cp.asarray(coords, dtype=cp.float64)
+        deltas = arr[:, cp.newaxis, :] - arr[cp.newaxis, :, :]
+        matrix = cp.sqrt((deltas ** 2).sum(axis=2))
+        result = cp.asnumpy(matrix).round(6).tolist()
+        return {"backend": "gpu", "engine": "cupy", "matrix": result, "count": len(coords)}
+    except Exception:
+        matrix = [[_distance(a, b) for b in coords] for a in coords]
+        return {"backend": "cpu", "engine": "python", "matrix": matrix, "count": len(coords)}
 
 
 @simulation_only("Use CuPy for real GPU raster algebra.")

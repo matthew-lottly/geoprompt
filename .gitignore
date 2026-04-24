@@ -6,6 +6,9 @@ dist/
 outputs/
 private/
 *.private.md
+outputs/parity-audit/
+outputs/parity-trust-report.json
+private/parity-audit/
 src/geoprompt.egg-info/
 
 # Internal planning/working docs — keep local only

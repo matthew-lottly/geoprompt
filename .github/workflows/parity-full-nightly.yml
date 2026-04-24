@@ -1,0 +1,39 @@
+name: Parity Full Nightly
+
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  parity-full:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Geoprompt for parity full run
+        run: python -m pip install -e ".[dev,compare,overlay,projection]"
+
+      - name: Run parity full suite
+        run: python -m pytest tests/parity -q
+
+      - name: Parity drift check
+        run: python tests/parity/check_parity_drift.py
+
+      - name: Generate trust report artifact
+        run: python tests/parity/generate_trust_report.py
+
+      - name: Upload trust report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-trust-report-nightly
+          path: |
+            outputs/parity-trust-report.json
+            data/parity_baseline.json
+          if-no-files-found: error

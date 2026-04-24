@@ -23,6 +23,33 @@ on:
       - "docs/**"
 
 jobs:
+  parity-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Geoprompt for parity smoke
+        run: python -m pip install -e ".[dev,compare,overlay,projection]"
+
+      - name: Run parity smoke suite
+        run: python -m pytest tests/parity -q
+
+      - name: Generate trust report artifact
+        run: python tests/parity/generate_trust_report.py
+
+      - name: Upload trust report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-trust-report
+          path: outputs/parity-trust-report.json
+          if-no-files-found: error
+
   validate:
     runs-on: ${{ matrix.os }}
     strategy:

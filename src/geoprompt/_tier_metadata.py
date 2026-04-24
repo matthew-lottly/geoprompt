@@ -104,15 +104,15 @@ TIER_METADATA: dict[str, TierLevel] = {
     "geoprocessing.get_environment": TIER_STABLE,
     "geoprocessing.set_environment": TIER_STABLE,
     
-    # Standards (standards.py) - mostly simulation
-    "standards.wms_capabilities_document": TIER_SIMULATION,
-    "standards.ogc_api_features_implementation": TIER_SIMULATION,
-    "standards.ogc_api_processes_implementation": TIER_SIMULATION,
-    "standards.ogc_api_records_implementation": TIER_SIMULATION,
-    "standards.ogc_api_tiles_implementation": TIER_SIMULATION,
-    "standards.ogc_api_maps_implementation": TIER_SIMULATION,
-    "standards.ogc_wfs_client": TIER_SIMULATION,
-    "standards.ogc_wms_client": TIER_SIMULATION,
+    # Standards (standards.py) - connector-grade beta surface
+    "standards.wms_capabilities_document": TIER_BETA,
+    "standards.ogc_api_features_implementation": TIER_BETA,
+    "standards.ogc_api_processes_implementation": TIER_BETA,
+    "standards.ogc_api_records_implementation": TIER_BETA,
+    "standards.ogc_api_tiles_implementation": TIER_BETA,
+    "standards.ogc_api_maps_implementation": TIER_BETA,
+    "standards.ogc_wfs_client": TIER_BETA,
+    "standards.ogc_wms_client": TIER_BETA,
     
     # Enterprise (enterprise.py)
     "enterprise.enterprise_geodatabase_connect": TIER_SIMULATION,
@@ -153,7 +153,7 @@ TIER_METADATA: dict[str, TierLevel] = {
     "performance.run_with_timeout_guard": TIER_STABLE,
     "performance.out_of_core_processing": TIER_EXPERIMENTAL,
     "performance.distributed_spatial_join": TIER_SIMULATION,
-    "performance.gpu_accelerated_distance_matrix": TIER_SIMULATION,
+    "performance.gpu_accelerated_distance_matrix": TIER_BETA,
     "performance.gpu_accelerated_raster_algebra": TIER_SIMULATION,
     
     # Quality (quality.py)

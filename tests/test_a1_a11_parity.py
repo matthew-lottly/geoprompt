@@ -193,7 +193,7 @@ def test_a11_ogc_and_cloud_interop_helpers(tmp_path):
     assert gpkg["compliant"] and features["service"] == "OGC API - Features"
     assert processes["process_count"] == 1 and records["record_count"] == 1
     assert tiles["tile_count"] == 1 and maps["service"] == "OGC API - Maps"
-    assert wfs["service"] == "WFS" and sld["format"] == "SLD/SE"
+    assert wfs["service"] == "WFS" and wfs["status"] == "configured" and sld["format"] == "SLD/SE"
     assert Path(sld_path).exists() and Path(iso_path).exists() and Path(stac["path"]).exists()
     assert Path(zarr["path"]).exists() and Path(kerchunk["path"]).exists()
     assert xarray["backend"] == "xarray" and dask["partitions"] == 2 and spark["engine"] == "sedona"
