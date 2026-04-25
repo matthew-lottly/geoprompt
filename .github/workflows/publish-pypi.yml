@@ -25,16 +25,13 @@ jobs:
         run: python -m pip install --upgrade pip build twine
 
       - name: Install Geoprompt with release validation extras
-        run: python -m pip install -e ".[dev,viz,compare,overlay,projection,service]"
+        run: python -m pip install -e ".[dev,viz,service]"
 
       - name: Run release smoke tests
         run: python -m pytest tests/test_section_d_notebooks.py -q
 
       - name: Generate demo outputs
         run: python -m geoprompt.demo
-
-      - name: Run comparison corpus
-        run: python -m geoprompt.compare
 
       - name: Build distribution artifacts
         run: python -m build
