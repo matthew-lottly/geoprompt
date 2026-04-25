@@ -5,7 +5,7 @@ This matrix tracks dependency ranges, known warning drift, and upgrade tasks so 
 ## Runtime Compatibility Ranges
 
 | Package | Current Range | Purpose | Risk Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | numpy | >=1.26,<3.0 | Numeric kernels / optional network extras | `np.find_common_type` deprecation impacts pandas/geopandas internals |
 | pandas | >=2.2,<3.0 | Tabular operations / IO extras | Uses deprecated numpy API in some join paths (upstream) |
 | geopandas | >=1.0,<2.0 | Comparator parity and geospatial frame bridges | Depends on pandas/numpy behavior for joins |
@@ -16,7 +16,7 @@ This matrix tracks dependency ranges, known warning drift, and upgrade tasks so 
 ## Warning Watchlist
 
 | Warning Signature | Observed In | Status | Action |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `np.find_common_type is deprecated` | GeoPandas sjoin path in parity test | Known / filtered in parity test | Remove filter once pandas/geopandas upstream no longer emits warning |
 | optional import initialization failures (`matplotlib`) | parity push viz tests on some Windows envs | Mitigated | `pytest.importorskip(..., exc_type=ImportError)` enforced |
 

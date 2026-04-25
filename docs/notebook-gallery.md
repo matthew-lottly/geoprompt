@@ -100,3 +100,21 @@ print(frame.head())
 print(frame.summary())
 print(frame.geom.area())
 ```
+
+## Section D Workflow Notebooks
+
+The full Section D workflow set is now available as runnable section-by-section notebooks:
+
+- `examples/notebooks/section_d/d1_utilities_workflow.ipynb`
+- `examples/notebooks/section_d/d2_forestry_management_workflow.ipynb`
+- `examples/notebooks/section_d/d3_flood_analysis_workflow.ipynb`
+- `examples/notebooks/section_d/d4_transportation_workflow.ipynb`
+- `examples/notebooks/section_d/d5_climate_workflow.ipynb`
+
+Each notebook is organized as:
+
+1. Section A: connector-style API data pull with deterministic offline fallback.
+2. Section B: simple-track analysis and outputs.
+3. Section C: complex-track analysis and outputs.
+
+All notebooks write result artifacts under `outputs/` so users can inspect tables, charts, and report files outside the notebook as well.

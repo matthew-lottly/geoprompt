@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Added parallel GeoPrompt and GeoPandas notebook suites under `examples/notebooks/geoprompt/` and `examples/notebooks/geopandas/` with aligned D1-D5 workflow coverage.
+- Reworked notebook Section A data pulls to try multiple public API sources and report whether live data was used, with deterministic fallback payloads when endpoints are unavailable.
+- Regenerated all workflow notebooks from `generate_notebooks.py` and validated execution coverage with `tests/test_section_d_notebooks.py`.
+- Hardened notebook generation defaults to enable live API retrieval by default while preserving reliable offline fallback behavior.
+- Prepared release metadata and package versioning for the 0.2.0 cut.
+
 ## 0.1.8
 
 - Replaced placeholder gallery figures with data-driven output renders generated from checked-in sample features and scenario metrics.

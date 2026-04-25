@@ -22,6 +22,11 @@ DEFAULT_NOTEBOOKS = [
     Path("examples/notebooks/network_resilience_walkthrough.ipynb"),
     Path("examples/notebooks/benchmark_proof_walkthrough.ipynb"),
     Path("examples/notebooks/remote_service_walkthrough.ipynb"),
+    Path("examples/notebooks/section_d/d1_utilities_workflow.ipynb"),
+    Path("examples/notebooks/section_d/d2_forestry_management_workflow.ipynb"),
+    Path("examples/notebooks/section_d/d3_flood_analysis_workflow.ipynb"),
+    Path("examples/notebooks/section_d/d4_transportation_workflow.ipynb"),
+    Path("examples/notebooks/section_d/d5_climate_workflow.ipynb"),
 ]
 
 
