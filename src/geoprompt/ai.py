@@ -1144,7 +1144,6 @@ def runtime_doctor(
 
     if check_gpu:
         try:
-            import importlib
             torch = importlib.import_module("torch")
             gpu_available = bool(getattr(torch, "cuda", None) and torch.cuda.is_available())
             checks["gpu_cuda"] = {"available": gpu_available}

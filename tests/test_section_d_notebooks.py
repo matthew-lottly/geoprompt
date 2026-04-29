@@ -11,11 +11,11 @@ from nbclient import NotebookClient
 
 
 SECTION_D_NOTEBOOKS = [
-    Path("examples/notebooks/section_d/d1_utilities_workflow.ipynb"),
-    Path("examples/notebooks/section_d/d2_forestry_management_workflow.ipynb"),
-    Path("examples/notebooks/section_d/d3_flood_analysis_workflow.ipynb"),
-    Path("examples/notebooks/section_d/d4_transportation_workflow.ipynb"),
-    Path("examples/notebooks/section_d/d5_climate_workflow.ipynb"),
+    Path("examples/notebooks/geoprompt/d1_utilities_workflow.ipynb"),
+    Path("examples/notebooks/geoprompt/d2_forestry_management_workflow.ipynb"),
+    Path("examples/notebooks/geoprompt/d3_flood_analysis_workflow.ipynb"),
+    Path("examples/notebooks/geoprompt/d4_transportation_workflow.ipynb"),
+    Path("examples/notebooks/geoprompt/d5_climate_workflow.ipynb"),
 ]
 
 GEOPROMPT_NOTEBOOKS = [

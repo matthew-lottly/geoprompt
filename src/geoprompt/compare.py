@@ -451,6 +451,7 @@ def _load_compare_dependencies() -> tuple[Any, Callable[[dict[str, Any]], Any], 
         geopandas = importlib.import_module("geopandas")
         shapely_geometry = importlib.import_module("shapely.geometry")
     except ImportError as exc:  # pragma: no cover - guarded by require_capability
+        require_capability("geopandas", context="geoprompt-compare")  # re-raises with proper message
         raise AssertionError("Capability guard failed for comparison dependencies") from exc
 
     return geopandas, shapely_geometry.shape, shapely_geometry.box

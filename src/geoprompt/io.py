@@ -65,7 +65,7 @@ def _validate_remote_url(url: str, *, allowed_schemes: frozenset[str] | None = N
     schemes = allowed_schemes if allowed_schemes is not None else _REMOTE_FETCH_SCHEMES
     try:
         parsed = urlparse(url)
-    except Exception as exc:
+    except (ValueError, UnicodeError) as exc:
         raise ValueError(f"Malformed URL: {url!r}") from exc
     if not parsed.scheme:
         raise ValueError(f"URL {url!r} has no scheme. Only {sorted(schemes)} are allowed.")
@@ -3048,3 +3048,266 @@ def fetch_remote_artifact(
                 f"expected {expected_hash!r}, got {actual!r}."
             )
     return data
+
+
+# ---------------------------------------------------------------------------
+# J6.66 – Network failure classification
+# ---------------------------------------------------------------------------
+
+NETWORK_ERROR_TIMEOUT = "timeout"
+NETWORK_ERROR_AUTH = "auth"
+NETWORK_ERROR_REMOTE_SERVICE = "remote_service"
+NETWORK_ERROR_PARSE = "parse"
+NETWORK_ERROR_TRANSPORT = "transport"
+NETWORK_ERROR_UNKNOWN = "unknown"
+
+
+class ClassifiedNetworkError(RuntimeError):
+    """A network error with a structured *category* and preserved *original* exception."""
+
+    def __init__(self, message: str, category: str, original: BaseException) -> None:
+        super().__init__(message)
+        self.category = category
+        self.original = original
+
+
+def classify_network_error(exc: BaseException) -> ClassifiedNetworkError:
+    """Classify a network exception into a structured :class:`ClassifiedNetworkError`."""
+    import json as _json
+
+    if isinstance(exc, TimeoutError):
+        category = NETWORK_ERROR_TIMEOUT
+    elif isinstance(exc, urllib.error.HTTPError):
+        if exc.code in (401, 403):
+            category = NETWORK_ERROR_AUTH
+        elif exc.code and exc.code >= 500:
+            category = NETWORK_ERROR_REMOTE_SERVICE
+        else:
+            category = NETWORK_ERROR_UNKNOWN
+    elif isinstance(exc, urllib.error.URLError):
+        reason = str(getattr(exc, "reason", "")).lower()
+        if "timed out" in reason or "timeout" in reason:
+            category = NETWORK_ERROR_TIMEOUT
+        else:
+            category = NETWORK_ERROR_TRANSPORT
+    elif isinstance(exc, _json.JSONDecodeError):
+        category = NETWORK_ERROR_PARSE
+    else:
+        category = NETWORK_ERROR_UNKNOWN
+
+    return ClassifiedNetworkError(str(exc), category=category, original=exc)
+
+
+# ---------------------------------------------------------------------------
+# J6.67 – Checksum / artifact integrity
+# ---------------------------------------------------------------------------
+
+def verify_artifact_checksum(
+    data: bytes,
+    *,
+    expected_hash: str,
+    algorithm: str = "sha256",
+) -> None:
+    """Verify that *data* matches *expected_hash* using *algorithm*."""
+    h = hashlib.new(algorithm)
+    h.update(data)
+    computed = h.hexdigest()
+    if computed.lower() != expected_hash.lower():
+        raise ValueError(
+            f"Artifact integrity check failed: "
+            f"expected {expected_hash!r}, got {computed!r} ({algorithm})."
+        )
+
+
+# ---------------------------------------------------------------------------
+# J6.68 – Path traversal protection
+# ---------------------------------------------------------------------------
+
+def safe_output_path(
+    path: str | Path,
+    *,
+    root: str | Path | None = None,
+    allowed_suffixes: frozenset[str] | None = None,
+) -> Path:
+    """Resolve *path* and validate it against traversal and extension rules.
+
+    Raises:
+        ValueError: If a path traversal is detected or the file extension is not allowed.
+    """
+    resolved = Path(path).resolve()
+
+    if root is not None:
+        root_resolved = Path(root).resolve()
+        try:
+            resolved.relative_to(root_resolved)
+        except ValueError:
+            raise ValueError(
+                f"Path traversal detected: {str(path)!r} resolves outside of root {str(root)!r}."
+            )
+
+    for part in Path(path).parts:
+        if part == "..":
+            raise ValueError(
+                f"Path traversal detected: '..' component found in {str(path)!r}."
+            )
+
+    if allowed_suffixes is not None:
+        suffix = resolved.suffix.lower()
+        if suffix not in allowed_suffixes:
+            raise ValueError(
+                f"Disallowed file extension {suffix!r} for output path. "
+                f"Allowed extensions: {sorted(allowed_suffixes)!r}."
+            )
+
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# J6.69 – Atomic write
+# ---------------------------------------------------------------------------
+
+def atomic_write_text(dest: str | Path, content: str, *, encoding: str = "utf-8") -> Path:
+    """Write *content* to *dest* atomically via a temp-file-and-rename pattern."""
+    return _atomic_write(Path(dest), content.encode(encoding))
+
+
+def atomic_write_bytes(dest: str | Path, data: bytes) -> Path:
+    """Write *data* to *dest* atomically via a temp-file-and-rename pattern."""
+    return _atomic_write(Path(dest), data)
+
+
+def _atomic_write(dest: Path, data: bytes) -> Path:
+    import tempfile
+    import os as _os
+    dest = dest.resolve()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path_str = tempfile.mkstemp(
+        dir=dest.parent,
+        prefix=".geoprompt_atomic_",
+        suffix=dest.suffix,
+    )
+    tmp_path = Path(tmp_path_str)
+    try:
+        with _os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        _os.replace(tmp_path, dest)
+    except BaseException:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    return dest
+
+
+# ---------------------------------------------------------------------------
+# J6.70 – GeoJSON schema validation
+# ---------------------------------------------------------------------------
+
+_GEOJSON_GEOMETRY_TYPES = frozenset({
+    "Point", "MultiPoint", "LineString", "MultiLineString",
+    "Polygon", "MultiPolygon", "GeometryCollection",
+})
+_ALL_GEOJSON_TYPES = _GEOJSON_GEOMETRY_TYPES | {"FeatureCollection", "Feature"}
+
+
+def validate_geojson_schema(obj: object) -> None:
+    """Validate that *obj* conforms to the GeoJSON schema before persisting.
+
+    Raises:
+        ValueError: If the object is not a valid GeoJSON dict or has structural errors.
+    """
+    if not isinstance(obj, dict):
+        raise ValueError(
+            f"GeoJSON must be a dict; got {type(obj).__name__!r}."
+        )
+    obj_type = obj.get("type")
+    if obj_type not in _ALL_GEOJSON_TYPES:
+        raise ValueError(
+            f"Invalid GeoJSON type {obj_type!r}. "
+            f"Expected one of {sorted(_ALL_GEOJSON_TYPES)!r}."
+        )
+
+    if obj_type == "FeatureCollection":
+        features = obj.get("features")
+        if not isinstance(features, list):
+            raise ValueError("GeoJSON FeatureCollection: 'features' must be a list.")
+        for i, feat in enumerate(features):
+            if not isinstance(feat, dict):
+                raise ValueError(f"Feature {i} is not a dict.")
+            missing = {"type", "geometry"} - set(feat.keys())
+            if missing:
+                raise ValueError(
+                    f"Feature {i} missing required keys: {sorted(missing)!r}."
+                )
+
+    elif obj_type == "Feature":
+        missing = {"type", "geometry", "properties"} - set(obj.keys())
+        if missing:
+            raise ValueError(
+                f"GeoJSON Feature missing required keys: {sorted(missing)!r}."
+            )
+
+
+# ---------------------------------------------------------------------------
+# J6.71 – CRS and geometry validation before persistence
+# ---------------------------------------------------------------------------
+
+_CRS_PATTERNS = (
+    r"^EPSG:\d+$",
+    r"^urn:ogc:def:crs:",
+    r"^\+proj=",
+    r"^PROJCS\[",
+    r"^GEOGCS\[",
+    r"^COMPD_CS\[",
+)
+
+
+def validate_crs_before_persist(crs: str | None) -> None:
+    """Validate or warn about a CRS string before persisting spatial data."""
+    import re as _re
+    if crs is None or crs == "":
+        warnings.warn(
+            "CRS is not set. Output will lack CRS metadata.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return
+
+    for pattern in _CRS_PATTERNS:
+        if _re.match(pattern, str(crs).strip()):
+            return
+
+    raise ValueError(
+        f"CRS string {crs!r} does not match any recognised format "
+        f"(EPSG:NNNN, urn:ogc:def:crs:..., +proj=..., PROJCS/GEOGCS WKT)."
+    )
+
+
+def validate_geometry_before_persist(
+    geometry: object,
+    *,
+    allow_none: bool = False,
+) -> None:
+    """Validate a GeoJSON-style geometry dict before persisting.
+
+    Raises:
+        ValueError: If the geometry is missing, malformed, or has an unknown type.
+    """
+    if geometry is None:
+        if allow_none:
+            return
+        raise ValueError("Geometry must not be None before persisting.")
+    if not isinstance(geometry, dict):
+        raise ValueError(
+            f"Geometry must be a GeoJSON dict; got {type(geometry).__name__!r}."
+        )
+    geom_type = geometry.get("type")
+    if geom_type not in _GEOJSON_GEOMETRY_TYPES:
+        raise ValueError(
+            f"{geom_type!r} is not a valid GeoJSON geometry type."
+        )
+    if geom_type != "GeometryCollection" and "coordinates" not in geometry:
+        raise ValueError(
+            f"GeoJSON geometry of type {geom_type!r} is missing 'coordinates'."
+        )

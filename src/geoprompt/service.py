@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from ._capabilities import require_capability
+from ._exceptions import FallbackPolicy
 
 logger = logging.getLogger("geoprompt.service")
 
@@ -221,7 +222,6 @@ def build_app() -> Any:
 
     if not is_dev_profile:
         # Enforce production-safe fallback policy
-        from ._exceptions import FallbackPolicy
         FallbackPolicy.for_environment()  # Validates and logs fallback policy from env
         logger.info("Service started in production mode (no stub fallbacks allowed). "
                    "Set GEOPROMPT_DEV_PROFILE=true to enable stubs for testing.")
@@ -541,11 +541,13 @@ def build_app() -> Any:
     return app
 
 
+from ._exceptions import DependencyError as _DependencyError
+
 # Convenience: create the app at module level for ``uvicorn geoprompt.service:app``
 try:
     app = build_app()
-except RuntimeError:
-    app = None  # FastAPI not installed â€” module can still be imported
+except (RuntimeError, ImportError, _DependencyError):  # FastAPI not installed — module can still be imported
+    app = None
 
 __all__ = [
     "ServiceJobManager",

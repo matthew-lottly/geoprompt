@@ -20,9 +20,10 @@ logger = logging.getLogger("geoprompt")
 def export_pressure_plot(records: list[dict[str, object]], output_path: Path) -> Path:
     require_capability("matplotlib", context="export_pressure_plot")
     try:
-        import matplotlib.pyplot as plt
+        import matplotlib.pyplot as plt  # noqa: PLC0415
     except ImportError as exc:  # pragma: no cover - guarded by require_capability
-        raise AssertionError("Capability guard failed for matplotlib") from exc
+        require_capability("matplotlib", context="export_pressure_plot")  # re-raises with proper message
+        raise RuntimeError("matplotlib is required for export_pressure_plot. Install with: pip install matplotlib") from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure, axis = plt.subplots(figsize=(10, 6))

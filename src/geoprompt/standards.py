@@ -10,6 +10,8 @@ from urllib.request import urlopen
 from pathlib import Path
 from typing import Any, Sequence
 
+from .quality import simulation_only
+
 
 def _write_json_artifact(path: str | Path, payload: Any) -> str:
     out = Path(path)
@@ -171,8 +173,15 @@ def ogc_wms_client(url: str, *, probe: bool = False, timeout_seconds: float = 8.
     }
 
 
+@simulation_only("Use a real WMS server (GeoServer, MapServer, or cloud WMS) for production use.")
 def wms_capabilities_document(url: str, *, probe: bool = True, timeout_seconds: float = 8.0) -> dict[str, Any]:
     """Return a minimal WMS capabilities summary.
+
+    .. note::
+        **Simulation stub** — This is a placeholder that wraps the real WMS
+        ``GetCapabilities`` request.  For production use, connect to a real
+        WMS server (GeoServer, MapServer, or a cloud WMS provider) and parse
+        the full XML capabilities document.
 
     When ``probe`` is enabled, this performs a GetCapabilities request and
     reports whether a capabilities document was returned.

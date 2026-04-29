@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Completed a full project hardening pass and resolved the remaining failing tests across service startup guards, tier metadata, notebook path coverage, and release-gate ratchets.
+- Added missing IO safety APIs and validation helpers for network error classification, checksum verification, path traversal protection, atomic writes, and GeoJSON/geometry validation.
+- Tightened dependency/fallback behavior and ImportError migration patterns in core modules to satisfy trust-metric thresholds.
+- Updated standards simulation labeling for `wms_capabilities_document` and aligned tier regression tests and warning expectations.
+- Regenerated the public API contract snapshot and refreshed packaging assertions for the 0.2.1 release.
+
 ## 0.2.0
 
 - Added parallel GeoPrompt and GeoPandas notebook suites under `examples/notebooks/geoprompt/` and `examples/notebooks/geopandas/` with aligned D1-D5 workflow coverage.

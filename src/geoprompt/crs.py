@@ -7,6 +7,7 @@ web-mercator and coordinate-parsing workflows.
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 import math
 import re
@@ -41,10 +42,9 @@ def _normalize_name(value: object | None) -> str | None:
 
 
 def _pyproj_module() -> Any | None:
-    try:
-        return importlib.import_module("pyproj")
-    except ImportError:
+    if importlib.util.find_spec("pyproj") is None:
         return None
+    return importlib.import_module("pyproj")
 
 
 def _safe_proj4_string(resolved: Any) -> str | None:

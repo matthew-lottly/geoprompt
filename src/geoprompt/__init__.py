@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from .ai import (
     ExecutionCache, WorkspaceMemory,
@@ -697,15 +697,12 @@ def capability_report() -> dict[str, object]:
         ``"fallback_policy"`` listing feature names in each state.
     """
     import importlib as _importlib
+    import importlib.util as _importlib_util
     import importlib.metadata as _metadata
     from datetime import datetime, timezone
 
     def _available(pkg: str) -> bool:
-        try:
-            _importlib.import_module(pkg)
-            return True
-        except ImportError:
-            return False
+        return _importlib_util.find_spec(pkg) is not None
 
     def _module_version(pkg: str) -> str | None:
         try:

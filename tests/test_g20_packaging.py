@@ -16,8 +16,8 @@ def _read_text(path: str) -> str:
 
 def test_g20_version_metadata_matches_public_api() -> None:
     pyproject = _read_text("pyproject.toml")
-    assert 'version = "0.1.8"' in pyproject
-    assert gp.__version__ == "0.1.8"
+    assert 'version = "0.2.1"' in pyproject
+    assert gp.__version__ == "0.2.1"
 
 
 def test_g20_core_install_is_light_and_profiles_exist() -> None:

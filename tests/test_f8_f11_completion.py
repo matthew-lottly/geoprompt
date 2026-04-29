@@ -13,6 +13,9 @@ def test_f8_briefing_pack_and_accessibility_audit_support_client_ready_output(tm
         [
             {"title": "Resilience score", "content": "84 / 100", "type": "metric"},
             {"title": "Priority action", "content": "Stage crews near feeder B.", "type": "note"},
+            {"title": "Service area map", "content": [], "type": "map"},
+            {"title": "Outage trend", "content": [], "type": "chart"},
+            {"title": "Asset summary", "content": [], "type": "table"},
         ],
         title="Utility Executive Briefing",
         organization="Geo Utility Lab",

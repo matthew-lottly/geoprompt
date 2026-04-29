@@ -105,7 +105,7 @@ TIER_METADATA: dict[str, TierLevel] = {
     "geoprocessing.set_environment": TIER_STABLE,
     
     # Standards (standards.py) - connector-grade beta surface
-    "standards.wms_capabilities_document": TIER_BETA,
+    "standards.wms_capabilities_document": TIER_SIMULATION,
     "standards.ogc_api_features_implementation": TIER_BETA,
     "standards.ogc_api_processes_implementation": TIER_BETA,
     "standards.ogc_api_records_implementation": TIER_BETA,
