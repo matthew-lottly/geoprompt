@@ -44,7 +44,7 @@ jobs:
         run: python tests/parity/generate_trust_report.py
 
       - name: Upload trust report artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: parity-trust-report
           path: outputs/parity-trust-report.json
@@ -121,7 +121,7 @@ jobs:
         run: python -m twine check dist/*
 
       - name: Upload benchmark and demo artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: geoprompt-artifacts-py${{ matrix.python-version }}
           path: |
